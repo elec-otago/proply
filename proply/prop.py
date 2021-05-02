@@ -12,7 +12,6 @@ from blade_element import BladeElement
 from design_parameters import DesignParameters
 from scipy.interpolate import PchipInterpolator, interp1d
 
-import os
 import logging
 logger = logging.getLogger(__name__)
 

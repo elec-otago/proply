@@ -1,8 +1,12 @@
 #!/bin/python
 # Proply executable
+import os
+import logging
 import logging.config
 import yaml
 import argparse
+
+from proply.design_parameters import DesignParameters
 
 if __name__ == "__main__":
 
