@@ -10,16 +10,16 @@ from setuptools import setup, find_packages
 with open('README.md') as f:
     readme = f.read()
 
-setup(name='tart2ms',
+setup(name='proply',
     version='0.1.4b5',
     description='Convert TART observation data to Measurement Sets',
     long_description=readme,
     long_description_content_type="text/markdown",
-    url='http://github.com/tmolteno/tart2ms',
+    url='http://github.com/elec-otago/proply',
     author='Tim Molteno',
     author_email='tim@elec.ac.nz',
     license='GPLv3',
-    install_requires=['scipy', 'matplotlib', 'yaml', 'numpy', 'numpy-stl', 'enum', 'enum32'],
+    install_requires=['scipy', 'matplotlib', 'pyaml', 'numpy', 'numpy-stl'],
     test_suite='nose.collector',
     tests_require=['nose'],
     packages=['proply'],
