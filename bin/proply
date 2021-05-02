@@ -1,2 +1,81 @@
 #!/bin/python
 # Proply executable
+import logging.config
+import yaml
+import argparse
+
+if __name__ == "__main__":
+
+    parser = argparse.ArgumentParser(description='Design a prop blade.')
+    parser.add_argument('--param', default='prop_design.json', help="Propeller design parameters.")
+    parser.add_argument('--n', type=int, default=40, help="The number of points in the top and bottom of the foil")
+    parser.add_argument('--mesh', action='store_true', help="Generate a GMSH mesh")
+    parser.add_argument('--bem', action='store_true', help="Use bem design")
+    parser.add_argument('--auto', action='store_true', help="Use auto design torque")
+    parser.add_argument('--arad', action='store_true', help="Use ARA-D airfoils (slow)")
+    parser.add_argument('--naca', action='store_true', help="Use NACA airfoils (slow)")
+    parser.add_argument('--resolution', type=int, default=40, help="The number of blade elements.")
+    parser.add_argument('--dir', default='.', help="The directory for output files")
+    parser.add_argument('--stl-file', default='prop.stl', help="The STL filename to generate.")
+    args = parser.parse_args()
+    
+    # Set up Logging
+    path = 'logging.yaml'
+    if os.path.exists(path):
+        with open(path, 'rt') as f:
+            config = yaml.load(f.read())
+        logging.config.dictConfig(config)
+
+    # Decode Design Parameters
+    param = DesignParameters(args.param)
+    resolution_m = (param.radius - param.hub_radius) / args.resolution
+    if args.arad:
+        p = ARADProp(param, resolution_m)
+    elif args.naca:
+        p = NACAProp(param, resolution_m)
+    else:
+        p = Prop(param, resolution_m)
+
+    m = motor_model.Motor(Kv = param.motor_Kv, I0 = param.motor_no_load_current, Rm = param.motor_winding_resistance)
+    optimum_torque, optimum_rpm = m.get_Qmax(param.motor_volts)
+    power = m.get_Pmax(param.motor_volts)
+    
+    print("\nPROPLY: Automatic propeller Design\n\n")
+    print(("Optimum Motor Torque {:5.3f} Nm at {:5.1f} RPM, power={:5.1f} Watts".format(optimum_torque, optimum_rpm, power)))
+    print(("Spanwise resolution (mm) {:4.2f}".format(resolution_m*1000)))
+    print(param)
+    dv = optimize.dv_from_thrust(param.thrust, param.radius, param.forward_airspeed,)
+    print(("Airspeed at propellers (hovering): {:4.2f} m/s".format(param.forward_airspeed + dv)))
+    print("\n\n")
+
+    if (args.bem):
+        p.n_blades = param.blades
+        thrust = param.thrust
+        goal_torque = optimum_torque*1.5
+        Q, T = p.full_optimize(optimum_torque, optimum_rpm, thrust=thrust)
+        print(("Total Thrust: {:5.2f}, Torque: {:5.3f}".format(T, Q)))
+        if (args.auto):
+            while Q > goal_torque:
+                thrust *= 0.95 * goal_torque/Q
+                Q, T =p.full_optimize(optimum_torque, optimum_rpm, thrust=thrust)
+                print(("Total Thrust: {:5.2f} (N), Torque: {:5.2f} (Nm)".format(T, Q)))
+
+        # Print Thrust and Torque as a function of RPM.
+        #print("RPM, \t\t THRUST, \t TORQUE")
+        #rpm_list = np.linspace(optimum_rpm/3, 2*optimum_rpm, 30)
+        #for rpm in rpm_list:
+            #torque, thrust = p.get_forces(rpm)
+            #print("{:5.3f}, \t {:5.3f}, \t{:5.3f}".format(rpm, thrust, torque))
+
+
+    if (args.mesh):
+      p.gen_mesh('gmsh.vtu', args.n)
+      
+    blade_stl_filename = "{}/{}_blade.stl".format(args.dir,param.name)
+    y0, y1 = p.gen_stl(blade_stl_filename, args.n)
+    
+    scad_filename = "{}/{}.scad".format(args.dir,param.name)
+    p.gen_scad(scad_filename, y0, y1)
+    p.gen_removable_blade_scad("{}/{}_removable.scad".format(args.dir,param.name), y0, y1)
+
+    
