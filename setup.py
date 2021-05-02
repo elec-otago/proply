@@ -20,6 +20,8 @@ setup(name='proply',
     author_email='tim@elec.ac.nz',
     license='GPLv3',
     install_requires=['scipy', 'matplotlib', 'pyaml', 'numpy', 'numpy-stl'],
+    package_data={'proply': ['foil_simulator.sql',]},
+
     test_suite='nose.collector',
     tests_require=['nose'],
     packages=['proply'],
