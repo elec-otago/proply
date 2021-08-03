@@ -114,17 +114,28 @@ if __name__ == "__main__":
     q = m.get_torque(i)
     #q, rpm = m.get_Qmax(v)
     import matplotlib.pyplot as plt
-    plt.plot(q, e, label='Efficiency')
-    #plt.plot(q, m.get_rpm(q), label='RPM')
+    
+    color='r'
+    fig, ax1 = plt.subplots()
+    ax1.plot(q, e, color=color)
+    ax1.set_ylabel('Efficiency', color=color)
+    ax1.set_xlabel('Torque (Nm)')
+    ax1.grid(True)
+    ax1.tick_params(axis='y', labelcolor=color)
+
+    color='g'
+    ax2 = ax1.twinx()
+    ax2.plot(q, m.get_rpm(q), color=color)
+    ax2.set_ylabel('RPM', color=color)
+    ax2.tick_params(axis='y', labelcolor=color)
+
     #plt.plot(v, q, label='Q_max')
     #plt.plot(v, rpm/1000, label='RPM')
     #plt.plot(v, m.get_Pmax(v), label='P_max')
-    plt.legend()
-    plt.grid(True)
-    plt.title('Turnigy Multistar 1704 1900kV')
-    plt.ylabel('Efficiency')
-    plt.xlabel('Torque (Nm)')
-    plt.savefig('multistar_17041900kv.png')
+    plt.title('Turnigy Multistar 1704 1900kV, $11V, I_0=0.5, R_m=0.405$')
+    fig.tight_layout()
+    
+    plt.savefig('multistar_17041900kv.pdf')
     #plt.show()
 
     symbolic_stuff()
