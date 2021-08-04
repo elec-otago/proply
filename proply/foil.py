@@ -7,9 +7,16 @@
 
 '''
 import numpy as np
+try:
+    import importlib.resources as pkg_resources
+except ImportError:
+    # Try backported to PY<37 `importlib_resources`.
+    import importlib_resources as pkg_resources
 
 import logging
 logger = logging.getLogger(__name__)
+
+from proply import foils
 
 class Foil(object):
     def __init__(self, chord, thickness):
@@ -66,7 +73,9 @@ class Foil(object):
     @staticmethod
     def load_selig(filename):
         ''' Load points from a file and normalize '''
-        fd = open(filename, 'r')
+        #fd = open(filename, 'r')
+        fd = pkg_resources.open_text(foils, filename)
+
         seligFile = fd.read()
         fd.close()
 

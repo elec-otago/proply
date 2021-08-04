@@ -334,9 +334,9 @@ class NonBlockingStreamReader:
             return None
 
 
-import foil
 
 if __name__ == "__main__":
+    from proply import foil
     polar = get_polar("NACA 2215", 5, 5E4, Mach=.06, gen_naca=True, show_seconds=20)
     print(polar)
     polars = get_polars("NACA 2215", np.arange(-30,30,3), 5E4, Mach=.06, gen_naca=True, show_seconds=20)

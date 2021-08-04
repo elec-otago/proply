@@ -2,8 +2,18 @@
 # To do this type
 #     make develop
 # in this directory.
+TARGET=test_prop
+RESOLUTION=30
+BUILDIR=build
+
 develop:
 	sudo python3 setup.py develop
+
+# Build using the Blade Element Momentum method
+test:
+	mkdir -p ${BUILDIR}
+	proply --arad --bem  --n 40 --resolution ${RESOLUTION} --dir=${BUILDIR} --param='props/${TARGET}.json'
+	meshlabserver -i ${BUILDIR}/${TARGET}_blade.stl -o ${BUILDIR}/${TARGET}_blade.stl -s meshclean.mlx
 
 lint:
 	pylint --extension-pkg-whitelist=numpy --ignored-modules=numpy,tart_tools,dask,dask.array --extension-pkg-whitelist=astropy --extension-pkg-whitelist=dask proply

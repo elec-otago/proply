@@ -216,8 +216,8 @@ def optimize_all(foil_simulator, dv_goal, rpm, r, dr, u_0, B, maxchord):
     return res.x, res.fun
 
 
-from foil import NACA4
-from foil_simulator import PlateSimulatedFoil as FoilSim
+from proply.foil import NACA4
+from proply.foil_simulator import PlateSimulatedFoil as FoilSim
 #from foil_simulator import XfoilSimulatedFoil as FoilSim
 
 def prop_design(R0 = 2.0/100, R = 10.0/100, tip_chord = 0.01, dr = 0.005, u_0 = 0.0, rpm = 10000.0):

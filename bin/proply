@@ -7,6 +7,9 @@ import yaml
 import argparse
 
 from proply.design_parameters import DesignParameters
+from proply.prop import ARADProp
+from proply import motor_model
+from proply import optimize
 
 if __name__ == "__main__":
 

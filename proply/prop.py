@@ -2,20 +2,23 @@
 # Copyright (c) 2016-2017. Tim Molteno tim@molteno.net
 #
 
-import numpy as np
 import math
-import foil
-import stl_tools
-import motor_model
+import textwrap
+import logging
 
-from blade_element import BladeElement
+import numpy as np
+
+from proply import foil
+from proply import stl_tools
+from proply import motor_model
+from proply import optimize
+
+from proply.blade_element import BladeElement
+
 from scipy.interpolate import PchipInterpolator, interp1d
 
-import logging
 logger = logging.getLogger(__name__)
 
-import optimize
-import textwrap
 
 class Prop:
     '''
@@ -486,6 +489,6 @@ class ARADProp(Prop):
     '''
 
     def new_foil(self, r, rpm, twist):
-        import foil_ARA
+        from proply import foil_ARA
         return self.new_blade_element(foil_ARA.ARADFoil, r, rpm, twist)
     

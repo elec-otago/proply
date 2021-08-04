@@ -15,11 +15,19 @@
 
 '''
 
-import xfoil
 import numpy as np
 from scipy.optimize import brentq
 
 import logging
+from proply import xfoil
+
+try:
+    import importlib.resources as pkg_resources
+except ImportError:
+    # Try backported to PY<37 `importlib_resources`.
+    import importlib_resources as pkg_resources
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -53,6 +61,8 @@ import os
 import sqlite3
 conn_global = None
 
+from proply import sql
+
 class XfoilSimulatedFoil(PlateSimulatedFoil):
   
     def __init__(self, foil):
@@ -81,7 +91,8 @@ class XfoilSimulatedFoil(PlateSimulatedFoil):
             if result == None:
                 # Create database tables
                 logger.info("Creating Database for the first time")
-                fd = open('foil_simulator.sql', 'r')
+                #fd = open('foil_simulator.sql', 'r')
+                fd = pkg_resources.open_text(sql, "foil_simulator.sql")
                 sqlFile = fd.read()
                 fd.close()
 

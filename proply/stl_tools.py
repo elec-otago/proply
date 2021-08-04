@@ -1,8 +1,9 @@
 from stl.mesh import Mesh
 from stl.base import RemoveDuplicates
 
-import foil
 import numpy as np
+
+from proply import foil
 
 class STL:
     

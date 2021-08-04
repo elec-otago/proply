@@ -1,8 +1,8 @@
 import numpy as np
-from foil_simulator import XfoilSimulatedFoil as FoilSimulator
+from proply.foil_simulator import XfoilSimulatedFoil as FoilSimulator
 #from foil_simulator import PlateSimulatedFoil as FoilSimulator
 import math
-import optimize
+from proply import optimize
 
 import logging
 logger = logging.getLogger(__name__)

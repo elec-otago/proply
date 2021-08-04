@@ -1,6 +1,7 @@
-from foil import Foil
-from scipy.interpolate import PchipInterpolator
 import numpy as np
+
+from proply.foil import Foil
+from scipy.interpolate import PchipInterpolator
 
 class ARAD_6_Foil(Foil):
     '''         ARA-D 20% AIRFOIL
@@ -17,7 +18,7 @@ class ARAD_6_Foil(Foil):
   
   
     def get_shape_points(self, n):
-        xu, yu, xl, yl = self.load_selig('foils/ara_d_6.dat')
+        xu, yu, xl, yl = self.load_selig('ara_d_6.dat')
         c = self.chord
         
         return [[xl*c,yl*c],[xu*c,yu*c]]
@@ -37,7 +38,7 @@ class ARAD_10_Foil(Foil):
   
   
     def get_shape_points(self, n):
-        xu, yu, xl, yl = self.load_selig('foils/ara_d_10.dat')
+        xu, yu, xl, yl = self.load_selig('ara_d_10.dat')
         c = self.chord
         
         return [[xl*c,yl*c],[xu*c,yu*c]]
@@ -57,7 +58,7 @@ class ARAD_13_Foil(Foil):
   
   
     def get_shape_points(self, n):
-        xu, yu, xl, yl = self.load_selig('foils/ara_d_13.dat')
+        xu, yu, xl, yl = self.load_selig('ara_d_13.dat')
         c = self.chord
         
         return [[xl*c,yl*c],[xu*c,yu*c]]
@@ -77,7 +78,7 @@ class ARAD_20_Foil(Foil):
   
   
     def get_shape_points(self, n):
-        xu, yu, xl, yl = self.load_selig('foils/ara_d_20.dat')
+        xu, yu, xl, yl = self.load_selig('ara_d_20.dat')
         c = self.chord
         
         return [[xl*c,yl*c],[xu*c,yu*c]]
@@ -87,19 +88,19 @@ class ARADFoil_Old(Foil):
     def __init__(self, chord, thickness):
         Foil.__init__(self,chord, thickness)
         if (self.thickness <= 0.06):
-            self.xl, self.yl, self.xu, self.yu = self.load_selig('foils/ara_d_6.dat')
+            self.xl, self.yl, self.xu, self.yu = self.load_selig('ara_d_6.dat')
             self.yu *= self.thickness / 0.06
             self.yl *= self.thickness / 0.06
         elif (self.thickness <= 0.10):
-            self.xl, self.yl, self.xu, self.yu = self.load_selig('foils/ara_d_10.dat')
+            self.xl, self.yl, self.xu, self.yu = self.load_selig('ara_d_10.dat')
             self.yu *= self.thickness / 0.1
             self.yl *= self.thickness / 0.1
         elif (self.thickness <= 0.13):
-            self.xl, self.yl, self.xu, self.yu = self.load_selig('foils/ara_d_13.dat')
+            self.xl, self.yl, self.xu, self.yu = self.load_selig('ara_d_13.dat')
             self.yu *= self.thickness / 0.13
             self.yl *= self.thickness / 0.13
         else:
-            self.xl, self.yl, self.xu, self.yu= self.load_selig('foils/ara_d_20.dat')
+            self.xl, self.yl, self.xu, self.yu= self.load_selig('ara_d_20.dat')
             self.yu *= self.thickness / 0.2
             self.yl *= self.thickness / 0.2
         self.init_te = (self.yu[-1] - self.yl[-1])
@@ -182,14 +183,14 @@ class ARADFoil(Foil):
         if g_linterp is not None:
             return g_linterp, g_uinterp, g_x0, g_x1
         
-        files = ['foils/ara_d_6.dat', 'foils/ara_d_10.dat', 'foils/ara_d_13.dat', 'foils/ara_d_20.dat']
+        files = ['ara_d_6.dat', 'ara_d_10.dat', 'ara_d_13.dat', 'ara_d_20.dat']
         thickness = np.array([0.06, 0.10, 0.13, 0.2])
         lpts = []
         lval = []
         upts = []
         uval = []
         # Lower Bound, linear interpolate here from the 6% foil
-        xl, yl, xu, yu = Foil.load_selig('foils/ara_d_6.dat')
+        xl, yl, xu, yu = Foil.load_selig('ara_d_6.dat')
         l_interp = ARADFoil.polyfit(xl, yl)
         u_interp = ARADFoil.polyfit(xu, yu)
         
@@ -219,7 +220,7 @@ class ARADFoil(Foil):
                 uval.append(uu)
         
         # Upper Bound is a circle
-        xl, yl, xu, yu = Foil.load_selig('foils/ara_d_20.dat')
+        xl, yl, xu, yu = Foil.load_selig('ara_d_20.dat')
         l_interp = ARADFoil.polyfit(xl, yl)
         u_interp = ARADFoil.polyfit(xu, yu)
         for t in np.linspace(0.25, 1.0, 9):
