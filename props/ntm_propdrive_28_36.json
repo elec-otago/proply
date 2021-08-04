@@ -1,0 +1,18 @@
+{
+    "name": "ntm_propdrive_28_36",
+    
+    "altitude": 0.0,
+    "forward_airspeed": 2.0,
+    
+    "motor_Kv": 750,
+    "motor_volts": 16.7,
+    "motor_no_load_current": 1.1,
+    "motor_winding_resistance": 0.16,
+    "thrust": 40.0,
+
+    "radius": 0.1,
+    "scimitar_percent": 7.0,
+    "trailing_edge": 0.5,
+    "hub_radius": 0.006,
+    "hub_depth": 0.008
+}

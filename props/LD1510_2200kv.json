@@ -1,0 +1,20 @@
+{
+    "name": "LD1510_2200kv",
+    "altitude": 0.0,
+    "forward_airspeed": 20.0,
+    
+    "motor_Kv": 2200,
+    "motor_volts": 7.4,
+    "motor_no_load_current": 0.2,
+    "motor_winding_resistance": 0.207,
+    
+    "thrust": 2.0,
+    "blades": 2,
+    
+    "radius": 0.0625,
+    "tip_chord": 0.005,
+    "scimitar_percent": 7.0,
+    "trailing_edge": 0.5,
+    "hub_radius": 0.005,
+    "hub_depth": 0.005
+}

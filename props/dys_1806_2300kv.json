@@ -1,0 +1,21 @@
+{
+    "name": "dys_1806_2300kv",
+    
+    "altitude": 0.0,
+    "forward_airspeed": 0.0,
+    
+    "motor_Kv": 2300,
+    "motor_volts": 11.0,
+    "motor_no_load_current": 0.6,
+    "motor_winding_resistance": 0.19,
+    
+    "thrust": 5.0,
+    "blades": 3,
+
+    "radius": 0.0635,
+    "tip_chord": 0.007,
+    "scimitar_percent": -5.0,
+    "trailing_edge": 0.25,
+    "hub_radius": 0.0065,
+    "hub_depth": 0.006
+}
