@@ -2,3 +2,4 @@ include LICENSE.txt
 include README.md
 include sql/foil_simulator.sql
 include foils/*.dat
+include templates/blade_template.scad

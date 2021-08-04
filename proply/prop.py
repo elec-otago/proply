@@ -333,7 +333,9 @@ class Prop:
         f=open(filename,"w")
         self.gen_scad_header(f, y0, y1)
 
-        template_file = open('blade_template.scad', 'r')
+        #template_file = open('blade_template.scad', 'r')
+        template_file = pkg_resources.open_text(templates, 'blade_template.scad')
+
         template = template_file.read()
         template_file.close()
         
