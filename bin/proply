@@ -7,7 +7,7 @@ import yaml
 import argparse
 
 from proply.design_parameters import DesignParameters
-from proply.prop import ARADProp
+from proply.prop import ARADProp, NACAProp
 from proply import motor_model
 from proply import optimize
 from proply import mplog
@@ -61,7 +61,7 @@ if __name__ == "__main__":
         thrust = param.thrust
         goal_torque = optimum_torque*1.5
         Q, T = p.full_optimize(optimum_torque, optimum_rpm, thrust=thrust)
-        print(("Total Thrust: {:5.2f}, Torque: {:5.3f}".format(T, Q)))
+        print(f"Total Thrust: {T :5.2f}, Torque: {Q :5.3f}")
         if (args.auto):
             while Q > goal_torque:
                 thrust *= 0.95 * goal_torque/Q

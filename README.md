@@ -12,7 +12,7 @@ This code will generate propeller designs automatically that can be 3D printed. 
 
 A single blade is generated as an STL file using the command:
 
-    python prop.py --naca --bem --n 40 --resolution 2.0 --thrust 4.0 --param='test_prop.json'
+    proply --naca --bem --n 40 --resolution 30 --param='test_prop.json'
 
 The mesh can be cleaned using meshlab to remove duplicate vertices with:
 
