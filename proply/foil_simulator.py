@@ -19,7 +19,7 @@ import numpy as np
 from scipy.optimize import brentq
 
 import logging
-from proply import xfoil
+from proply import xfoil_old
 
 try:
     import importlib.resources as pkg_resources
@@ -62,6 +62,7 @@ import sqlite3
 conn_global = None
 
 from proply import sql
+import xfoil as xf
 
 class XfoilSimulatedFoil(PlateSimulatedFoil):
   
@@ -189,6 +190,9 @@ class XfoilSimulatedFoil(PlateSimulatedFoil):
                 cd.append(pol[2])
             if (len(alpha) > 20):
                 
+                print(alpha)
+                print(cl)
+                print(cd)
                 cl_poly = np.poly1d(np.polyfit(alpha, cl, 9))
                 cd_poly = np.poly1d(np.polyfit(alpha, cd, 9))
                 conn.commit()
@@ -315,6 +319,82 @@ class XfoilSimulatedFoil(PlateSimulatedFoil):
         '''
         xcoords = np.concatenate((pl[0][::-1], pu[0]), axis=0)
         ycoords = np.concatenate((pl[1][::-1], pu[1]), axis=0)
+        
+        
+        
+        # Chop off overhang.
+        limit = xcoords <= xcoords[0]
+        xcoords = xcoords[limit]
+        ycoords = ycoords[limit]
+        if (False):
+            xcoords = np.append(xcoords, xcoords[0] )
+            ycoords = np.append(ycoords, ycoords[0] )
+        #if (False):
+            #xcoords = np.append(xcoords, xcoords[0] )
+            #ycoords = np.append(ycoords, ycoords[-1] )
+        
+        dut = xf.model.Airfoil(x=xcoords, y=ycoords)
+        af = xf.XFoil()
+        af.airfoil = dut
+
+        af.Re = 1e6
+        af.max_iter = 40
+        alpha, cl, cd, cm, cdp = af.aseq(-20, 20, 0.5)
+        
+        print(f"alpha={alpha}, cl={cl}, cd={cd}")
+        indices = np.where(~np.isnan(alpha))
+        alpha = alpha[indices]
+        cl = cl[indices]
+        cd = cd[indices]
+        cm = cm[indices]
+        cdp = cdp[indices]
+        top_xtr = cd
+        bot_xtr = cd
+        alfa = np.radians(alpha)
+        print(f"alpha={alpha}, cl={cl}, cd={cd}")
+        if len(alfa) < 5:
+            logger.warning("Foil didn't simulate.")
+            # Try modifying things.
+            alpha = np.arange(np.linspace(-20, 20, 0.5))
+            cl = 2.0 * np.pi * alpha
+            cd = 1.28 * np.sin(alpha)
+            cl_poly = np.poly1d(np.polyfit(alpha, cl, 4))
+            cd_poly = np.poly1d(np.polyfit(alpha, cd, 4))
+            return [cl_poly, cd_poly]
+        else:
+            # Insert into database
+            conn = self.get_db()
+            c = conn.cursor()
+            c.execute("INSERT INTO simulation(foil_id, reynolds, mach) VALUES (?,?, ?)", (self.foil_id, reynolds, Ma))
+            c.execute("SELECT id FROM simulation WHERE (foil_id=?) AND (reynolds=?) AND (mach=?)", (self.foil_id, reynolds, Ma ))
+            sim_id = c.fetchone()[0]
+
+            for i, a in enumerate(alfa):
+                c.execute("INSERT INTO polar(sim_id, alpha, cl, cd, cdp, cm, Top_Xtr, Bot_Xtr) VALUES (?,?,?,?,?,?,?,?)", 
+                          (sim_id, a, cl[i], cd[i], cdp[i], cm[i], top_xtr[i], bot_xtr[i]))
+            conn.commit()
+        
+    def xfoil_simulate_polars_old(self, reynolds, Ma):
+        logger.info("Simulating Foil {}, at Re={} Ma={:5.2f}".format(self.foil, reynolds, Ma))
+    
+        ''' Use XFOIL to simulate the performance of this get_shape
+        '''
+        
+        #n_points = int(101.0*self.foil.chord / self.foil.trailing_edge) + 30
+        #n_points = min(81.0, n_points)
+        #n_points = max(61, n_points)
+        n_points = 42
+        logger.info("N Points = %d" % n_points)
+        
+        pl, pu = self.foil.get_shape_points(n=n_points)
+        ''' This contains only the X,Y coordinates, which run from the 
+            trailing edge, round the leading edge, back to the trailing edge 
+            in either direction:
+        '''
+        xcoords = np.concatenate((pl[0][::-1], pu[0]), axis=0)
+        ycoords = np.concatenate((pl[1][::-1], pu[1]), axis=0)
+        
+        
         
         # Chop off overhang.
         limit = xcoords <= xcoords[0]

@@ -94,9 +94,8 @@ def get_polar(airfoil, alpha, Re, Mach=None,
         start_time = time.time()
 
         while test:
-            line = str(xf.readline())
+            line = xf.readline()
             if line:
-                #print line
                 if re.search("Point added to stored polar", line):
                     test = False
                 elif re.search("VISCAL:  Convergence failed", line):
@@ -270,7 +269,10 @@ class Xfoil():
 
     def readline(self):
         """Read one line, returns None if empty"""
-        return self._stdoutnonblock.readline()
+        ret = self._stdoutnonblock.readline()
+        if ret:
+            print(ret)
+        return ret
 
     def close(self):
         print("Xfoil: instance closed through .close()")
@@ -326,9 +328,9 @@ class NonBlockingStreamReader:
     def readline(self, timeout = None):
         try:
             if timeout is not None:
-                return self._q.get(block = True, timeout = timeout)
+                return str(self._q.get(block = True, timeout = timeout))
             else:
-                return self._q.get(block = False)
+                return str(self._q.get(block = False))
 
         except Empty:
             return None
