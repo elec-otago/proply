@@ -29,7 +29,7 @@ def smooth(x,window_len=11,window='hanning'):
     scipy.signal.lfilter
  
     TODO: the window parameter could be the window itself if an array instead of a string
-    NOTE: length(output) != length(input), to correct this: return y[(window_len/2-1):-(window_len/2)] instead of just y.
+    NOTE: length(output) != length(input), to correct this: return y[(window_len//2-1):-(window_len//2)] instead of just y.
     """
 
     if x.ndim != 1:
@@ -55,7 +55,7 @@ def smooth(x,window_len=11,window='hanning'):
         w=eval('numpy.'+window+'(window_len)')
 
     y=numpy.convolve(w/w.sum(),s,mode='valid')
-    return y[(window_len/2):-(window_len/2)]
+    return y[(window_len//2):-(window_len//2)]
 
 if __name__=="__main__":
     t=numpy.linspace(-2,2,20)

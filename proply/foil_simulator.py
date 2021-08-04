@@ -337,8 +337,8 @@ class XfoilSimulatedFoil(PlateSimulatedFoil):
         af = xf.XFoil()
         af.airfoil = dut
 
-        af.Re = 1e6
-        af.max_iter = 40
+        af.Re = reynolds
+        af.max_iter = 80
         alpha, cl, cd, cm, cdp = af.aseq(-20, 20, 0.5)
         
         print(f"alpha={alpha}, cl={cl}, cd={cd}")

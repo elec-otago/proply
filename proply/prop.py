@@ -12,6 +12,7 @@ from proply import foil
 from proply import stl_tools
 from proply import motor_model
 from proply import optimize
+from proply.smooth import smooth
 
 from proply.blade_element import BladeElement
 
@@ -444,7 +445,6 @@ class Prop:
         coeff = np.polyfit(radial_points[::-1], twist_angles, 4)
         twist_angle_poly = np.poly1d(coeff)
 
-        from smooth import smooth
 
         #coeff = np.polyfit(radial_points[::-1], chords, 4)
         #chord_poly = np.poly1d(coeff)
