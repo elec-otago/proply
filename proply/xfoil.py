@@ -94,7 +94,7 @@ def get_polar(airfoil, alpha, Re, Mach=None,
         start_time = time.time()
 
         while test:
-            line = xf.readline()
+            line = str(xf.readline())
             if line:
                 #print line
                 if re.search("Point added to stored polar", line):
@@ -156,7 +156,7 @@ def get_polars(airfoil, alpha, Re, Mach=None,
         if Mach > 1.0:
             raise ValueError("Mach number ({}) exceeds 1.0".format(Mach))
 
-    mp = True
+    mp = False
     if (mp):
         original_sigint_handler = signal.signal(signal.SIGINT, signal.SIG_IGN)
         p = Pool()
@@ -265,7 +265,7 @@ class Xfoil():
     def cmd(self, cmd, autonewline=True):
         """Give a command. Set newline=False for manual control with '\n'"""
         n = '\n' if autonewline else ''
-        #print (cmd + n),
+        print (cmd + n),
         self.xfinst.stdin.write((cmd + n).encode())
 
     def readline(self):
@@ -273,7 +273,7 @@ class Xfoil():
         return self._stdoutnonblock.readline()
 
     def close(self):
-        #print "Xfoil: instance closed through .close()"
+        print("Xfoil: instance closed through .close()")
         self.xfinst.kill()
     def __enter__(self):
         """Gets called when entering 'with ... as ...' block"""

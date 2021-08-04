@@ -10,6 +10,7 @@ from proply.design_parameters import DesignParameters
 from proply.prop import ARADProp
 from proply import motor_model
 from proply import optimize
+from proply import mplog
 
 if __name__ == "__main__":
 
