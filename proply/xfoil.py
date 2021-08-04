@@ -266,7 +266,7 @@ class Xfoil():
         """Give a command. Set newline=False for manual control with '\n'"""
         n = '\n' if autonewline else ''
         #print (cmd + n),
-        self.xfinst.stdin.write(cmd + n)
+        self.xfinst.stdin.write((cmd + n).encode())
 
     def readline(self):
         """Read one line, returns None if empty"""
