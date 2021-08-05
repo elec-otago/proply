@@ -17,6 +17,6 @@ RUN pip3 install .
 WORKDIR /build
 RUN git clone https://github.com/elec-otago/proply.git
 WORKDIR /build/proply
-RUN python3 setup.py develop
+RUN pip3 install .
 
 ENV LANG en_US.UTF-8 

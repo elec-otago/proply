@@ -1,4 +1,4 @@
-#!/bin/python
+#!/usr/bin/python3
 # Proply executable
 import os
 import logging

@@ -1,5 +1,5 @@
 include LICENSE
 include README.md
-include sql/foil_simulator.sql
-include foils/*.dat
-include templates/blade_template.scad
+include proply/sql/foil_simulator.sql
+include proply/foils/*.dat
+include proply/templates/blade_template.scad

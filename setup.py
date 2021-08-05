@@ -24,6 +24,7 @@ setup(
     package_data={
         "proply": [
             "sql/foil_simulator.sql",
+            "foils/foil_simulator.sql",
         ]
     },
     include_package_data=True,
