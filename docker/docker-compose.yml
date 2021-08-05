@@ -1,0 +1,19 @@
+# On the docker host
+# type 'xhost +', and then you can run this with
+#    docker-compose run --rm casa
+# Type casabrowser at the prompt, and you will find the measurement set in the /remote directory. 
+version: '3.5'
+
+services:
+
+  proply:
+    container_name: proply
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - './build:/build'
+    environment:
+      - LANG=en_US.UTF-8  
+      - LANGUAGE=en_US:en  
+      - LC_ALL=en_US.UTF-8     

@@ -26,11 +26,6 @@ setup(
             "sql/foil_simulator.sql",
         ]
     },
-    data_files={
-        "sql": [
-            "sql/foil_simulator.sql",
-        ]
-    },
     include_package_data=True,
     test_suite="nose.collector",
     tests_require=["nose"],
