@@ -9,14 +9,15 @@ RUN sed -i -e 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen && \
     dpkg-reconfigure --frontend=noninteractive locales && \
     update-locale LANG=en_US.UTF-8
 
+ENV LANG en_US.UTF-8 
+
 WORKDIR /build
 RUN git clone https://github.com/mxjeff/xfoil-python.git
 WORKDIR /build/xfoil-python
-RUN pip3 install .
+RUN python3 setup.py install
 
 WORKDIR /build
 RUN git clone https://github.com/elec-otago/proply.git
+RUN ls
 WORKDIR /build/proply
-RUN pip3 install .
-
-ENV LANG en_US.UTF-8 
+RUN python3 setup.py install

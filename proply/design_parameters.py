@@ -71,7 +71,10 @@ class DesignParameters:
         self.tip_chord = settings["tip_chord"]
         self.hub_radius = settings["hub_radius"]
         self.hub_depth = settings["hub_depth"]
-        self.center_hole = settings["center_hole"]
+        try:
+            self.center_hole = settings["center_hole"]
+        except:
+            self.center_hole = 0.005
 
         self.scimitar_percent = settings["scimitar_percent"]
         self.trailing_edge = settings["trailing_edge"]

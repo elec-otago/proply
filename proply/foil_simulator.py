@@ -199,9 +199,6 @@ class XfoilSimulatedFoil(PlateSimulatedFoil):
                 cd.append(pol[2])
             if len(alpha) > 20:
 
-                print(alpha)
-                print(cl)
-                print(cd)
                 cl_poly = np.poly1d(np.polyfit(alpha, cl, 9))
                 cd_poly = np.poly1d(np.polyfit(alpha, cd, 9))
                 conn.commit()
@@ -230,108 +227,6 @@ class XfoilSimulatedFoil(PlateSimulatedFoil):
                 conn.commit()
 
         self.xfoil_simulate_polars(reynolds, Ma)
-        if False:
-            logger.info(
-                "Simulating Foil {}, at Re={} Ma={:5.2f}".format(
-                    self.foil, reynolds, Ma
-                )
-            )
-
-            """ Use XFOIL to simulate the performance of this get_shape
-            """
-
-            # n_points = int(101.0*self.foil.chord / self.foil.trailing_edge) + 30
-            # n_points = min(81.0, n_points)
-            # n_points = max(61, n_points)
-            n_points = 43
-            logger.info("N Points = %d" % n_points)
-
-            pl, pu = self.foil.get_shape_points(n=n_points)
-            """ This contains only the X,Y coordinates, which run from the 
-                trailing edge, round the leading edge, back to the trailing edge 
-                in either direction:
-            """
-            xcoords = np.concatenate((pl[0][::-1], pu[0]), axis=0)
-            ycoords = np.concatenate((pl[1][::-1], pu[1]), axis=0)
-
-            # Chop off overhang.
-            limit = xcoords <= xcoords[0]
-            xcoords = xcoords[limit]
-            ycoords = ycoords[limit]
-            if False:
-                xcoords = np.append(xcoords, xcoords[0])
-                ycoords = np.append(ycoords, ycoords[0])
-            # if (False):
-            # xcoords = np.append(xcoords, xcoords[0] )
-            # ycoords = np.append(ycoords, ycoords[-1] )
-
-            coordslist = np.array((xcoords, ycoords)).T
-            coordstrlist = [
-                "{:.6f} {:.6f}".format(coord[0], coord[1]) for coord in coordslist
-            ]
-            # Join with linebreaks in between
-            points = "\n".join(coordstrlist)
-
-            # Save points to a file
-            randstr = "".join(choice(ascii_uppercase) for i in range(20))
-            filename = "parsec_{}.dat".format(randstr)
-            with open(filename, "w") as af:
-                af.write(points)
-
-            # Let Xfoil do its magic
-            alfa = np.arange(-30, 30, 1.0)
-            polar = xfoil.get_polars(
-                filename, alfa, reynolds, Mach=Ma, iterlim=200, normalize=True
-            )
-            # print polar.keys()
-            os.remove(filename)
-
-            cl = np.array(polar["CL"])
-            cd = np.array(polar["CD"])
-            cdp = np.array(polar["CDp"])
-            cm = np.array(polar["CM"])
-            top_xtr = np.array(polar["Top_Xtr"])
-            bot_xtr = np.array(polar["Bot_Xtr"])
-            alfa = np.radians(polar["alpha"])
-            if len(alfa) < 5:
-                logger.warning("Foil didn't simulate.")
-                # Try modifying things.
-                alpha = np.radians(np.linspace(-40, 40, 20))
-                cl = 2.0 * np.pi * alpha
-                cd = 1.28 * np.sin(alpha)
-                cl_poly = np.poly1d(np.polyfit(alpha, cl, 4))
-                cd_poly = np.poly1d(np.polyfit(alpha, cd, 4))
-                return [cl_poly, cd_poly]
-            else:
-                # Insert into database
-                conn = self.get_db()
-                c = conn.cursor()
-                c.execute(
-                    "INSERT INTO simulation(foil_id, reynolds, mach) VALUES (?,?, ?)",
-                    (self.foil_id, reynolds, Ma),
-                )
-                c.execute(
-                    "SELECT id FROM simulation WHERE (foil_id=?) AND (reynolds=?) AND (mach=?)",
-                    (self.foil_id, reynolds, Ma),
-                )
-                sim_id = c.fetchone()[0]
-
-                for i, a in enumerate(alfa):
-                    c.execute(
-                        "INSERT INTO polar(sim_id, alpha, cl, cd, cdp, cm, Top_Xtr, Bot_Xtr) VALUES (?,?,?,?,?,?,?,?)",
-                        (
-                            sim_id,
-                            a,
-                            cl[i],
-                            cd[i],
-                            cdp[i],
-                            cm[i],
-                            top_xtr[i],
-                            bot_xtr[i],
-                        ),
-                    )
-                conn.commit()
-
         return self.get_polars(velocity)
 
     def xfoil_simulate_polars(self, reynolds, Ma):
@@ -375,7 +270,7 @@ class XfoilSimulatedFoil(PlateSimulatedFoil):
         af.max_iter = 80
         alpha, cl, cd, cm, cdp = af.aseq(-20, 20, 0.5)
 
-        print(f"alpha={alpha}, cl={cl}, cd={cd}")
+        # Prune all the nan from the results
         indices = np.where(~np.isnan(alpha))
         alpha = alpha[indices]
         cl = cl[indices]
@@ -385,7 +280,7 @@ class XfoilSimulatedFoil(PlateSimulatedFoil):
         top_xtr = cd
         bot_xtr = cd
         alfa = np.radians(alpha)
-        print(f"alpha={alpha}, cl={cl}, cd={cd}")
+
         if len(alfa) < 5:
             logger.warning("Foil didn't simulate.")
             # Try modifying things.
@@ -416,96 +311,6 @@ class XfoilSimulatedFoil(PlateSimulatedFoil):
                 )
             conn.commit()
 
-    def xfoil_simulate_polars_old(self, reynolds, Ma):
-        logger.info(
-            "Simulating Foil {}, at Re={} Ma={:5.2f}".format(self.foil, reynolds, Ma)
-        )
-
-        """ Use XFOIL to simulate the performance of this get_shape
-        """
-
-        # n_points = int(101.0*self.foil.chord / self.foil.trailing_edge) + 30
-        # n_points = min(81.0, n_points)
-        # n_points = max(61, n_points)
-        n_points = 42
-        logger.info("N Points = %d" % n_points)
-
-        pl, pu = self.foil.get_shape_points(n=n_points)
-        """ This contains only the X,Y coordinates, which run from the 
-            trailing edge, round the leading edge, back to the trailing edge 
-            in either direction:
-        """
-        xcoords = np.concatenate((pl[0][::-1], pu[0]), axis=0)
-        ycoords = np.concatenate((pl[1][::-1], pu[1]), axis=0)
-
-        # Chop off overhang.
-        limit = xcoords <= xcoords[0]
-        xcoords = xcoords[limit]
-        ycoords = ycoords[limit]
-        if False:
-            xcoords = np.append(xcoords, xcoords[0])
-            ycoords = np.append(ycoords, ycoords[0])
-        # if (False):
-        # xcoords = np.append(xcoords, xcoords[0] )
-        # ycoords = np.append(ycoords, ycoords[-1] )
-
-        coordslist = np.array((xcoords, ycoords)).T
-        coordstrlist = [
-            "{:.6f} {:.6f}".format(coord[0], coord[1]) for coord in coordslist
-        ]
-        # Join with linebreaks in between
-        points = "\n".join(coordstrlist)
-
-        # Save points to a file
-        randstr = "".join(choice(ascii_uppercase) for i in range(20))
-        filename = "parsec_{}.dat".format(randstr)
-        with open(filename, "w") as af:
-            af.write(points)
-
-        # Let Xfoil do its magic
-        alfa = np.arange(-30, 30, 1.0)
-        polar = xfoil.get_polars(
-            filename, alfa, reynolds, Mach=Ma, iterlim=200, normalize=True
-        )
-        # print polar.keys()
-        os.remove(filename)
-
-        cl = np.array(polar["CL"])
-        cd = np.array(polar["CD"])
-        cdp = np.array(polar["CDp"])
-        cm = np.array(polar["CM"])
-        top_xtr = np.array(polar["Top_Xtr"])
-        bot_xtr = np.array(polar["Bot_Xtr"])
-        alfa = np.radians(polar["alpha"])
-        if len(alfa) < 5:
-            logger.warning("Foil didn't simulate.")
-            # Try modifying things.
-            alpha = np.arange(np.linspace(-30, 30, 1.1))
-            cl = 2.0 * np.pi * alpha
-            cd = 1.28 * np.sin(alpha)
-            cl_poly = np.poly1d(np.polyfit(alpha, cl, 4))
-            cd_poly = np.poly1d(np.polyfit(alpha, cd, 4))
-            return [cl_poly, cd_poly]
-        else:
-            # Insert into database
-            conn = self.get_db()
-            c = conn.cursor()
-            c.execute(
-                "INSERT INTO simulation(foil_id, reynolds, mach) VALUES (?,?, ?)",
-                (self.foil_id, reynolds, Ma),
-            )
-            c.execute(
-                "SELECT id FROM simulation WHERE (foil_id=?) AND (reynolds=?) AND (mach=?)",
-                (self.foil_id, reynolds, Ma),
-            )
-            sim_id = c.fetchone()[0]
-
-            for i, a in enumerate(alfa):
-                c.execute(
-                    "INSERT INTO polar(sim_id, alpha, cl, cd, cdp, cm, Top_Xtr, Bot_Xtr) VALUES (?,?,?,?,?,?,?,?)",
-                    (sim_id, a, cl[i], cd[i], cdp[i], cm[i], top_xtr[i], bot_xtr[i]),
-                )
-            conn.commit()
 
 
 if __name__ == "__main__":

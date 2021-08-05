@@ -12,7 +12,7 @@ with open("README.md") as f:
 
 setup(
     name="proply",
-    version="0.1.4b5",
+    version="0.1.4b6",
     description="Convert TART observation data to Measurement Sets",
     long_description=readme,
     long_description_content_type="text/markdown",
@@ -30,7 +30,7 @@ setup(
     include_package_data=True,
     test_suite="nose.collector",
     tests_require=["nose"],
-    packages=["proply"],
+    packages=["proply", "proply.sql", "proply.foils", "proply.templates"],
     scripts=["bin/proply"],
     classifiers=[
         "Development Status :: 4 - Beta",
