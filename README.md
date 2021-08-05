@@ -8,6 +8,14 @@ This code will generate propeller designs automatically that can be 3D printed. 
 
 ![alt text][prop5x3]
 
+## Install
+
+Proply depends on a slightly modified version of xfoil-python. It should be installed as follows
+
+    git clone https://github.com/mxjeff/xfoil-python.git
+    cd xfoil-python
+    pip3 install .
+
 ## Creating a blade
 
 A single blade is generated as an STL file using the command:
@@ -21,7 +29,6 @@ The mesh can be cleaned using meshlab to remove duplicate vertices with:
 ##  Using OpenSCAD to generate a propeller
 
 OpenSCAD imports the blade STL and generates a prop.
-
 
 ## TODO
 
