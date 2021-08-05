@@ -1,0 +1,21 @@
+{
+    "name": "FLYWOO_ROBO_RB1202.5",
+    
+    "altitude": 0.0,
+    "forward_airspeed": 0.0,
+    
+    "motor_Kv": 11500,
+    "motor_volts": 3.7,
+    "motor_no_load_current": 0.075,
+    "motor_winding_resistance": 0.035,
+    
+    "thrust": 0.5,
+    "blades": 3,
+
+    "radius": 0.02,
+    "tip_chord": 0.003,
+    "scimitar_percent": 10.0,
+    "trailing_edge": 0.25,
+    "hub_radius": 0.004,
+    "hub_depth": 0.003
+}
