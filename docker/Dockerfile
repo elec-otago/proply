@@ -11,6 +11,8 @@ RUN sed -i -e 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen && \
     dpkg-reconfigure --frontend=noninteractive locales && \
     update-locale LANG=en_US.UTF-8
 
+RUN apt-get install -y python3-numpy python3-matplotlib python3-scipy
+
 WORKDIR /build
 RUN git clone https://github.com/mxjeff/xfoil-python.git
 WORKDIR /build/xfoil-python
