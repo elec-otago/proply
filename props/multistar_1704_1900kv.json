@@ -14,6 +14,7 @@
 
     "radius": 0.0635,
     "tip_chord": 0.007,
+    "center_hole": 5e-3,
     "scimitar_percent": 10.0,
     "trailing_edge": 0.25,
     "hub_radius": 0.005,

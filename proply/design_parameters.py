@@ -9,6 +9,7 @@ class DesignParameters:
         self.radius = 0.0625  # m
         self.thrust = 2.0  # Newtons
         self.blades = 2
+        self.center_hole = 5 / 1000
         self.tip_chord = 7.0 / 1000
         self.hub_radius = 5.0 / 1000
         self.trailing_edge = 0.5 / 1000
@@ -42,6 +43,7 @@ class DesignParameters:
         configdict["tip_chord"] = self.tip_chord
         configdict["hub_radius"] = self.hub_radius
         configdict["hub_depth"] = self.hub_depth
+        configdict["center_hole"] = self.center_hole
 
         configdict["scimitar_percent"] = self.param.scimitar_percent
         configdict["trailing_edge"] = self.param.trailing_edge
@@ -69,6 +71,7 @@ class DesignParameters:
         self.tip_chord = settings["tip_chord"]
         self.hub_radius = settings["hub_radius"]
         self.hub_depth = settings["hub_depth"]
+        self.center_hole = settings["center_hole"]
 
         self.scimitar_percent = settings["scimitar_percent"]
         self.trailing_edge = settings["trailing_edge"]

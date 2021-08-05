@@ -321,22 +321,15 @@ class Prop:
         blade_stl_filename = self.param.name + "_blade.stl"
         f.write(
             textwrap.dedent(
-                """
-            center_hole = 5;
-            hub_diameter = {};
-            hub_height = {};
-            n_blades = {};
-            y_min = {};
-            y_max = {};
-            blade_name = "{}";
-            """.format(
-                    self.param.hub_radius * 2000,
-                    self.param.hub_depth * 1000.0,
-                    self.n_blades,
-                    y0,
-                    y1,
-                    blade_stl_filename,
-                )
+                f"""
+            center_hole = {self.param.center_hole * 1000.0};
+            hub_diameter = {self.param.hub_radius * 2000};
+            hub_height = {self.param.hub_depth * 1000.0};
+            n_blades = {self.n_blades};
+            y_min = {y0};
+            y_max = {y1};
+            blade_name = "{blade_stl_filename}";
+            """
             )
         )
 

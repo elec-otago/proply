@@ -7,7 +7,7 @@ import yaml
 import argparse
 
 from proply.design_parameters import DesignParameters
-from proply.prop import ARADProp, NACAProp
+from proply.prop import ARADProp, NACAProp, Prop
 from proply import motor_model
 from proply import optimize
 from proply import mplog
