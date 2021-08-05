@@ -2,16 +2,12 @@ FROM debian:buster
 ARG DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y locales \
-    python3-tz \
-    python3-casacore \
-    python3-pip \
+    python3-pip python3-numpy python3-matplotlib python3-scipy \
     cmake build-essential git gfortran
 
 RUN sed -i -e 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen && \
     dpkg-reconfigure --frontend=noninteractive locales && \
     update-locale LANG=en_US.UTF-8
-
-RUN apt-get install -y python3-numpy python3-matplotlib python3-scipy
 
 WORKDIR /build
 RUN git clone https://github.com/mxjeff/xfoil-python.git
@@ -21,6 +17,6 @@ RUN pip3 install .
 WORKDIR /build
 RUN git clone https://github.com/elec-otago/proply.git
 WORKDIR /build/proply
-RUN pip3 install .
+RUN python3 setup.py develop
 
 ENV LANG en_US.UTF-8 
