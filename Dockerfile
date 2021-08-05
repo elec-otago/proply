@@ -16,8 +16,9 @@ RUN git clone https://github.com/mxjeff/xfoil-python.git
 WORKDIR /build/xfoil-python
 RUN python3 setup.py install
 
-WORKDIR /build
-RUN git clone https://github.com/elec-otago/proply.git
-RUN ls
 WORKDIR /build/proply
+ADD . .
+
 RUN python3 setup.py install
+
+WORKDIR /run

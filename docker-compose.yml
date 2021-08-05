@@ -1,7 +1,8 @@
 # On the docker host
 # type 'xhost +', and then you can run this with
-#    docker-compose run --rm casa
-# Type casabrowser at the prompt, and you will find the measurement set in the /remote directory. 
+#    docker-compose run --rm proply
+# At the prompt issue the following command:
+#    proply --bem --naca --n 40 --resolution 40 --dir /build --param /props/flywoo_robo_rb1202.5_11500kv.json --auto
 version: '3.5'
 
 services:
@@ -12,7 +13,8 @@ services:
       context: .
       dockerfile: Dockerfile
     volumes:
-      - '../props:/props'
+      - './props:/props'
+      - './build:/build'
     environment:
       - LANG=en_US.UTF-8  
       - LANGUAGE=en_US:en  

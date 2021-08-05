@@ -3,3 +3,4 @@ include README.md
 include proply/sql/foil_simulator.sql
 include proply/foils/*.dat
 include proply/templates/blade_template.scad
+recursive-include package *

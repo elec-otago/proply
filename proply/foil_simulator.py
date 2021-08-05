@@ -62,7 +62,6 @@ import sqlite3
 
 conn_global = None
 
-from proply import sql
 import xfoil as xf
 
 
@@ -98,7 +97,7 @@ class XfoilSimulatedFoil(PlateSimulatedFoil):
                 # Create database tables
                 logger.info("Creating Database for the first time")
                 # fd = open('foil_simulator.sql', 'r')
-                fd = pkg_resources.open_text(sql, "foil_simulator.sql")
+                fd = pkg_resources.open_text("proply.sql", "foil_simulator.sql")
                 sqlFile = fd.read()
                 fd.close()
 

@@ -24,6 +24,15 @@ test_upload:
 	twine upload --repository testpypi dist/*
 
 upload:
-	rm -rf tproply.egg-info dist
+	rm -rf proply.egg-info dist
 	python3 setup.py sdist
 	twine upload --repository pypi dist/*
+
+.PHONY: run build
+run:
+	xhost +
+	docker-compose run --rm proply
+build:
+	docker-compose build # --no-cache
+
+# proply --bem --naca --n 40 --resolution 40 --param /props/flywoo_robo_rb1202.5_11500kv.json --auto
