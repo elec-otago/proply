@@ -81,11 +81,11 @@ class Prop:
         """Allowed chord as a function of radius (m)
         Limited by mechanical strength, or weight issues
 
-        k/r = tip_chord
-        c = k / r
+        k/r_max**2 = tip_chord => k = tip_chord * r_max**2
+        c = k / r**2
         """
-        k = self.param.tip_chord * self.param.radius
-        c = k / r
+        k = self.param.tip_chord * self.param.radius**2
+        c = k / r**2
 
         upper_limit = (2.0 * np.pi * r / (self.n_blades + 2.0)) / np.cos(twist)
 
