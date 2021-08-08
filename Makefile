@@ -29,10 +29,15 @@ upload:
 	twine upload --repository pypi dist/*
 
 .PHONY: run build
+#
+# Run the following command from the prompt when the docker container is run. The results will be in the build directory
+# that is mounted from the local filesystem to /build inside the docker container
+#
+#    proply --bem --naca --n 40 --resolution 40 --dir /build --param /props/flywoo_robo_rb1202.5_11500kv.json --auto
+#
 run:
 	xhost +
 	docker-compose run --rm proply
 build:
 	docker-compose build # --no-cache
 
-# proply --bem --naca --n 40 --resolution 40 --param /props/flywoo_robo_rb1202.5_11500kv.json --auto
