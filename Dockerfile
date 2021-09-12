@@ -12,13 +12,15 @@ RUN sed -i -e 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen && \
 ENV LANG en_US.UTF-8 
 
 WORKDIR /build
-RUN git clone https://github.com/mxjeff/xfoil-python.git
-WORKDIR /build/xfoil-python
-RUN python3 setup.py install
+# RUN git clone https://github.com/mxjeff/xfoil-python.git
+# WORKDIR /build/xfoil-python
+# RUN python3 setup.py install
+
+# RUN pip3 install git+https://github.com/mxjeff/xfoil-python.git
 
 WORKDIR /build/proply
 ADD . .
 
-RUN python3 setup.py install
+RUN pip3 install .
 
 WORKDIR /run

@@ -12,7 +12,7 @@ with open("README.md") as f:
 
 setup(
     name="proply",
-    version="0.1.4b6",
+    version="0.1.4b7",
     description="Convert TART observation data to Measurement Sets",
     long_description=readme,
     long_description_content_type="text/markdown",
@@ -20,7 +20,8 @@ setup(
     author="Tim Molteno",
     author_email="tim@elec.ac.nz",
     license="GPLv3",
-    install_requires=["scipy", "matplotlib", "pyaml", "numpy", "numpy-stl"],
+    install_requires=["scipy", "matplotlib", "pyaml", "numpy", "numpy-stl",
+                      "xfoil @ https://github.com/mxjeff/xfoil-python/tarball/master"],
     package_data={
         "proply": [
             "sql/foil_simulator.sql",

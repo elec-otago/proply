@@ -12,7 +12,7 @@ develop:
 # Build using the Blade Element Momentum method
 test:
 	mkdir -p ${BUILDIR}
-	proply --arad --bem  --n 40 --resolution ${RESOLUTION} --dir=${BUILDIR} --param='props/${TARGET}.json'
+	proply --naca --bem  --n 40 --resolution ${RESOLUTION} --dir=${BUILDIR} --param='props/${TARGET}.json'
 	meshlabserver -i ${BUILDIR}/${TARGET}_blade.stl -o ${BUILDIR}/${TARGET}_blade.stl -s meshclean.mlx
 
 lint:

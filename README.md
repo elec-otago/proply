@@ -16,7 +16,36 @@ Proply depends on a slightly modified version of xfoil-python. It should be inst
     cd xfoil-python
     pip3 install .
 
-## Creating a blade
+## Specifying a prop
+
+This is done using a JSON file. Here is an example:
+
+    {
+        "name": "FLYWOO_ROBO_RB1202.5",
+        
+        "altitude": 0.0,
+        "forward_airspeed": 0.0,
+        
+        "motor_Kv": 11500,
+        "motor_volts": 3.7,
+        "motor_no_load_current": 0.075,
+        "motor_winding_resistance": 0.035,
+        
+        "thrust": 0.5,
+        "blades": 3,
+
+        "radius": 0.02,
+        "tip_chord": 0.003,
+        "center_hole": 1.5e-3,
+        "scimitar_percent": -5.0,
+        "trailing_edge": 0.25,
+        "hub_radius": 0.004,
+        "hub_depth": 0.003
+    }
+
+The prop will automatically be optimized for the motor to operate at max efficiency at the specified thrust. For this to work, you need to put in the motor parameters.
+
+### Creating a blade
 
 A single blade is generated as an STL file using the command:
 
@@ -28,7 +57,7 @@ The mesh can be cleaned using meshlab to remove duplicate vertices with:
 
 ##  Using OpenSCAD to generate a propeller
 
-OpenSCAD imports the blade STL and generates a prop.
+Proply generates an OpenSCAD file. This file imports the blade STL and generates a propeller model.
 
 ## TODO
 
@@ -60,7 +89,7 @@ now delete all the other bits of your design (right click and delect the origina
 Then export this as an .stl file.
 
 
-# Step 4. Use OpenSCAD
+# Use OpenSCAD
 
 Import the .stl file inside openscad. The file prop5x3.scad shows how this is done.
 
