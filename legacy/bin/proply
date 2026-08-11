@@ -28,7 +28,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     # Set up Logging
-    path = 'logging.yaml'
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "logging.yaml")
     if os.path.exists(path):
         with open(path, 'rt') as f:
             config = yaml.load(f.read())

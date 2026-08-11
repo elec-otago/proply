@@ -13,8 +13,8 @@ services:
       context: .
       dockerfile: Dockerfile
     volumes:
-      - './props:/props'
-      - './build:/build'
+      - '../props:/props'
+      - '../build:/build'
     environment:
       - LANG=en_US.UTF-8  
       - LANGUAGE=en_US:en  
