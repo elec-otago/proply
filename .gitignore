@@ -66,6 +66,9 @@ docs/_build/
 # PyBuilder
 target/
 
+# proply-rs runtime polar cache
+foil_cache.json
+
 # IPython Notebook
 .ipynb_checkpoints
 
