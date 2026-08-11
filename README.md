@@ -61,6 +61,19 @@ Golden tests compare the BEM equations and optimizer against numpy/scipy
 reference values, and a FreeCAD headless check validates that the STEP
 solids are watertight with positive volume.
 
+## TODO
+
+- [ ] **ARA-D foil family (`--arad`)** — not yet ported; only NACA 4-digit
+      foils are implemented.
+- [ ] **GMSH meshing (`--mesh`)** — not yet ported; the design output is the
+      STEP file only.
+- [ ] **Version the port-verification tooling** — the reference scripts
+      (`build/pyref/`, FreeCAD STEP check) are gitignored and only exist on
+      this machine; move them into the repo (e.g. `proply-rs/tests/`) so a
+      fresh clone can re-run the checks.
+- [ ] **Clean up `images/prop5x3.png`** — leftover asset from the old Python
+      README; move it into `legacy/` or delete it.
+
 ## Legacy Python version
 
 The original Python `proply` package (scipy optimizer, OpenSCAD/STL output)
