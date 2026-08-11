@@ -1,0 +1,11 @@
+[package]
+name = "rust-foil"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+description = "A Rust port of XFOIL: viscous/inviscid panel-method analysis of airfoils"
+readme = "README.md"
+keywords = ["aerodynamics", "airfoil", "cfd", "panel-method", "xfoil"]
+categories = ["mathematics", "science"]
+
+[dependencies]
