@@ -159,6 +159,75 @@ fn test_aseq() {
 }
 
 #[test]
+fn aseq_par_matches_aseq() {
+    // The parallel sweep splits the alpha range into one chunk per rayon
+    // thread and warm-starts within each chunk, so converged values must
+    // match the serial sweep.  On an 8-thread pool this workload matches
+    // bit-for-bit; the tolerances cover other thread counts, where the
+    // chunk boundaries (and hence the cold-started stall points) differ.
+    let mut xf = new_solver();
+    xf.set_reynolds(1.0e6);
+    xf.set_max_iter(150);
+
+    // Serial and parallel sweeps must both start from the same fresh
+    // engine state (aseq_par clones, and a used engine would warm-start
+    // the clone from the previous sweep's solution).
+    let mut ser = xf.clone();
+    let serial = ser.aseq(-20.0, 20.0, 80);
+    let par = xf.aseq_par(-20.0, 20.0, 80);
+    assert_eq!(serial.len(), par.len());
+
+    let mut max_cl_err = 0.0f64;
+    let mut max_cd_err = 0.0f64;
+    let mut conv_diff = 0usize;
+    for (i, (s, p)) in serial.iter().zip(par.iter()).enumerate() {
+        close(s.0, p.0, 1.0e-9, &format!("alpha[{}]", i));
+        max_cl_err = max_cl_err.max((s.1 - p.1).abs());
+        max_cd_err = max_cd_err.max((s.2 - p.2).abs());
+        if s.5 != p.5 {
+            conv_diff += 1;
+        }
+    }
+    assert!(
+        max_cl_err < 5.0e-2,
+        "max CL error vs serial sweep: {}",
+        max_cl_err
+    );
+    assert!(
+        max_cd_err < 8.0e-3,
+        "max CD error vs serial sweep: {}",
+        max_cd_err
+    );
+    assert!(
+        conv_diff <= 2,
+        "convergence flags differ from the serial sweep at {} points",
+        conv_diff
+    );
+}
+
+#[test]
+fn aseq_par_falls_back_below_1e6() {
+    // Below Re = 1e6 the boundary-layer convergence is history-sensitive and
+    // the parallel sweep's cold-started chunk boundaries can land on
+    // different (non-)converged states, so aseq_par must run the serial path
+    // and return bit-identical results.
+    let mut xf = new_solver();
+    xf.set_reynolds(1.4e5);
+    xf.set_max_iter(150);
+
+    let mut ser = xf.clone();
+    let serial = ser.aseq(-20.0, 20.0, 80);
+    let par = xf.aseq_par(-20.0, 20.0, 80);
+    assert_eq!(serial.len(), par.len());
+    for (i, (s, p)) in serial.iter().zip(par.iter()).enumerate() {
+        assert_eq!(s.0, p.0, "alpha[{}]", i);
+        assert_eq!(s.1, p.1, "CL[{}]", i);
+        assert_eq!(s.2, p.2, "CD[{}]", i);
+        assert_eq!(s.5, p.5, "conv flag at alpha[{}]", i);
+    }
+}
+
+#[test]
 fn test_cseq() {
     let mut xf = new_solver();
     xf.set_reynolds(1.0e6);

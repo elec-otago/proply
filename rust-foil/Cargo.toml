@@ -9,3 +9,4 @@ keywords = ["aerodynamics", "airfoil", "cfd", "panel-method", "xfoil"]
 categories = ["mathematics", "science"]
 
 [dependencies]
+rayon = "1"
