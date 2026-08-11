@@ -36,6 +36,31 @@ so reruns are fast.
 
 ## Port notes
 
+- Angle conventions (the design twist of each blade element).  With
+  `u_0` the freestream axial velocity, `dv` the axial induction at the
+  disc, `a'` the tangential induction, and `omega` the angular velocity,
+  the local inflow angle measured from the rotor plane is
+  `phi = atan((u_0 + dv) / (omega·r·(1 − a')))` and the angle of attack is
+  `alpha = theta − phi`, with `theta` the blade pitch angle from the rotor
+  plane.  The design loop solves `theta` per station for the target
+  induced velocity at maximum efficiency, bounded to
+  `[phi − 8°, phi + 10°]` around the ideal inflow angle (so the design
+  angle of attack stays in `[−8°, +10°]`).  Positive `theta` rotates the
+  profile around its 0.67·chord point with the leading edge toward −z,
+  consistent with the positive-alpha → positive-CL convention of the
+  polar model.  Momentum theory is used in its classical second-order
+  form: the thrust uses `a(1 + a)` and the torque carries the
+  `(1 + a)` axial coupling (`d_t`/`d_m` in `optimize.rs`).
+- The Buhl (2005) turbulent-wake `CT(a)` relation (NREL/TP-500-36834,
+  Eqs. 1 + 18) is implemented as `ct_buhl`/`a_buhl` in `optimize.rs`
+  (golden-tested).  It is *not* wired into the design loop: it is
+  published in the decelerating-disk (wind-turbine) convention for
+  `a ∈ (0.4, 1)`, whereas the accelerating propeller state
+  (`u_disc = u_0 + dv`, `CT = 4a(1 + a)`) has no momentum-theory
+  breakdown — the canonical propeller code (XROTOR) likewise solves the
+  exact momentum balance without a Glauert-type correction.  The
+  functions are provided for brake-state / turbulent-wake momentum-model
+  work.
 - `optimize.rs` reproduces the Python BEM equations 1:1 (verified against
   numpy reference values in `tests/golden.rs`).  The scipy SLSQP/COBYLA
   optimizer is replaced by a box-constrained Nelder-Mead (with a quadratic

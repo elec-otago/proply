@@ -6,6 +6,13 @@
 //! simplex, candidate points projected onto the bounds).  All constraints
 //! in `bem_iterate` / `optimize_all` are simple variable bounds, so
 //! projection is exact.
+//!
+//! The Buhl (2005) turbulent-wake thrust-coefficient relation
+//! ([`ct_buhl`], [`a_buhl`]) is also implemented as a momentum-model tool.
+//! It is deliberately **not** part of the design loop: it is published in
+//! the decelerating-disk (wind-turbine) convention, whereas the
+//! accelerating propeller state has no momentum-theory breakdown.  See
+//! [`ct_buhl`] for the full convention note.
 
 use crate::simulator::FoilSimulator;
 use crate::foil::FoilLike;
@@ -208,6 +215,45 @@ pub fn dv_from_thrust(t: f64, r: f64, u_0: f64) -> f64 {
     -u_0 / 2.0
         + (std::f64::consts::PI * r.powi(2) * RHO.powi(2) * u_0.powi(2) + 2.0 * t * RHO).sqrt()
             / (2.0 * (std::f64::consts::PI).sqrt() * r * RHO)
+}
+
+/// Buhl (2005) thrust-coefficient relation — NREL/TP-500-36834, Eqs. 1 and
+/// 18.  The momentum relation `CT = 4·F·a·(1 − a)` is replaced, for the
+/// turbulent-wake state (`a > 0.4`), by the empirical curve
+/// `CT = 8/9 + (4F − 40/9)·a + (50/9 − 4F)·a²`, with `F` the tip/hub loss
+/// factor.  The two branches join C¹-continuously at `a = 0.4`
+/// (`CT = 0.96·F`).
+///
+/// Convention note: `a` is the axial induction factor of the
+/// *decelerating-disk* (wind-turbine) momentum theory, valid for
+/// `a ∈ [0, 1]`.  The accelerating propeller state (`u_disc = u_0 + dv`)
+/// has no momentum-theory breakdown — its relation is `CT = 4·a·(1 + a)`
+/// with `a = dv/u_0` — so the design loop does not use this curve; it is
+/// provided for momentum-model work in the heavily-loaded / turbulent-wake
+/// regime (e.g. brake-state analysis).
+pub fn ct_buhl(a: f64, f: f64) -> f64 {
+    if a <= 0.4 {
+        4.0 * f * a * (1.0 - a)
+    } else {
+        8.0 / 9.0 + (4.0 * f - 40.0 / 9.0) * a + (50.0 / 9.0 - 4.0 * f) * a * a
+    }
+}
+
+/// Inverse of [`ct_buhl`]: the axial induction factor `a` (decelerating-disk
+/// convention) for a given thrust coefficient `CT` and loss factor `F`.
+/// The momentum branch is inverted analytically (`a ≤ 0.4` for `CT ≤ 0.96F`);
+/// the turbulent-wake branch solves the quadratic, taking the root in
+/// `(0.4, 1)`.
+pub fn a_buhl(ct: f64, f: f64) -> f64 {
+    let q = ct / f;
+    if q <= 0.96 {
+        0.5 * (1.0 - (1.0 - q).sqrt())
+    } else {
+        let c2 = 50.0 / 9.0 - 4.0 * f;
+        let c1 = 4.0 * f - 40.0 / 9.0;
+        let c0 = 8.0 / 9.0 - ct;
+        (-c1 + (c1 * c1 - 4.0 * c2 * c0).sqrt()) / (2.0 * c2)
+    }
 }
 
 /// `optimize.error`: relative residual between two momentum states.

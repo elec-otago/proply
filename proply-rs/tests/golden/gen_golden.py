@@ -279,10 +279,52 @@ def gen_bem():
         json.dump(out, f, indent=1)
 
 
+# ---------------------------------------------------------------------------
+# 6. Buhl (2005) turbulent-wake CT(a) relation
+# ---------------------------------------------------------------------------
+def gen_buhl():
+    """Buhl (2005), NREL/TP-500-36834, Eqs. 1 + 18 (decelerating-disk
+    convention, a in [0, 1], F the tip/hub loss factor):
+        a <= 0.4:  CT = 4 F a (1 - a)
+        a >  0.4:  CT = 8/9 + (4F - 40/9) a + (50/9 - 4F) a^2
+    """
+    out = {}
+    a_grid = np.linspace(0.0, 0.999, 25)
+    for name, F in {"F1": 1.0, "F08": 0.8}.items():
+        ct = np.where(
+            a_grid <= 0.4,
+            4.0 * F * a_grid * (1.0 - a_grid),
+            8.0 / 9.0
+            + (4.0 * F - 40.0 / 9.0) * a_grid
+            + (50.0 / 9.0 - 4.0 * F) * a_grid ** 2,
+        )
+        out[name] = {"a": a_grid.tolist(), "ct": ct.tolist()}
+    # inverse: a(CT) for both loss factors
+    ct_pts = np.array([0.2, 0.5, 0.9, 0.96, 1.0, 1.2, 1.5, 1.9])
+    inv = {}
+    for name, F in {"F1": 1.0, "F08": 0.8}.items():
+        a_inv = []
+        for ct in ct_pts:
+            q = ct / F
+            if q <= 0.96:
+                a = 0.5 * (1.0 - np.sqrt(1.0 - q))
+            else:
+                c2 = 50.0 / 9.0 - 4.0 * F
+                c1 = 4.0 * F - 40.0 / 9.0
+                c0 = 8.0 / 9.0 - ct
+                a = (-c1 + np.sqrt(c1 * c1 - 4.0 * c2 * c0)) / (2.0 * c2)
+            a_inv.append(float(a))
+        inv[name] = a_inv
+    out["invert"] = {"ct": ct_pts.tolist(), "F1": inv["F1"], "F08": inv["F08"]}
+    with open(os.path.join(OUT, "buhl.json"), "w") as f:
+        json.dump(out, f, indent=1)
+
+
 if __name__ == "__main__":
     gen_naca4()
     gen_pchip()
     gen_polyfit()
     gen_motor()
     gen_bem()
+    gen_buhl()
     print("golden files written to", os.path.abspath(OUT))

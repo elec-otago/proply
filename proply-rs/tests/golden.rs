@@ -203,3 +203,37 @@ fn optimizer_matches_slsqp_reference() {
         g["slsqp_all"]["fun"].as_f64().unwrap()
     );
 }
+
+#[test]
+fn buhl_golden() {
+    // Buhl (2005) NREL/TP-500-36834 turbulent-wake CT(a) relation, Eqs. 1
+    // and 18 (decelerating-disk convention), verified against numpy in
+    // build/golden/gen_golden.py.
+    let g = golden("buhl.json");
+
+    // Forward relation on a grid, for F = 1 and F = 0.8.
+    for (name, f) in [("F1", 1.0), ("F08", 0.8)] {
+        let s = &g[name];
+        let a = arr(&s["a"]);
+        let want = arr(&s["ct"]);
+        let got: Vec<f64> = a.iter().map(|ai| proply_rs::optimize::ct_buhl(*ai, f)).collect();
+        near_array(&got, &want, 1e-12, &format!("ct_buhl {}", name));
+    }
+
+    // Inverse a_buhl(CT, F) across both branches.
+    let inv = &g["invert"];
+    let ct = arr(&inv["ct"]);
+    for (name, f) in [("F1", 1.0), ("F08", 0.8)] {
+        let want = arr(&inv[name]);
+        let got: Vec<f64> = ct.iter().map(|c| proply_rs::optimize::a_buhl(*c, f)).collect();
+        near_array(&got, &want, 1e-12, &format!("a_buhl {}", name));
+    }
+
+    // Round-trip: ct_buhl(a_buhl(CT)) == CT on both branches.
+    for f in [1.0, 0.8] {
+        for c in [0.2, 0.5, 0.9, 0.96, 1.0, 1.2, 1.5, 1.9] {
+            let a = proply_rs::optimize::a_buhl(c, f);
+            near(proply_rs::optimize::ct_buhl(a, f), c, 1e-9, &format!("round-trip F={} CT={}", f, c));
+        }
+    }
+}
