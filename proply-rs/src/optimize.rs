@@ -477,7 +477,7 @@ pub fn optimize_all<S: FoilSim>(
     let (_cl, _cd, phi) = precalc(fs, dv_goal, 0.0, 0.0, omega, r, dr, u_0, b);
     let chord0 = fs.chord();
     let bounds = [
-        Some((phi - 8.0_f64.to_radians(), phi + 10.0_f64.to_radians())),
+        Some((phi - 8.0_f64.to_radians(), phi + 15.0_f64.to_radians())),
         Some((dv_goal / 2.0, 2.0 * dv_goal)),
         Some((0.0, 0.2)),
         Some((0.0, maxchord)),

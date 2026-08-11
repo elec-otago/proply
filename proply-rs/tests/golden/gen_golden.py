@@ -264,7 +264,7 @@ def gen_bem():
     # SLSQP reference for optimize_all (min_all)
     x0 = np.array([phi, dv, 0.002, c])
     cons = [{"type": "ineq", "fun": lambda x: x[0] - (phi - np.radians(8))},
-            {"type": "ineq", "fun": lambda x: (phi + np.radians(10)) - x[0]},
+            {"type": "ineq", "fun": lambda x: (phi + np.radians(15)) - x[0]},
             {"type": "ineq", "fun": lambda x: x[1] - dv / 2},
             {"type": "ineq", "fun": lambda x: 2 * dv - x[1]},
             {"type": "ineq", "fun": lambda x: x[2]},

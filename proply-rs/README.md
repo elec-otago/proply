@@ -44,8 +44,8 @@ so reruns are fast.
   `alpha = theta − phi`, with `theta` the blade pitch angle from the rotor
   plane.  The design loop solves `theta` per station for the target
   induced velocity at maximum efficiency, bounded to
-  `[phi − 8°, phi + 10°]` around the ideal inflow angle (so the design
-  angle of attack stays in `[−8°, +10°]`).  Positive `theta` rotates the
+  `[phi − 8°, phi + 15°]` around the ideal inflow angle (so the design
+  angle of attack stays in `[−8°, +15°]`).  Positive `theta` rotates the
   profile around its 0.67·chord point with the leading edge toward −z,
   consistent with the positive-alpha → positive-CL convention of the
   polar model.  Momentum theory is used in its classical second-order
