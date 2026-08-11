@@ -3,7 +3,8 @@
 //! The propeller is written as an assembly: one blade part (a single
 //! watertight NURBS solid: upper loft, lower loft, trailing-edge cap and
 //! the two end caps) placed `n_blades` times around the hub, plus a hub
-//! part with the mounting-hole through-bore.
+//! part with the mounting-hole through-bore (`center_hole`), written as a
+//! single closed shell.
 //!
 //! Blade faces: 1 = upper loft (same_sense=false), 2 = lower loft, 3 = TE
 //! cap, 4 = hub end cap (same_sense=false), 5 = tip end cap.  Shared edges
@@ -255,45 +256,67 @@ pub fn write_prop(prop: &mut Prop, n_points: usize) -> Result<String, String> {
     b.finish().map_err(|e| format!("step finish: {}", e))
 }
 
-/// Build the hub solid: a cylinder (outer side plus two planar caps).
+/// Build the hub solid: a cylinder with a coaxial mounting-hole bore
+/// (`center_hole`), written as a single closed shell.
 ///
-/// The Python prop's mounting-hole through-bore is not included: step-io's
-/// multi-shell output (rings with inner bounds, or BREP_WITH_VOIDS) is not
-/// read back correctly by FreeCAD's OCCT importer (every face arrives as an
-/// open shell).  A plain cylinder imports reliably; the bore is a trivial
-/// pocket operation in any CAD package.
-///
-/// The circles are SINGLE full-circle edges shared by the side face and the
-/// caps; adjacent faces must reference the same edge entities or the shell
-/// does not close.
+/// Four faces share edges consistently so FreeCAD's OCCT importer sees one
+/// watertight solid: the outer cylindrical side, the bore side, and the two
+/// annular caps (ring faces with an inner bound).  Each circle level is
+/// split into two semicircular arcs so every arc is shared by exactly two
+/// faces (traversed in opposite directions); the side faces carry one seam
+/// edge each, traversed once each way — the single-loop cylinder
+/// construction that imports reliably.
 fn build_hub(
     b: &mut step_io::StepBuilder,
     hub_part: step_io::build::Part,
     param: &crate::design_parameters::DesignParameters,
 ) -> Result<(), String> {
     let hub_r = (param.hub_radius + 0.05e-3) * MM;
+    let bore_r = param.center_hole * MM;
+    if bore_r >= hub_r {
+        return Err(format!(
+            "step: center_hole ({:.3} mm) must be smaller than the hub radius ({:.3} mm)",
+            bore_r, hub_r
+        ));
+    }
     let hh = param.hub_depth * MM;
     let z0 = -hh / 2.0;
     let z1 = hh / 2.0;
 
-    // One seam vertex per circle level (angle 0).
-    let a_bot = b.vertex([hub_r, 0.0, z0]).map_err(err)?;
-    let a_top = b.vertex([hub_r, 0.0, z1]).map_err(err)?;
+    // Two seam vertices per circle level: angle 0 (+X) and angle π (−X).
+    let b0 = b.vertex([hub_r, 0.0, z0]).map_err(err)?;
+    let b1 = b.vertex([-hub_r, 0.0, z0]).map_err(err)?;
+    let t0 = b.vertex([hub_r, 0.0, z1]).map_err(err)?;
+    let t1 = b.vertex([-hub_r, 0.0, z1]).map_err(err)?;
+    let c0 = b.vertex([bore_r, 0.0, z0]).map_err(err)?;
+    let c1 = b.vertex([-bore_r, 0.0, z0]).map_err(err)?;
+    let d0 = b.vertex([bore_r, 0.0, z1]).map_err(err)?;
+    let d1 = b.vertex([-bore_r, 0.0, z1]).map_err(err)?;
 
+    // Each full circle is split into two semicircular arcs (CCW when viewed
+    // from +Z): arc0 runs angle 0 → π, arc1 runs π → 2π.
     let circle_frame = |z: f64| Frame {
         origin: [0.0, 0.0, z],
         axis: [0.0, 0.0, 1.0],
         ref_dir: [1.0, 0.0, 0.0],
     };
-    let outer_bot_full = b
-        .edge(a_bot, a_bot, CurveInput::Circle(circle_frame(z0), hub_r))
-        .map_err(err)?;
-    let outer_top_full = b
-        .edge(a_top, a_top, CurveInput::Circle(circle_frame(z1), hub_r))
-        .map_err(err)?;
-    let outer_seam = b.edge(a_bot, a_top, CurveInput::Line).map_err(err)?;
+    // Outer circle arcs (hub radius).
+    let bo0 = b.edge(b0, b1, CurveInput::Circle(circle_frame(z0), hub_r)).map_err(err)?;
+    let bo1 = b.edge(b1, b0, CurveInput::Circle(circle_frame(z0), hub_r)).map_err(err)?;
+    let to0 = b.edge(t0, t1, CurveInput::Circle(circle_frame(z1), hub_r)).map_err(err)?;
+    let to1 = b.edge(t1, t0, CurveInput::Circle(circle_frame(z1), hub_r)).map_err(err)?;
+    // Bore circle arcs (center_hole radius).
+    let bi0 = b.edge(c0, c1, CurveInput::Circle(circle_frame(z0), bore_r)).map_err(err)?;
+    let bi1 = b.edge(c1, c0, CurveInput::Circle(circle_frame(z0), bore_r)).map_err(err)?;
+    let ti0 = b.edge(d0, d1, CurveInput::Circle(circle_frame(z1), bore_r)).map_err(err)?;
+    let ti1 = b.edge(d1, d0, CurveInput::Circle(circle_frame(z1), bore_r)).map_err(err)?;
+    // Seams at angle 0, traversed once each way by their side face.
+    let seam_o = b.edge(b0, t0, CurveInput::Line).map_err(err)?;
+    let seam_i = b.edge(c0, d0, CurveInput::Line).map_err(err)?;
 
-    let side = b
+    // Outer cylindrical side.  Single loop: bottom circle CCW from +Z (both
+    // arcs), up the seam, top circle CW from +Z (both arcs), down the seam.
+    let outer_side = b
         .face(
             SurfaceInput::Cylinder(
                 Frame { origin: [0.0, 0.0, z0], axis: [0.0, 0.0, 1.0], ref_dir: [1.0, 0.0, 0.0] },
@@ -301,31 +324,65 @@ fn build_hub(
             ),
             true,
             vec![FaceBoundInput::outer(vec![
-                (outer_bot_full, true),
-                (outer_seam, true),
-                (outer_top_full, false),
-                (outer_seam, false),
+                (bo0, true),
+                (bo1, true),
+                (seam_o, true),
+                (to1, false),
+                (to0, false),
+                (seam_o, false),
             ])],
         )
         .map_err(err)?;
 
+    // Bore side; the outward normal points toward the axis, so the surface
+    // normal (+radial) is inverted (same_sense=false).  Same single-loop
+    // construction as the outer side, with the loop mirrored: seam up, top
+    // circle CCW from +Z, seam down, bottom circle CW from +Z.
+    let bore_side = b
+        .face(
+            SurfaceInput::Cylinder(
+                Frame { origin: [0.0, 0.0, z0], axis: [0.0, 0.0, 1.0], ref_dir: [1.0, 0.0, 0.0] },
+                bore_r,
+            ),
+            false,
+            vec![FaceBoundInput::outer(vec![
+                (seam_i, true),
+                (ti0, true),
+                (ti1, true),
+                (seam_i, false),
+                (bi1, false),
+                (bi0, false),
+            ])],
+        )
+        .map_err(err)?;
+
+    // Bottom annular cap (normal = −Z).  Outer bound runs CW from +Z (CCW
+    // viewed from −Z); the bore's inner bound runs the opposite way.
     let cap_bot = b
         .face(
             SurfaceInput::Plane(Frame { origin: [0.0, 0.0, z0], axis: [0.0, 0.0, -1.0], ref_dir: [1.0, 0.0, 0.0] }),
             true,
-            vec![FaceBoundInput::outer(vec![(outer_bot_full, false)])],
+            vec![
+                FaceBoundInput::outer(vec![(bo0, false), (bo1, false)]),
+                FaceBoundInput::inner(vec![(bi0, true), (bi1, true)]),
+            ],
         )
         .map_err(err)?;
 
+    // Top annular cap (normal = +Z).  Outer bound runs CCW from +Z; the
+    // bore's inner bound runs the opposite way.
     let cap_top = b
         .face(
             SurfaceInput::Plane(Frame { origin: [0.0, 0.0, z1], axis: [0.0, 0.0, 1.0], ref_dir: [1.0, 0.0, 0.0] }),
             true,
-            vec![FaceBoundInput::outer(vec![(outer_top_full, true)])],
+            vec![
+                FaceBoundInput::outer(vec![(to0, true), (to1, true)]),
+                FaceBoundInput::inner(vec![(ti0, false), (ti1, false)]),
+            ],
         )
         .map_err(err)?;
 
-    b.solid(hub_part, "hub", vec![side, cap_bot, cap_top])
+    b.solid(hub_part, "hub", vec![outer_side, bore_side, cap_bot, cap_top])
         .map_err(err)?;
     Ok(())
 }

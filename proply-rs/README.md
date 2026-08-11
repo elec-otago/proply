@@ -24,10 +24,11 @@ hub and `blades` copies of the blade solid.  `--auto` re-runs the design
 loop, reducing the thrust target until the torque drops below
 `1.5 × Qmax`.
 
-The hub is currently a plain cylinder: the Python's `center_hole` mounting
-bore is a trivial pocket operation in any CAD package, and step-io's
-multi-shell output (rings with inner bounds / `BREP_WITH_VOIDS`) is not
-read back correctly by FreeCAD's OCCT importer.
+The hub includes the `center_hole` mounting bore as a single closed shell:
+outer and bore cylinders plus two annular caps (ring faces with an inner
+bound), written so every circular edge is split into two semicircular arcs
+shared by exactly two faces.  FreeCAD's OCCT importer reads the solid back
+as watertight (`freecadcmd` + `Part.read` reports valid, closed solids).
 
 The first run simulates a polar (an 80-point alpha sweep) for each blade
 station; polars are cached in `foil_cache.json` in the working directory,
