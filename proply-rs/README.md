@@ -44,16 +44,12 @@ so reruns are fast.
 - `foil_simulator.rs` replicates the polar pipeline: Reynolds number
   snapped to `np.geomspace(3e4, 2e6, 20)`, degree-9 polynomial fit of
   cl/cd over alpha in radians, flat-plate fallback outside the envelope.
-  Two deliberate deviations from the Python, both required for correct
-  viscous results with rust-foil:
-  - the airfoil is **normalized to unit chord** before the solve
-    (xfoil-python's Fortran library normalizes internally; rust-foil's
-    `set_airfoil` does not, and a chord-scaled input breaks the viscous
-    solution), and
-  - the trailing edge is **closed** for the polar solve (the ~0.25 mm
-    design gap has negligible aerodynamic effect but destabilizes the
-    boundary-layer convergence below Re ≈ 2e5).  The blade geometry keeps
-    the gap.
+  One deliberate deviation from the Python: the airfoil's trailing edge is
+  **closed** for the polar solve (the ~0.25 mm design gap has negligible
+  aerodynamic effect but destabilizes the boundary-layer convergence below
+  Re ≈ 2e5).  The blade geometry keeps the gap.  (Coordinate normalization
+  is handled by rust-foil itself — its `set_airfoil` normalizes by default,
+  matching canonical XFOIL.)
 - The STEP writer (`step_out.rs`) builds the blade as a single watertight
   NURBS solid: cubic B-splines interpolate each station profile (Piegl &
   Tiller A9.1 with averaged knots), and the upper/lower/TE-cap/end-cap

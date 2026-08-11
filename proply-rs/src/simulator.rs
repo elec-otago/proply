@@ -214,13 +214,16 @@ fn flat_plate_polys() -> (Vec<f64>, Vec<f64>) {
 
 /// Build the airfoil coordinate pair fed to rust-foil for a polar sweep,
 /// exactly as the Python's `xfoil_simulate_polars` does — except that the
-/// trailing edge is closed and the coordinates are normalized to unit chord.
+/// trailing edge is closed.
 ///
-/// Both deviations are required for correct viscous results: the proply TE
-/// gap (~0.25 mm) has negligible aerodynamic effect but destabilizes the
-/// low-Reynolds boundary-layer solve, and rust-foil's `set_airfoil` does
-/// not normalize its input (xfoil-python's Fortran library does), so a
-/// chord-scaled input breaks the viscous solution.
+/// rust-foil normalizes the input to unit chord itself (its `set_airfoil`
+/// default, matching canonical XFOIL), so the chord-scaled coordinates can
+/// be passed through as-is.  The TE close is a deliberate deviation: the
+/// proply TE gap (~0.25 mm) has negligible aerodynamic effect but
+/// destabilizes the low-Reynolds boundary-layer solve (rust-foil, like the
+/// XFOIL family, struggles to converge an open-TE boundary layer below
+/// Re ~ 2e5; the converged values there are non-physical).  The design
+/// geometry keeps the gap.
 fn prepare_airfoil_coords(foil: &impl FoilLike, n_points: usize) -> (Vec<f64>, Vec<f64>) {
     let (xl, yl, xu, yu) = foil.get_shape_points(n_points);
 
@@ -254,20 +257,6 @@ fn prepare_airfoil_coords(foil: &impl FoilLike, n_points: usize) -> (Vec<f64>, V
     kept_x[n - 1] = mean_x;
     kept_y[n - 1] = mean_y;
 
-    // Normalize to unit chord (see the function docs above).
-    let mut mn = f64::INFINITY;
-    let mut mx = f64::NEG_INFINITY;
-    for x in &kept_x {
-        mn = mn.min(*x);
-        mx = mx.max(*x);
-    }
-    let chord = mx - mn;
-    for v in kept_x.iter_mut() {
-        *v = (*v - mn) / chord;
-    }
-    for v in kept_y.iter_mut() {
-        *v /= chord;
-    }
     (kept_x, kept_y)
 }
 
@@ -378,9 +367,11 @@ mod tests {
     }
 
     #[test]
-    fn airfoil_coords_are_closed_and_unit_chord() {
+    fn airfoil_coords_close_the_trailing_edge() {
         // Regression test for the polar-preparation fix: rust-foil needs a
-        // closed-TE, unit-chord airfoil or the viscous solution breaks.
+        // closed-TE airfoil or the low-Reynolds viscous solution breaks.
+        // (Normalization is rust-foil's own default now; the coordinates
+        // stay chord-scaled here.)
         let mut f = Naca4::new(0.02, 0.10, 0.0, 0.4);
         f.base.set_trailing_edge(0.25 / 1000.0);
         let (x, y) = prepare_airfoil_coords(&f, 42);
@@ -389,15 +380,12 @@ mod tests {
         // Closed TE: the first and last points coincide.
         assert!((x[0] - x[n - 1]).abs() < 1e-12, "TE not closed");
         assert!((y[0] - y[n - 1]).abs() < 1e-12, "TE not closed");
-        // Unit chord, starting at x = 0.
-        let mut mn = f64::INFINITY;
+        // Coordinates are still chord-scaled (max x ~ chord, not 1).
         let mut mx = f64::NEG_INFINITY;
         for v in &x {
-            mn = mn.min(*v);
             mx = mx.max(*v);
         }
-        assert!(mn.abs() < 1e-12, "min x {}", mn);
-        assert!((mx - 1.0).abs() < 1e-9, "chord {}", mx);
+        assert!((mx - 0.02).abs() < 1e-3, "max x {} (chord-scaled)", mx);
         // 84 points (42 per side), and the LE is a single point.
         assert_eq!(n, 84);
     }
