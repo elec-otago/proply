@@ -43,6 +43,10 @@ This writes `build/out/<name>.step` — an assembly containing the hub and
 - `--auto` re-runs the design loop, reducing the thrust target until the
   torque drops below `1.5 × Qmax`.
 - `--step-file <path>` overrides the output STEP file name.
+- `--lifting-line [--ar N]` selects the coupled lifting-line / vortex design
+  (spanwise-induced losses from the trailed wake instead of the empirical
+  tip-loss factor; `--ar` targets a minimum blade aspect ratio). Technique
+  described in detail in [proply-rs/README.md](proply-rs/README.md).
 - The first run simulates an 80-point alpha sweep per blade station; polars
   are cached in `foil_cache.json` in the working directory, so reruns are
   fast.

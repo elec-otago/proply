@@ -30,6 +30,14 @@ pub struct DesignParameters {
     pub motor_winding_resistance: f64,
     pub motor_no_load_current: f64,
     pub scimitar_percent: f64,
+    /// Number of control points for the smooth (cubic-spline) blade chord
+    /// distribution used by the lifting-line design (default 3).
+    #[serde(default = "default_chord_spline_n")]
+    pub chord_spline_n: usize,
+}
+
+fn default_chord_spline_n() -> usize {
+    3
 }
 
 impl Default for DesignParameters {
@@ -51,6 +59,7 @@ impl Default for DesignParameters {
             motor_winding_resistance: d(0.206),
             motor_no_load_current: d(0.5),
             scimitar_percent: d(0.0),
+            chord_spline_n: 3,
         }
     }
 }

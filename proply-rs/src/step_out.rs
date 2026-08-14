@@ -32,6 +32,18 @@ fn err<E: std::fmt::Display>(e: E) -> String {
     format!("step: {}", e)
 }
 
+/// Write `text` to `path`, creating the parent directory first if it does not
+/// yet exist (e.g. `build/out/`), so `fs::write` does not fail with "No such
+/// file or directory".
+pub fn write_step_file(path: &str, text: &str) -> std::io::Result<()> {
+    if let Some(parent) = std::path::Path::new(path).parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)?;
+        }
+    }
+    std::fs::write(path, text)
+}
+
 /// Convert a non-rational curve to the step-io input type.
 fn to_step_curve(c: &NurbsCurve) -> step_io::build::NurbsCurve {
     step_io::build::NurbsCurve {

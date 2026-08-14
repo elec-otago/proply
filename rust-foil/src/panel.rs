@@ -5,7 +5,7 @@
 
 use crate::solve::{baksub, ludcmp};
 use crate::spline::segspl;
-use crate::state::{IQX, IWX, Xfoil};
+use crate::state::{IQX, IWX, IZX, Xfoil};
 use crate::utils::atanc;
 
 /// Sets angles of airfoil panels.
@@ -892,6 +892,19 @@ pub fn qdcalc(xf: &mut Xfoil) {
         xf.dij[Xfoil::d_index(n, j)] = xf.dij[Xfoil::d_index(n - 1, j)];
     }
 
+    // Build the transposed copy of dij.  Consumers (setbl/ueset/update) sweep
+    // the influence index `j` innermost for a fixed station `i`; dij is stored
+    // j-major (offset j*IZX + i), so that sweep strides by IZX elements and
+    // misses the cache.  dij_t stores the same matrix i-major
+    // (offset i*IZX + j) so the identical read order becomes contiguous.  The
+    // transpose is exact — same values, same FP order — so results are
+    // bit-identical to direct dij reads.
+    for i in 0..IZX {
+        for j in 0..IZX {
+            xf.dij_t[i * IZX + j] = xf.dij[j * IZX + i];
+        }
+    }
+
     xf.lwdij = true;
 }
 
@@ -1313,7 +1326,7 @@ pub fn ueset(xf: &mut Xfoil) {
             for js in 0..2 {
                 for jbl in 2..=xf.nbl[js] as usize {
                     let j = xf.ipan[js][jbl] as usize;
-                    let ue_m = -xf.vti[is][ibl] * xf.vti[js][jbl] * xf.dij[Xfoil::d_index(i, j)];
+                    let ue_m = -xf.vti[is][ibl] * xf.vti[js][jbl] * xf.dij_t[i * IZX + j];
                     dui += ue_m * xf.mass[js][jbl];
                 }
             }

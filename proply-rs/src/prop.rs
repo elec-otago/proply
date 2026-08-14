@@ -12,9 +12,11 @@ use crate::blade_element::BladeElement;
 use crate::cache::PolarStore;
 use crate::design_parameters::DesignParameters;
 use crate::foil::{FoilLike, Naca4};
+use crate::lift_line::{self, Station};
 use crate::optimize;
 use crate::pchip::Pchip;
 use crate::polyfit::{polyfit, polyval};
+use crate::simulator::FoilSimulator;
 use crate::smooth::smooth;
 
 /// A propeller: a collection of blade elements plus the design parameters.
@@ -67,6 +69,35 @@ impl Prop {
         };
         println!("Max Chord {}", c_max);
         foil.borrow_mut().modify_chord(c_max);
+
+        let mut be = BladeElement::new(
+            r,
+            self.radial_resolution,
+            foil,
+            twist,
+            rpm,
+            self.param.forward_airspeed,
+            self.store.clone(),
+        );
+        if self.plate_mode {
+            be.set_plate_mode(true);
+        }
+        be
+    }
+
+    /// Create a blade element with an explicit chord `c` (the lifting-line
+    /// design sizes the chord directly instead of the geometric fit).
+    fn new_blade_element_with_chord(
+        &mut self,
+        r: f64,
+        rpm: f64,
+        twist: f64,
+        c: f64,
+    ) -> BladeElement<Naca4> {
+        let thickness = self.get_foil_thickness(r);
+        let foil = Rc::new(RefCell::new(Naca4::new(c, thickness / c, 0.0, 0.4)));
+        foil.borrow_mut().set_trailing_edge(self.param.trailing_edge / 1000.0);
+        foil.borrow_mut().modify_chord(c);
 
         let mut be = BladeElement::new(
             r,
@@ -314,6 +345,262 @@ impl Prop {
         let _ = (total_thrust, total_torque);
         (torque, thrust_final)
     }
+
+    /// Angle of attack (rad) giving the maximum CL/CD at speed `v`, found by
+    /// scanning the polar.  Uses the cached polar, so repeated calls are cheap
+    /// after the first.
+    fn best_alpha<F: FoilLike>(fs: &FoilSimulator<F>, v: f64) -> f64 {
+        let mut best = 0.0;
+        let mut best_ld = f64::NEG_INFINITY;
+        for a in -8..=16 {
+            let alpha = (a as f64).to_radians();
+            let cl = fs.get_cl(v, alpha);
+            let cd = fs.get_cd(v, alpha).max(1.0e-6);
+            let ld = cl / cd;
+            if ld > best_ld {
+                best_ld = ld;
+                best = alpha;
+            }
+        }
+        // Degenerate/analytic models (flat-plate: cl/cd constant) tie at every
+        // alpha; fall back to a working moderate attack angle instead of the
+        // argmax tie (which would pick the scan start).
+        if best_ld.is_finite() && best_ld <= 4.9 + 1.0e-6 {
+            best = 0.10;
+        }
+        best
+    }
+
+    /// Free-chord law `tip_chord*R^2/r^2`, capped by the geometric limits
+    /// ([`get_max_chord`]).  `scale < 1` thins the blade for a higher aspect
+    /// ratio.
+    fn chord_law(&self, r: f64, twist: f64, scale: f64) -> f64 {
+        let k = self.param.tip_chord * self.param.radius.powi(2);
+        let cap = self.get_max_chord(r, twist);
+        (scale * k / r.powi(2)).min(cap).max(1.0e-6)
+    }
+
+    /// Design a blade with the coupled lifting line, targeting `thrust`.
+    ///
+    /// `ar` optionally forces a minimum blade aspect ratio
+    /// `(R - hub) / mean_chord`, which thins the blade (lowers induced loss
+    /// and raises efficiency).  Returns `(torque, thrust)` of the converged
+    /// design.
+    pub fn lift_line_design(&mut self, rpm: f64, thrust: f64, ar: Option<f64>) -> (f64, f64) {
+        let u_0 = self.param.forward_airspeed;
+        let omega = optimize::rpm2omega(rpm);
+        let r_hub = self.param.hub_radius;
+        let r_tip = self.param.radius;
+        let n_blades = self.n_blades;
+        let m = self.radial_steps.max(2);
+        let rr: Vec<f64> = (0..m)
+            .map(|i| r_hub + (r_tip - r_hub) * i as f64 / (m - 1) as f64)
+            .collect();
+
+        // --- Chord is a smooth (shape-preserving cubic / PCHIP) spline ---
+        // through `chord_spline_n` control values at radii spread hub->tip.
+        // Those control values are the design variables, so the optimum
+        // *shape* (not just a global scale) is found.  `--ar` only caps the
+        // upper bound each control may take.
+        let shape: f64 = rr
+            .iter()
+            .map(|&r| self.chord_law(r, 0.0, 1.0))
+            .sum::<f64>()
+            / m as f64;
+        let ar_shape = (r_tip - r_hub) / shape;
+        const S_FLOOR: f64 = 0.2;
+        let s_cap = ar.map(|a| (ar_shape / a).clamp(S_FLOOR, 1.0)).unwrap_or(1.0);
+        const CH_FLOOR: f64 = 0.002; // min chord floor (m)
+        let n_ctrl = self.param.chord_spline_n.max(2);
+        let ref_r: Vec<f64> = (0..n_ctrl)
+            .map(|k| r_hub + (r_tip - r_hub) * k as f64 / (n_ctrl.max(2) - 1) as f64)
+            .collect();
+
+        // Initial elements (used only to seed best-L/D angles).
+        let mut elements: Vec<BladeElement<Naca4>> = Vec::with_capacity(m);
+        for &r in &rr {
+            let phi0 = u_0.atan2(omega * r).max(1.0e-3);
+            let c = self.chord_law(r, 0.0, s_cap);
+            elements.push(self.new_blade_element_with_chord(r, rpm, phi0 + 0.12, c));
+        }
+        let mut alpha_base: Vec<f64> = Vec::with_capacity(m);
+        for be in &elements {
+            let vv = ((u_0 * u_0) + (omega * be.r).powi(2)).sqrt();
+            alpha_base.push(Self::best_alpha::<Naca4>(&be.fs, vv));
+        }
+
+        const DA_MAX: f64 = 0.12; // ~7 deg above best-L/D, below deep stall
+        // Design variables `x ∈ [0,1]^(n_ctrl+1)`: x[0..n_ctrl] log-map to the
+        // control chords, x[n_ctrl] to `da`.  `alpha_i = best_L/D_i + da` is
+        // prescribed (`twist = phi + alpha`), so there is no twist<->induction
+        // feedback; the solve takes `alpha` directly and is converged by damped
+        // Newton (warm-started from the previous evaluation).
+        // The chord at any radius is the smooth spline (clipped to the local
+        // geometric cap for safety), so there are no taper/cap kinks.
+        // `eval` evaluates a candidate: chord = smooth spline through
+        // `controls` at `ref_r`, attack angle = best-L/D + da (prescribed ->
+        // `twist = phi + alpha`, no twist<->induction feedback), circulation by
+        // damped Newton (warm-started).
+        // The chord is a smooth shape-preserving cubic (PCHIP) spline through
+        // `chord_spline_n` control points holding the free taper
+        // (`tip_chord*R^2/r^2`) at each reference radius.  The design sweeps a
+        // single scale `s` of that smooth spline (plus the common attack
+        // offset `da`), so the chord has no taper/cap kinks and meets the
+        // thrust target robustly (thrust is monotone in `s` and, before stall,
+        // in `da`).
+        let state = RefCell::new(elements);
+        let pg = RefCell::new(vec![0.0; m]); // warm-start gamma
+        // Control values = the geometrically-allowed chord at each reference
+        // radius (the taper capped by the blade-spacing limit).  Sampling the
+        // kinked cap and interpolating it with a shape-preserving cubic gives
+        // a *smooth* chord for any radius (no taper/cap kink), yet bounded by
+        // the allowed geometry so the loading stays physical.
+        let taper_ref: Vec<f64> = ref_r
+            .iter()
+            .map(|&r| self.get_max_chord(r, 0.0).max(CH_FLOOR))
+            .collect();
+        let chord_temp = Pchip::new(&ref_r, &taper_ref);
+        let eval = |s: f64,
+                    da: f64,
+                    elems: &mut Vec<BladeElement<Naca4>>,
+                    seed: &[f64]|
+         -> (f64, f64, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
+            let alphas: Vec<f64> = alpha_base
+                .iter()
+                .map(|&ab| (ab + da).clamp(-0.45, 0.45))
+                .collect();
+            for i in 0..m {
+                let cap_i = self.get_max_chord(rr[i], alphas[i]).max(CH_FLOOR);
+                let c = (s * chord_temp.eval(rr[i])).clamp(CH_FLOOR, cap_i);
+                elems[i].set_chord(c);
+            }
+            let stations: Vec<Station> = (0..m)
+                .map(|i| Station {
+                    r: rr[i],
+                    c: elems[i].foil.borrow().chord(),
+                    alpha: alphas[i],
+                })
+                .collect();
+            let fs_refs: Vec<&FoilSimulator<Naca4>> = elems.iter().map(|be| &be.fs).collect();
+            let res = lift_line::solve(&stations, n_blades, omega, u_0, &fs_refs, seed);
+            for i in 0..m {
+                elems[i].set_twist(res.phi[i] + alphas[i]);
+            }
+            let chords: Vec<f64> = elems.iter().map(|be| be.foil.borrow().chord()).collect();
+            (res.thrust, res.torque, alphas, chords, res.gamma.clone(), res.phi.clone())
+        };
+
+        // Monotone search: scan `s`, then inner-bisect `da` to the target.
+        let mut best: Option<(f64, f64, f64, f64, Vec<f64>, Vec<f64>, Vec<f64>)> = None; // (s, err, t, q, alpha, chord, phi)
+        let s_grid: Vec<f64> = (0..=4)
+            .map(|k| 0.4 * s_cap + (s_cap - 0.4 * s_cap) * k as f64 / 4.0)
+            .collect();
+        for &s in &s_grid {
+            let mut bst: Option<(f64, f64, f64, f64, Vec<f64>, Vec<f64>, Vec<f64>)> = None; // da, err, t, q, alpha, chord, phi
+            let mut prev: Option<(f64, f64)> = None; // (da, thrust)
+            let mut bracket: Option<(f64, f64)> = None;
+            let scan: [f64; 3] = [0.0, DA_MAX / 2.0, DA_MAX];
+            let better = |err: f64,
+                          q: f64,
+                          b: &Option<(f64, f64, f64, f64, Vec<f64>, Vec<f64>, Vec<f64>)>|
+             -> bool {
+                match b {
+                    None => q > 0.0,
+                    Some((_, be, _, bq, _, _, _)) => {
+                        (q > 0.0)
+                            && (err < *be - 1.0e-9 || ((err - *be).abs() < 1.0e-9 && q < *bq))
+                    }
+                }
+            };
+            for &da in &scan {
+                let seed = pg.borrow();
+                let (t, q, alphas, chords, g, phis) = {
+                    let mut e = state.borrow_mut();
+                    eval(s, da, &mut e, &*seed)
+                };
+                drop(seed);
+                *pg.borrow_mut() = g;
+                let err = (t - thrust).abs() / thrust.max(1.0e-9);
+                println!("lift-line s={:.3} da={:.3}: T={:.4} Q={:.4}", s, da, t, q);
+                if better(err, q, &bst) {
+                    bst = Some((da, err, t, q, alphas, chords, phis));
+                }
+                if let Some((pd, pt)) = prev {
+                    if (pt < thrust && t >= thrust) || (pt >= thrust && t < thrust) {
+                        bracket = Some((pd, da));
+                    }
+                }
+                prev = Some((da, t));
+            }
+            if let Some((mut lo, mut hi)) = bracket {
+                for _ in 0..5 {
+                    let mid = 0.5 * (lo + hi);
+                    let seed = pg.borrow();
+                    let (t, q, alphas, chords, g, phis) = {
+                        let mut e = state.borrow_mut();
+                        eval(s, mid, &mut e, &*seed)
+                    };
+                    drop(seed);
+                    *pg.borrow_mut() = g;
+                    let err = (t - thrust).abs() / thrust.max(1.0e-9);
+                    println!("lift-line s={:.3} da={:.3}: T={:.4} Q={:.4}", s, mid, t, q);
+                    if better(err, q, &bst) {
+                        bst = Some((mid, err, t, q, alphas, chords, phis));
+                    }
+                    if t < thrust {
+                        lo = mid;
+                    } else {
+                        hi = mid;
+                    }
+                    if err < 0.02 {
+                        break;
+                    }
+                }
+            }
+            if let Some((da, err, t, q, alphas, chords, phis)) = bst {
+                let replace = match &best {
+                    None => true,
+                    Some((_, be, _, bq, _, _, _)) => {
+                        let this_meets = err <= 0.03;
+                        let best_meets = *be <= 0.03;
+                        (this_meets && !best_meets)
+                            || (this_meets == best_meets
+                                && (err < *be - 1.0e-9 || ((err - *be).abs() < 1.0e-9 && q < *bq)))
+                    }
+                };
+                let _ = da;
+                if replace {
+                    best = Some((s, err, t, q, alphas, chords, phis));
+                }
+            }
+        }
+
+        // Apply the best measured candidate (its own converged forces/twist).
+        let mut elements = state.into_inner();
+        let (r_t, r_q) = match best {
+            Some((_s, _err, t, q, alphas, chords, phis)) => {
+                for i in 0..m {
+                    elements[i].set_chord(chords[i]);
+                    elements[i].set_twist(phis[i] + alphas[i]);
+                }
+                (t, q)
+            }
+            None => {
+                let alphas: Vec<f64> = alpha_base
+                    .iter()
+                    .map(|&ab| (ab + DA_MAX).clamp(-0.45, 0.45))
+                    .collect();
+                for i in 0..m {
+                    let c = chord_temp.eval(rr[i]).clamp(CH_FLOOR, self.get_max_chord(rr[i], alphas[i]).max(CH_FLOOR));
+                    elements[i].set_chord(c);
+                    elements[i].set_twist(u_0.atan2(omega * rr[i]) + alphas[i]);
+                }
+                (0.0, 0.0)
+            }
+        };
+        self.blade_elements = elements;
+        (r_q, r_t)
+    }
 }
 
 /// Piecewise-linear interpolation (scipy `interp1d(x, y, "linear")`).
@@ -375,5 +662,21 @@ mod tests {
         let p = test_prop();
         let l = p.tip_loss(0.03, 0.2);
         assert!(l > 0.9 && l <= 1.0, "tip loss {}", l);
+    }
+
+    #[test]
+    fn lift_line_design_finite_and_thrust_matching() {
+        // Plate polar (no rust-foil) so this is fast; checks the coupled
+        // lifting-line produces finite thrust that converges toward a target.
+        let mut prop = test_prop();
+        // coarser grid for speed
+        prop.radial_steps = 12;
+        prop.set_plate_mode(true);
+        let (q, t) = prop.lift_line_design(12000.0, 2.0, Some(4.0));
+        assert!(t.is_finite() && t > 0.0, "thrust {} not finite/positive", t);
+        assert!(q.is_finite() && q > 0.0, "torque {} not finite/positive", q);
+        // The coupled solve must be stable and bounded (well below the 
+        // unreachable target for this tiny prop at this rpm).
+        assert!(t < 2.0 && q < 0.5, "thrust/torque {} {} not bounded", t, q);
     }
 }

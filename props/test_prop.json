@@ -1,23 +1,25 @@
 {
-    "comment": "This is a multistar 1706, running 3S and a 120mm diameter prop",
+    "comment": "Physically realizable: a Multistar 1706-class 5in (127mm) 3-blade prop on 3S, cruising at 3 m/s. Three blades (rather than two) lower the per-blade loading so the design converges to the target at every station; a heavier hover thrust on this tiny prop is energetically marginal and does not converge.",
+
     "name": "test_prop",
 
     "altitude": 0.0,
-    "forward_airspeed": 0.0,
+    "forward_airspeed": 3.0,
 
     "motor_Kv": 1900,
     "motor_volts": 11.0,
     "motor_no_load_current": 0.5,
     "motor_winding_resistance": 0.405,
 
-    "blades": 2,
-    "thrust": 3.0,
+    "blades": 3,
+    "thrust": 1.0,
 
-    "radius": 0.0635,
+    "radius": 0.075,
     "tip_chord": 0.007,
-    "scimitar_percent": -5.0,
+    "scimitar_percent": 0.0,
     "trailing_edge": 0.25,
-    "hub_radius": 0.005,
+    "centre_hole": 0.0015,
+    "hub_radius": 0.006,
     "hub_depth": 0.005,
 
     "exclude_zone": [

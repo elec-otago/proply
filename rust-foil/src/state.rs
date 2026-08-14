@@ -164,6 +164,7 @@ pub struct Xfoil {
     pub bij: Vec<f64>, // dGam/dSig influence matrix (IQX x IZX)
     pub cij: Vec<f64>, // dQtan/dGam influence matrix (IWX x IQX)
     pub dij: Vec<f64>, // dQtan/dSig influence matrix (IZX x IZX)
+    pub dij_t: Vec<f64>, // transposed copy of dij (row-major over j), for contiguous BL reads
     pub q: Vec<f64>, // generic coefficient matrix (IQX x IQX)
     pub dq: Vec<f64>, // generic matrix righthand side (IQX)
     pub dqdg: Vec<f64>, // dQtan/dGam (IQX)
@@ -550,6 +551,7 @@ impl Xfoil {
             bij: vec![0.0; IQX * IZX],
             cij: vec![0.0; IWX * IQX],
             dij: vec![0.0; IZX * IZX],
+            dij_t: vec![0.0; IZX * IZX],
             q: vec![0.0; IQX * IQX],
             dq: vec![0.0; IQX],
             dqdg: vec![0.0; IQX],

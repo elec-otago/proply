@@ -24,7 +24,7 @@ fn main() {
     };
     match step_out::hub_only_step(&param) {
         Ok(text) => {
-            std::fs::write(&out, text).unwrap_or_else(|e| {
+            step_out::write_step_file(&out, &text).unwrap_or_else(|e| {
                 eprintln!("cannot write {}: {}", out, e);
                 exit(1);
             });

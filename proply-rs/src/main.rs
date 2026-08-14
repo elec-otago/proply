@@ -23,6 +23,9 @@ struct Args {
     dir: String,
     step_file: String,
     plate: bool,
+    lifting_line: bool,
+    ar: Option<f64>,
+    chord_spline_n: Option<usize>,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -35,6 +38,9 @@ fn parse_args() -> Result<Args, String> {
         dir: ".".into(),
         step_file: String::new(),
         plate: false,
+        lifting_line: false,
+        ar: None,
+        chord_spline_n: None,
     };
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
@@ -60,6 +66,11 @@ fn parse_args() -> Result<Args, String> {
             "--dir" => a.dir = value()?,
             "--step-file" => a.step_file = value()?,
             "--plate" => a.plate = true, // testing: analytic flat-plate polars
+            "--lifting-line" => a.lifting_line = true, // coupled vortex-lattice design
+            "--ar" => a.ar = Some(value()?.parse().map_err(|_| "bad --ar".to_string())?),
+            "--chord-spline-n" => {
+                a.chord_spline_n = Some(value()?.parse().map_err(|_| "bad --chord-spline-n".to_string())?)
+            }
             "--mesh" => return Err("--mesh (GMSH) is not yet ported".into()),
             "--arad" => return Err("--arad (ARA-D foils) is not yet ported".into()),
             other => return Err(format!("unknown argument: {}", other)),
@@ -82,7 +93,7 @@ fn main() {
         exit(1);
     }
 
-    let param = match DesignParameters::from_file(&args.param) {
+    let mut param = match DesignParameters::from_file(&args.param) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("proply-rs: {}", e);
@@ -91,6 +102,9 @@ fn main() {
     };
 
     let resolution_m = (param.radius - param.hub_radius) / args.resolution as f64;
+    if let Some(n) = args.chord_spline_n {
+        param.chord_spline_n = n;
+    }
 
     let store: Arc<Mutex<PolarStore>> = Arc::new(Mutex::new(PolarStore::load(
         proply_rs::cache::default_cache_path().as_str(),
@@ -120,7 +134,11 @@ fn main() {
 
     let mut thrust = param.thrust;
     let goal_torque = optimum_torque * 1.5;
-    let (mut q, mut t) = p.full_optimize(optimum_rpm, thrust);
+    let (mut q, mut t) = if args.lifting_line {
+        p.lift_line_design(optimum_rpm, thrust, args.ar)
+    } else {
+        p.full_optimize(optimum_rpm, thrust)
+    };
     println!("Total Thrust: {:5.2}, Torque: {:5.3}", t, q);
     if args.auto {
         while q > goal_torque {
@@ -137,11 +155,10 @@ fn main() {
     };
     match step_out::write_prop(&mut p, args.n) {
         Ok(text) => {
-            std::fs::write(&step_filename, text)
-                .unwrap_or_else(|e| {
-                    eprintln!("cannot write {}: {}", step_filename, e);
-                    exit(1);
-                });
+            step_out::write_step_file(&step_filename, &text).unwrap_or_else(|e| {
+                eprintln!("cannot write {}: {}", step_filename, e);
+                exit(1);
+            });
             println!("Wrote {}", step_filename);
         }
         Err(e) => {

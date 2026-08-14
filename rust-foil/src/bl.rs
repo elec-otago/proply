@@ -9,7 +9,7 @@ use crate::blsys::{blkin, blmid, blprv, blsys, blvar, tesys, trchek, hkin};
 use crate::panel::ueset;
 use crate::solve::gauss;
 use crate::spline::{seval, sinvrt, splind};
-use crate::state::{Xfoil, NCOM, QOPI};
+use crate::state::{Xfoil, IZX, NCOM, QOPI};
 
 /// Returns the BL Newton scratch Vecs (pulled out of `xf` via `mem::take` at
 /// the top of `setbl`) back to the state, so the buffers are reused on the
@@ -140,10 +140,10 @@ pub fn setbl(xf: &mut Xfoil) -> bool {
         for jbl in 2..=xf.nbl[js] as usize {
             let j = xf.ipan[js][jbl] as usize;
             let jv = xf.isys[js][jbl] as usize;
-            ule1_m[jv] = -xf.vti[0][2] * xf.vti[js][jbl] * xf.dij[Xfoil::d_index(ile1, j)];
-            ule2_m[jv] = -xf.vti[1][2] * xf.vti[js][jbl] * xf.dij[Xfoil::d_index(ile2, j)];
-            ute1_m[jv] = -xf.vti[0][xf.iblte[0] as usize] * xf.vti[js][jbl] * xf.dij[Xfoil::d_index(ite1, j)];
-            ute2_m[jv] = -xf.vti[1][xf.iblte[1] as usize] * xf.vti[js][jbl] * xf.dij[Xfoil::d_index(ite2, j)];
+            ule1_m[jv] = -xf.vti[0][2] * xf.vti[js][jbl] * xf.dij_t[ile1 * IZX + j];
+            ule2_m[jv] = -xf.vti[1][2] * xf.vti[js][jbl] * xf.dij_t[ile2 * IZX + j];
+            ute1_m[jv] = -xf.vti[0][xf.iblte[0] as usize] * xf.vti[js][jbl] * xf.dij_t[ite1 * IZX + j];
+            ute2_m[jv] = -xf.vti[1][xf.iblte[1] as usize] * xf.vti[js][jbl] * xf.dij_t[ite2 * IZX + j];
         }
     }
 
@@ -238,7 +238,7 @@ pub fn setbl(xf: &mut Xfoil) -> bool {
                 for jbl in 2..=xf.nbl[js] as usize {
                     let j = xf.ipan[js][jbl] as usize;
                     let jv = xf.isys[js][jbl] as usize;
-                    u2_m[jv] = -xf.vti[is][ibl] * xf.vti[js][jbl] * xf.dij[Xfoil::d_index(i, j)];
+                    u2_m[jv] = -xf.vti[is][ibl] * xf.vti[js][jbl] * xf.dij_t[i * IZX + j];
                     d2_m[jv] = d2_u2 * u2_m[jv];
                 }
             }
@@ -337,12 +337,31 @@ pub fn setbl(xf: &mut Xfoil) -> bool {
                 xi_ule2 = xf.sst_gp;
             }
 
-            // stuff BL system coefficients into main Jacobian matrix
-            for jv in 1..=xf.nsys {
-                xf.vm[Xfoil::vm_index(iv, jv, 1)] = xf.vs1[0][2] * d1_m[jv] + xf.vs1[0][3] * u1_m[jv]
-                    + xf.vs2[0][2] * d2_m[jv]
-                    + xf.vs2[0][3] * u2_m[jv]
-                    + (xf.vs1[0][4] + xf.vs2[0][4] + xf.vsx[0]) * (xi_ule1 * ule1_m[jv] + xi_ule2 * ule2_m[jv]);
+            // stuff BL system coefficients into main Jacobian matrix.  The vm
+            // layout is (i, j, k) with k innermost, so for a fixed iv the
+            // nsys*3 elements form one contiguous row.  The original code wrote
+            // the k=1,2,3 components in three separate sweeps that all shared
+            // the same cache lines; fusing them into a single jv pass over the
+            // contiguous row keeps the same values and FP order (bit-identical)
+            // while streaming memory once and hoisting the row-offset bounds
+            // work out of the loop.
+            {
+                let base3 = (iv - 1) * IZX * 3;
+                for jv in 1..=xf.nsys {
+                    let o = base3 + (jv - 1) * 3;
+                    xf.vm[o] = xf.vs1[0][2] * d1_m[jv] + xf.vs1[0][3] * u1_m[jv]
+                        + xf.vs2[0][2] * d2_m[jv]
+                        + xf.vs2[0][3] * u2_m[jv]
+                        + (xf.vs1[0][4] + xf.vs2[0][4] + xf.vsx[0]) * (xi_ule1 * ule1_m[jv] + xi_ule2 * ule2_m[jv]);
+                    xf.vm[o + 1] = xf.vs1[1][2] * d1_m[jv] + xf.vs1[1][3] * u1_m[jv]
+                        + xf.vs2[1][2] * d2_m[jv]
+                        + xf.vs2[1][3] * u2_m[jv]
+                        + (xf.vs1[1][4] + xf.vs2[1][4] + xf.vsx[1]) * (xi_ule1 * ule1_m[jv] + xi_ule2 * ule2_m[jv]);
+                    xf.vm[o + 2] = xf.vs1[2][2] * d1_m[jv] + xf.vs1[2][3] * u1_m[jv]
+                        + xf.vs2[2][2] * d2_m[jv]
+                        + xf.vs2[2][3] * u2_m[jv]
+                        + (xf.vs1[2][4] + xf.vs2[2][4] + xf.vsx[2]) * (xi_ule1 * ule1_m[jv] + xi_ule2 * ule2_m[jv]);
+                }
             }
 
             xf.vb[Xfoil::v_index(iv, 1, 1)] = xf.vs1[0][0];
@@ -363,13 +382,6 @@ pub fn setbl(xf: &mut Xfoil) -> bool {
                 + (xf.vs2[0][3] * due2 + xf.vs2[0][2] * dds2)
                 + (xf.vs1[0][4] + xf.vs2[0][4] + xf.vsx[0]) * (xi_ule1 * dule1 + xi_ule2 * dule2);
 
-            for jv in 1..=xf.nsys {
-                xf.vm[Xfoil::vm_index(iv, jv, 2)] = xf.vs1[1][2] * d1_m[jv] + xf.vs1[1][3] * u1_m[jv]
-                    + xf.vs2[1][2] * d2_m[jv]
-                    + xf.vs2[1][3] * u2_m[jv]
-                    + (xf.vs1[1][4] + xf.vs2[1][4] + xf.vsx[1]) * (xi_ule1 * ule1_m[jv] + xi_ule2 * ule2_m[jv]);
-            }
-
             xf.vb[Xfoil::v_index(iv, 1, 2)] = xf.vs1[1][0];
             xf.vb[Xfoil::v_index(iv, 2, 2)] = xf.vs1[1][1];
 
@@ -387,13 +399,6 @@ pub fn setbl(xf: &mut Xfoil) -> bool {
             xf.vdel[Xfoil::v_index(iv, 1, 2)] = xf.vsrez[1] + (xf.vs1[1][3] * due1 + xf.vs1[1][2] * dds1)
                 + (xf.vs2[1][3] * due2 + xf.vs2[1][2] * dds2)
                 + (xf.vs1[1][4] + xf.vs2[1][4] + xf.vsx[1]) * (xi_ule1 * dule1 + xi_ule2 * dule2);
-
-            for jv in 1..=xf.nsys {
-                xf.vm[Xfoil::vm_index(iv, jv, 3)] = xf.vs1[2][2] * d1_m[jv] + xf.vs1[2][3] * u1_m[jv]
-                    + xf.vs2[2][2] * d2_m[jv]
-                    + xf.vs2[2][3] * u2_m[jv]
-                    + (xf.vs1[2][4] + xf.vs2[2][4] + xf.vsx[2]) * (xi_ule1 * ule1_m[jv] + xi_ule2 * ule2_m[jv]);
-            }
 
             xf.vb[Xfoil::v_index(iv, 1, 3)] = xf.vs1[2][0];
             xf.vb[Xfoil::v_index(iv, 2, 3)] = xf.vs1[2][1];
@@ -461,13 +466,15 @@ pub fn setbl(xf: &mut Xfoil) -> bool {
                 blmid(xf, 3);
             }
 
-            for js in 0..2 {
-                for jbl in 2..=xf.nbl[js] as usize {
-                    let jv = xf.isys[js][jbl] as usize;
-                    u1_m[jv] = u2_m[jv];
-                    d1_m[jv] = d2_m[jv];
-                }
-            }
+            // Roll u2_m/d2_m (the just-computed "2" station) into the "1"
+            // station slot by swapping buffers instead of copying all nsys
+            // entries.  u2_m is fully overwritten at the top of the next
+            // station (the js/jbl rebuild loop above), so whatever stale
+            // values it picks up here are discarded before use; u1_m is either
+            // read as-is (vm assembly) or fully redefined at the TE, so the
+            // swap always presents the correct previous-station values.
+            std::mem::swap(&mut u1_m, &mut u2_m);
+            std::mem::swap(&mut d1_m, &mut d2_m);
 
             u1_a = u2_a;
             d1_a = d2_a;
@@ -1299,7 +1306,7 @@ pub fn update(xf: &mut Xfoil) {
                 for jbl in 2..=xf.nbl[js] as usize {
                     let j = xf.ipan[js][jbl] as usize;
                     let jv = xf.isys[js][jbl] as usize;
-                    let ue_m = -xf.vti[is][ibl] * xf.vti[js][jbl] * xf.dij[Xfoil::d_index(i, j)];
+                    let ue_m = -xf.vti[is][ibl] * xf.vti[js][jbl] * xf.dij_t[i * IZX + j];
                     dui += ue_m * (xf.mass[js][jbl] + xf.vdel[Xfoil::v_index(jv, 1, 3)]);
                     dui_ac += ue_m * (-xf.vdel[Xfoil::v_index(jv, 2, 3)]);
                 }

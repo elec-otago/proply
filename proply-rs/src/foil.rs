@@ -54,9 +54,18 @@ impl Foil {
     }
 
     /// A unique hash for this foil (used as the polar cache key).
+    ///
+    /// The polar (from rust-foil, which normalizes to unit chord) depends only
+    /// on the *shape* and the Reynolds number — not on the chord magnitude.
+    /// `get_shape_points` scales coordinates by `chord`, so the hash is
+    /// normalised by `chord` to identify the shape alone.  This lets a chord
+    /// scale change reuse the same cached polar for the same Reynolds bucket
+    /// (and makes the cache deterministic regardless of the order a design
+    /// loop visits chord scales).
     pub fn hash(&self) -> String {
         let (_xl, yl, _xu, yu) = self.get_shape_points(10);
-        let s: f64 = yu.iter().skip(1).sum::<f64>() + yl.iter().skip(1).sum::<f64>();
+        let s: f64 = (yu.iter().skip(1).sum::<f64>() + yl.iter().skip(1).sum::<f64>())
+            / self.chord.max(1.0e-12);
         format!("{}", s)
     }
 
@@ -404,6 +413,21 @@ mod tests {
         // at the sample before the TE: beta = pi*205/209 -> x = 0.9990965.
         assert!(xu[0].abs() < 1e-12);
         assert!((xu[41] - 0.9990965).abs() < 1e-6, "TE sample x = {}", xu[41]);
+    }
+
+    #[test]
+    fn hash_is_chord_independent() {
+        // The polar cache key must identify the (unit-chord-normalised) shape
+        // only, so that scaling the chord reuses the same polar for the same
+        // Reynolds bucket.
+        let a = Naca4::new(0.010, 0.12, 0.0, 0.4);
+        let b = Naca4::new(0.020, 0.12, 0.0, 0.4);
+        assert_eq!(a.hash(), b.hash(), "hash must not depend on chord");
+        let mut c = Naca4::new(1.0, 0.12, 0.0, 0.4);
+        c.modify_chord(0.005);
+        assert_eq!(Naca4::new(0.005, 0.12, 0.0, 0.4).hash(), c.hash());
+        // A different thickness (shape) must change the hash.
+        assert_ne!(Naca4::new(0.01, 0.15, 0.0, 0.4).hash(), a.hash());
     }
 
     #[test]
