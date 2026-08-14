@@ -450,17 +450,17 @@ impl Prop {
         // in `da`).
         let state = RefCell::new(elements);
         let pg = RefCell::new(vec![0.0; m]); // warm-start gamma
-        // Control values = the geometrically-allowed chord at each reference
-        // radius (the taper capped by the blade-spacing limit).  Sampling the
-        // kinked cap and interpolating it with a shape-preserving cubic gives
-        // a *smooth* chord for any radius (no taper/cap kink), yet bounded by
-        // the allowed geometry so the loading stays physical.
-        let taper_ref: Vec<f64> = ref_r
+        // Per-control upper bound: the geometrically-allowed chord (taper
+        // capped by blade spacing) at each reference radius.
+        let cap_ctl: Vec<f64> = ref_r
             .iter()
             .map(|&r| self.get_max_chord(r, 0.0).max(CH_FLOOR))
             .collect();
-        let chord_temp = Pchip::new(&ref_r, &taper_ref);
-        let eval = |s: f64,
+
+        // eval(controls, da): chord = smooth shape-preserving cubic (PCHIP)
+        // spline through the N control values at `ref_r` (kink-free, clipped to
+        // the geometrically-allowed chord for safety), attack angle prescribed.
+        let eval = |controls: &[f64],
                     da: f64,
                     elems: &mut Vec<BladeElement<Naca4>>,
                     seed: &[f64]|
@@ -469,9 +469,10 @@ impl Prop {
                 .iter()
                 .map(|&ab| (ab + da).clamp(-0.45, 0.45))
                 .collect();
+            let spl = Pchip::new(&ref_r, controls);
             for i in 0..m {
                 let cap_i = self.get_max_chord(rr[i], alphas[i]).max(CH_FLOOR);
-                let c = (s * chord_temp.eval(rr[i])).clamp(CH_FLOOR, cap_i);
+                let c = spl.eval(rr[i]).clamp(CH_FLOOR, cap_i);
                 elems[i].set_chord(c);
             }
             let stations: Vec<Station> = (0..m)
@@ -490,12 +491,18 @@ impl Prop {
             (res.thrust, res.torque, alphas, chords, res.gamma.clone(), res.phi.clone())
         };
 
-        // Monotone search: scan `s`, then inner-bisect `da` to the target.
-        let mut best: Option<(f64, f64, f64, f64, Vec<f64>, Vec<f64>, Vec<f64>)> = None; // (s, err, t, q, alpha, chord, phi)
-        let s_grid: Vec<f64> = (0..=4)
-            .map(|k| 0.4 * s_cap + (s_cap - 0.4 * s_cap) * k as f64 / 4.0)
-            .collect();
-        for &s in &s_grid {
+        // Outer optimizer over the N control values: for each candidate shape,
+        // an inner **monotone `da` bisection** (below) reliably matches the
+        // thrust target, so the outer NelderMead only needs to minimise the
+        // torque (efficiency) among shapes that meet the target.  Seeded at the
+        // full chord — the thrust-capable geometry — so it cannot be trapped in
+        // a thin/low-thrust region.
+        let meet_thrust = |controls: &[f64],
+                           elems: &mut Vec<BladeElement<Naca4>>,
+                           pg_r: &RefCell<Vec<f64>>|
+         -> (f64, f64, f64, f64, Vec<f64>, Vec<f64>, Vec<f64>, bool) {
+            // returns (da, err, thrust, torque, alpha, chord, phi, reachable)
+            let mut cur: Vec<f64> = pg_r.borrow().clone();
             let mut bst: Option<(f64, f64, f64, f64, Vec<f64>, Vec<f64>, Vec<f64>)> = None; // da, err, t, q, alpha, chord, phi
             let mut prev: Option<(f64, f64)> = None; // (da, thrust)
             let mut bracket: Option<(f64, f64)> = None;
@@ -513,15 +520,9 @@ impl Prop {
                 }
             };
             for &da in &scan {
-                let seed = pg.borrow();
-                let (t, q, alphas, chords, g, phis) = {
-                    let mut e = state.borrow_mut();
-                    eval(s, da, &mut e, &*seed)
-                };
-                drop(seed);
-                *pg.borrow_mut() = g;
+                let (t, q, alphas, chords, g, phis) = eval(controls, da, elems, &cur);
+                cur = g;
                 let err = (t - thrust).abs() / thrust.max(1.0e-9);
-                println!("lift-line s={:.3} da={:.3}: T={:.4} Q={:.4}", s, da, t, q);
                 if better(err, q, &bst) {
                     bst = Some((da, err, t, q, alphas, chords, phis));
                 }
@@ -533,17 +534,11 @@ impl Prop {
                 prev = Some((da, t));
             }
             if let Some((mut lo, mut hi)) = bracket {
-                for _ in 0..5 {
+                for _ in 0..6 {
                     let mid = 0.5 * (lo + hi);
-                    let seed = pg.borrow();
-                    let (t, q, alphas, chords, g, phis) = {
-                        let mut e = state.borrow_mut();
-                        eval(s, mid, &mut e, &*seed)
-                    };
-                    drop(seed);
-                    *pg.borrow_mut() = g;
+                    let (t, q, alphas, chords, g, phis) = eval(controls, mid, elems, &cur);
+                    cur = g;
                     let err = (t - thrust).abs() / thrust.max(1.0e-9);
-                    println!("lift-line s={:.3} da={:.3}: T={:.4} Q={:.4}", s, mid, t, q);
                     if better(err, q, &bst) {
                         bst = Some((mid, err, t, q, alphas, chords, phis));
                     }
@@ -552,52 +547,68 @@ impl Prop {
                     } else {
                         hi = mid;
                     }
-                    if err < 0.02 {
-                        break;
-                    }
                 }
             }
-            if let Some((da, err, t, q, alphas, chords, phis)) = bst {
-                let replace = match &best {
-                    None => true,
-                    Some((_, be, _, bq, _, _, _)) => {
-                        let this_meets = err <= 0.03;
-                        let best_meets = *be <= 0.03;
-                        (this_meets && !best_meets)
-                            || (this_meets == best_meets
-                                && (err < *be - 1.0e-9 || ((err - *be).abs() < 1.0e-9 && q < *bq)))
-                    }
-                };
-                let _ = da;
-                if replace {
-                    best = Some((s, err, t, q, alphas, chords, phis));
+            *pg_r.borrow_mut() = cur.clone();
+            match bst {
+                Some((da, err, t, q, alphas, chords, phis)) => {
+                    (da, err, t, q, alphas, chords, phis, err <= 0.05)
                 }
+                None => (0.0, 1.0, 0.0, 0.0, Vec::new(), Vec::new(), Vec::new(), false),
+            }
+        };
+
+        let obj = |x: &[f64]| -> f64 {
+            let controls: Vec<f64> = (0..n_ctrl)
+                .map(|k| CH_FLOOR * (cap_ctl[k] / CH_FLOOR).powf(x[k].clamp(0.0, 1.0)))
+                .collect();
+            let (da, err, t, q, _al, _ch, _ph, _reach) = {
+                let mut e = state.borrow_mut();
+                meet_thrust(&controls, &mut e, &pg)
+            };
+            println!(
+                "lift-line ctrl=[{}] da={:.3}: T={:.4} Q={:.4}",
+                controls.iter().map(|c| format!("{:.4}", c)).collect::<Vec<_>>().join(" "),
+                da, t, q
+            );
+            // Meet the target (50*err dominates) and then minimise torque.
+            q + 50.0 * err
+        };
+
+        let mut nm = optimize::NelderMead::default();
+        nm.maxiter = 120;
+        let bounds: Vec<Option<(f64, f64)>> = vec![Some((0.0, 1.0)); n_ctrl];
+        // Seeded at (near) the full chord — the thrust-capable geometry.
+        let starts: Vec<Vec<f64>> = vec![
+            vec![1.0; n_ctrl],
+            vec![0.85; n_ctrl],
+            vec![0.6; n_ctrl],
+        ];
+        let mut best_x: Vec<f64> = vec![1.0; n_ctrl];
+        let mut best_f = f64::INFINITY;
+        for x0 in starts {
+            let (x, f) = nm.minimize(&obj, &x0, &bounds);
+            if f < best_f {
+                best_f = f;
+                best_x = x;
+            }
+            if best_f < 0.03 {
+                break;
             }
         }
 
-        // Apply the best measured candidate (its own converged forces/twist).
+        // Final measured candidate (its own converged forces/twist).
         let mut elements = state.into_inner();
-        let (r_t, r_q) = match best {
-            Some((_s, _err, t, q, alphas, chords, phis)) => {
-                for i in 0..m {
-                    elements[i].set_chord(chords[i]);
-                    elements[i].set_twist(phis[i] + alphas[i]);
-                }
-                (t, q)
-            }
-            None => {
-                let alphas: Vec<f64> = alpha_base
-                    .iter()
-                    .map(|&ab| (ab + DA_MAX).clamp(-0.45, 0.45))
-                    .collect();
-                for i in 0..m {
-                    let c = chord_temp.eval(rr[i]).clamp(CH_FLOOR, self.get_max_chord(rr[i], alphas[i]).max(CH_FLOOR));
-                    elements[i].set_chord(c);
-                    elements[i].set_twist(u_0.atan2(omega * rr[i]) + alphas[i]);
-                }
-                (0.0, 0.0)
-            }
+        let controls: Vec<f64> = (0..n_ctrl)
+            .map(|k| CH_FLOOR * (cap_ctl[k] / CH_FLOOR).powf(best_x[k].clamp(0.0, 1.0)))
+            .collect();
+        let (_da, _err, r_t, r_q, _al, _ch, phis, _reach) = {
+            meet_thrust(&controls, &mut elements, &pg)
         };
+        for i in 0..m {
+            elements[i].set_twist(phis[i] + (alpha_base[i] + _da).clamp(-0.45, 0.45));
+        }
+        let _ = best_f;
         self.blade_elements = elements;
         (r_q, r_t)
     }

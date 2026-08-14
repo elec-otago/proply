@@ -92,18 +92,20 @@ model:
 2. the local angle of attack is *prescribed* (`alpha = best-L/D + da`), so
    the twist is `phi + alpha` and the solve has no twist↔induction feedback
    to limit-cycle;
-3. **smooth chord**: the chord is a **shape-preserving cubic (PCHIP)
-   spline** through `chord_spline_n` control points (default 3; override
-   with `"chord_spline_n": N` in the JSON, or `--chord-spline-n N`), at
-   radii spread hub→tip.  The control values hold the geometrically-allowed
-   chord (the `tip_chord·R²/r²` taper capped by the blade-spacing limit) at
-   each reference radius; interpolating them as a cubic spline gives a
-   kink-free smooth chord at every radius.  The design sweeps a single
-   scale `s` of that smooth spline and, inside each `s`, brackets and
-   bisects the single `da` to the thrust target, then keeps the `(s, da)`
-   with the lowest torque — pure, independent, exactly-solved evaluations
-   with no feedback loop to oscillate in.  `--ar N` caps `s` (a minimum
-   blade aspect ratio), thinning the blade as `N` rises.
+3. **smooth chord / per-control optimization**: the chord is a
+   **shape-preserving cubic (PCHIP) spline** through `chord_spline_n`
+   control points (default 3; `"chord_spline_n": N` in the JSON or
+   `--chord-spline-n N`), at radii spread hub→tip.  Each control value is a
+   design variable (bounded by the geometrically-allowed chord — the
+   `tip_chord·R²/r²` taper capped by blade spacing) and the spline gives a
+   kink-free smooth chord at every radius.  The outer level is a
+   **NelderMead** over those N control values, seeded at the full chord (so
+   it starts at the thrust-capable geometry); for each candidate shape an
+   inner **monotone `da` bisection** reliably matches the thrust target
+   (`alpha = best-L/D + da`), so the outer only minimises the torque —
+   i.e. it finds the most efficient chord *shape* that meets the required
+   thrust with no oscillation.  `--ar N` caps the control values (a
+   minimum blade aspect ratio), thinning the blade as `N` rises.
 
 Because the wake is coupled, the reported torque *includes* the induced
 loss — so the design can make real efficiency trade-offs (induced vs
