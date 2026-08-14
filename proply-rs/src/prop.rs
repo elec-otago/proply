@@ -497,16 +497,21 @@ impl Prop {
         // torque (efficiency) among shapes that meet the target.  Seeded at the
         // full chord — the thrust-capable geometry — so it cannot be trapped in
         // a thin/low-thrust region.
+        // `hint_da` carries the previous objective call's converged `da` so the
+        // next `meet_thrust` warm-starts the root find: near the optimum the
+        // controls (and hence the da needed to hit the target) barely change,
+        // so we fast-path on a single evaluation instead of the full scan.
+        let da_hint = RefCell::new(None::<f64>);
         let meet_thrust = |controls: &[f64],
                            elems: &mut Vec<BladeElement<Naca4>>,
-                           pg_r: &RefCell<Vec<f64>>|
+                           pg_r: &RefCell<Vec<f64>>,
+                           hint_da: Option<f64>|
          -> (f64, f64, f64, f64, Vec<f64>, Vec<f64>, Vec<f64>, bool) {
             // returns (da, err, thrust, torque, alpha, chord, phi, reachable)
             let mut cur: Vec<f64> = pg_r.borrow().clone();
             let mut bst: Option<(f64, f64, f64, f64, Vec<f64>, Vec<f64>, Vec<f64>)> = None; // da, err, t, q, alpha, chord, phi
             let mut prev: Option<(f64, f64)> = None; // (da, thrust)
             let mut bracket: Option<(f64, f64)> = None;
-            let scan: [f64; 3] = [0.0, DA_MAX / 2.0, DA_MAX];
             let better = |err: f64,
                           q: f64,
                           b: &Option<(f64, f64, f64, f64, Vec<f64>, Vec<f64>, Vec<f64>)>|
@@ -519,7 +524,38 @@ impl Prop {
                     }
                 }
             };
-            for &da in &scan {
+
+            // Warm start: evaluate the previous `da` first; if it already meets
+            // the target, return immediately (a single circulation solve).
+            if let Some(hd) = hint_da {
+                if (0.0..=DA_MAX).contains(&hd) {
+                    let (t, q, alphas, chords, g, phis) = eval(controls, hd, elems, &cur);
+                    cur = g;
+                    let err = (t - thrust).abs() / thrust.max(1.0e-9);
+                    if err <= 0.03 {
+                        *pg_r.borrow_mut() = cur.clone();
+                        println!(
+                            "lift-line ctrl=[{}] da={:.3} (warm): T={:.4} Q={:.4}",
+                            controls.iter().map(|c| format!("{:.4}", c)).collect::<Vec<_>>().join(" "),
+                            hd, t, q
+                        );
+                        return (hd, err, t, q, alphas, chords, phis, true);
+                    }
+                    bst = Some((hd, err, t, q, alphas, chords, phis));
+                    prev = Some((hd, t));
+                }
+            }
+
+            // Full bounded scan (including the hint if not already scanned),
+            // then bisection on the bracketing interval.
+            let mut cands: Vec<f64> = vec![0.0, DA_MAX / 2.0, DA_MAX];
+            if let Some(hd) = hint_da {
+                if (0.0..=DA_MAX).contains(&hd) && !cands.contains(&hd) {
+                    cands.push(hd);
+                }
+            }
+            cands.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            for &da in &cands {
                 let (t, q, alphas, chords, g, phis) = eval(controls, da, elems, &cur);
                 cur = g;
                 let err = (t - thrust).abs() / thrust.max(1.0e-9);
@@ -562,15 +598,19 @@ impl Prop {
             let controls: Vec<f64> = (0..n_ctrl)
                 .map(|k| CH_FLOOR * (cap_ctl[k] / CH_FLOOR).powf(x[k].clamp(0.0, 1.0)))
                 .collect();
+            let hint = *da_hint.borrow();
             let (da, err, t, q, _al, _ch, _ph, _reach) = {
                 let mut e = state.borrow_mut();
-                meet_thrust(&controls, &mut e, &pg)
+                meet_thrust(&controls, &mut e, &pg, hint)
             };
-            println!(
-                "lift-line ctrl=[{}] da={:.3}: T={:.4} Q={:.4}",
-                controls.iter().map(|c| format!("{:.4}", c)).collect::<Vec<_>>().join(" "),
-                da, t, q
-            );
+            *da_hint.borrow_mut() = Some(da);
+            if hint.is_none() {
+                println!(
+                    "lift-line ctrl=[{}] da={:.3}: T={:.4} Q={:.4}",
+                    controls.iter().map(|c| format!("{:.4}", c)).collect::<Vec<_>>().join(" "),
+                    da, t, q
+                );
+            }
             // Meet the target (50*err dominates) and then minimise torque.
             q + 50.0 * err
         };
@@ -578,15 +618,19 @@ impl Prop {
         let mut nm = optimize::NelderMead::default();
         nm.maxiter = 120;
         let bounds: Vec<Option<(f64, f64)>> = vec![Some((0.0, 1.0)); n_ctrl];
-        // Seeded at (near) the full chord — the thrust-capable geometry.
-        let starts: Vec<Vec<f64>> = vec![
-            vec![1.0; n_ctrl],
-            vec![0.85; n_ctrl],
-            vec![0.6; n_ctrl],
-        ];
+        // First start at the full chord (the thrust-capable geometry); each
+        // later start warm-starts from the running best point so the simplex
+        // keeps working the promising region (and the shared gamma/da warm
+        // state — pg / da_hint — is already near the solution).
         let mut best_x: Vec<f64> = vec![1.0; n_ctrl];
         let mut best_f = f64::INFINITY;
-        for x0 in starts {
+        for i in 0..3 {
+            let x0: Vec<f64> = if i == 0 {
+                vec![1.0; n_ctrl]
+            } else {
+                let scale = if i == 1 { 0.85 } else { 0.7 };
+                best_x.iter().map(|&v| (scale * v).clamp(0.0, 1.0)).collect()
+            };
             let (x, f) = nm.minimize(&obj, &x0, &bounds);
             if f < best_f {
                 best_f = f;
@@ -597,13 +641,15 @@ impl Prop {
             }
         }
 
-        // Final measured candidate (its own converged forces/twist).
+        // Final measured candidate (its own converged forces/twist); hint=None
+        // forces the full bounded search so the reported result is the exact
+        // best (not a fast-path approximation).
         let mut elements = state.into_inner();
         let controls: Vec<f64> = (0..n_ctrl)
             .map(|k| CH_FLOOR * (cap_ctl[k] / CH_FLOOR).powf(best_x[k].clamp(0.0, 1.0)))
             .collect();
         let (_da, _err, r_t, r_q, _al, _ch, phis, _reach) = {
-            meet_thrust(&controls, &mut elements, &pg)
+            meet_thrust(&controls, &mut elements, &pg, None)
         };
         for i in 0..m {
             elements[i].set_twist(phis[i] + (alpha_base[i] + _da).clamp(-0.45, 0.45));
