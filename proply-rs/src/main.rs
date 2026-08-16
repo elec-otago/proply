@@ -26,6 +26,49 @@ struct Args {
     lifting_line: bool,
     ar: Option<f64>,
     chord_spline_n: Option<usize>,
+    help: bool,
+}
+
+fn print_help() {
+    println!(
+        "proply-rs: propeller design in Rust.
+
+USAGE:
+    proply-rs --bem [OPTIONS]
+
+The BEM (or --lifting-line) design loop must be selected to produce a
+propeller.  The propeller is written as a STEP (AP242) file.
+
+DESIGN OPTIONS:
+    --bem                  Use the blade-element momentum design loop.
+    --lifting-line         Use the coupled vortex lifting-line design loop
+                           (spanwise-induced losses; smooth chord).
+    --param <FILE>         JSON propeller parameter file
+                           (default: prop_design.json).
+    --n <N>                STEP loft resolution (default: 40).
+    --resolution <MM>      Radial (spanwise) resolution in millimetres;
+                           2 x (radius - hub_radius) stations
+                           (default: 40).
+    --naca                 NACA airfoil family (accepted; the only family
+                           ported).
+    --auto                 Re-run the design loop, reducing the thrust
+                           target until the torque drops below ~1.5 x Qmax.
+    --ar <N>               Minimum blade aspect ratio (R - hub)/<mean chord>;
+                           caps the chord (thinner blade) in the lifting line.
+    --chord-spline-n <N>   Number of control points for the smooth spline
+                           chord (lifting line; default: 3).
+    --plate                Use analytic flat-plate polars (testing only).
+
+OUTPUT OPTIONS:
+    --dir <DIR>            Directory for the output STEP (created if needed;
+                           default: .).
+    --step-file <FILE>     Explicit output STEP path (overrides --dir +
+                           <param name>.step).
+
+OTHER:
+    --help, -h             Print this help and exit.
+"
+    );
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -41,6 +84,7 @@ fn parse_args() -> Result<Args, String> {
         lifting_line: false,
         ar: None,
         chord_spline_n: None,
+        help: false,
     };
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
@@ -71,6 +115,7 @@ fn parse_args() -> Result<Args, String> {
             "--chord-spline-n" => {
                 a.chord_spline_n = Some(value()?.parse().map_err(|_| "bad --chord-spline-n".to_string())?)
             }
+            "--help" | "-h" => a.help = true,
             "--mesh" => return Err("--mesh (GMSH) is not yet ported".into()),
             "--arad" => return Err("--arad (ARA-D foils) is not yet ported".into()),
             other => return Err(format!("unknown argument: {}", other)),
@@ -87,6 +132,11 @@ fn main() {
             exit(1);
         }
     };
+
+    if args.help {
+        print_help();
+        exit(0);
+    }
 
     if !args.bem {
         eprintln!("proply-rs: the --bem design loop is required to produce a propeller");
