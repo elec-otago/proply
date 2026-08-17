@@ -232,7 +232,13 @@ fn main() {
     if param.auto {
         while q > goal_torque {
             thrust *= 0.95 * goal_torque / q;
-            (q, t) = p.full_optimize(optimum_rpm, thrust);
+            // Re-run with the same design loop that produced the initial
+            // design (lifting-line or BEM).
+            (q, t) = if param.lifting_line {
+                p.lift_line_design(optimum_rpm, thrust, param.ar)
+            } else {
+                p.full_optimize(optimum_rpm, thrust)
+            };
             println!("Total Thrust: {:5.2} (N), Torque: {:5.2} (Nm)", t, q);
         }
     }

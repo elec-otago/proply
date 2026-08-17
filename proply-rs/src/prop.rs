@@ -430,31 +430,34 @@ impl Prop {
         }
 
         const DA_MAX: f64 = 0.12; // ~7 deg above best-L/D, below deep stall
-        // Design variables `x ∈ [0,1]^(n_ctrl+1)`: x[0..n_ctrl] log-map to the
-        // control chords, x[n_ctrl] to `da`.  `alpha_i = best_L/D_i + da` is
-        // prescribed (`twist = phi + alpha`), so there is no twist<->induction
-        // feedback; the solve takes `alpha` directly and is converged by damped
-        // Newton (warm-started from the previous evaluation).
-        // The chord at any radius is the smooth spline (clipped to the local
-        // geometric cap for safety), so there are no taper/cap kinks.
-        // `eval` evaluates a candidate: chord = smooth spline through
-        // `controls` at `ref_r`, attack angle = best-L/D + da (prescribed ->
-        // `twist = phi + alpha`, no twist<->induction feedback), circulation by
-        // damped Newton (warm-started).
-        // The chord is a smooth shape-preserving cubic (PCHIP) spline through
-        // `chord_spline_n` control points holding the free taper
-        // (`tip_chord*R^2/r^2`) at each reference radius.  The design sweeps a
-        // single scale `s` of that smooth spline (plus the common attack
-        // offset `da`), so the chord has no taper/cap kinks and meets the
-        // thrust target robustly (thrust is monotone in `s` and, before stall,
-        // in `da`).
+        // `da` may also trim the attack angle *below* best-L/D (through zero
+        // lift): thrust is monotone in `da` across the whole range, so the
+        // inner bisection can match a low thrust target at any chord —
+        // without this, a full-chord blade whose thrust already exceeds the
+        // target (e.g. a light target on a fast, wide prop) could never
+        // converge, as `da > 0` only adds thrust.
+        const DA_MIN: f64 = -0.45;
+        // Design variables `x ∈ [0,1]^n_ctrl` log-map to the control chords;
+        // the common attack offset `da ∈ [DA_MIN, DA_MAX]` over the best-L/D
+        // angles is matched to the thrust target by an inner monotone
+        // bisection (`meet_thrust` below), not optimized.  `alpha_i =
+        // best_L/D_i + da` is prescribed (`twist = phi + alpha`), so there is
+        // no twist<->induction feedback; the circulation solve is converged
+        // by damped Newton (warm-started from the previous evaluation).  The
+        // chord at any radius is the smooth PCHIP spline through the
+        // controls at `ref_r` (clipped to the local geometric cap for
+        // safety), so there are no taper/cap kinks.
         let state = RefCell::new(elements);
         let pg = RefCell::new(vec![0.0; m]); // warm-start gamma
+        // The trailed-wake influence depends only on the station radii and the
+        // blade count, so build it once and reuse it for every evaluation.
+        let infl = lift_line::influence(&rr, n_blades);
         // Per-control upper bound: the geometrically-allowed chord (taper
-        // capped by blade spacing) at each reference radius.
+        // capped by blade spacing) at each reference radius, thinned by `s_cap`
+        // when a minimum aspect ratio was requested.
         let cap_ctl: Vec<f64> = ref_r
             .iter()
-            .map(|&r| self.get_max_chord(r, 0.0).max(CH_FLOOR))
+            .map(|&r| (s_cap * self.get_max_chord(r, 0.0)).max(CH_FLOOR))
             .collect();
 
         // eval(controls, da): chord = smooth shape-preserving cubic (PCHIP)
@@ -467,7 +470,7 @@ impl Prop {
          -> (f64, f64, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
             let alphas: Vec<f64> = alpha_base
                 .iter()
-                .map(|&ab| (ab + da).clamp(-0.45, 0.45))
+                .map(|&ab| (ab + da).clamp(-lift_line::ALPHA_MAX, lift_line::ALPHA_MAX))
                 .collect();
             let spl = Pchip::new(&ref_r, controls);
             for i in 0..m {
@@ -483,7 +486,8 @@ impl Prop {
                 })
                 .collect();
             let fs_refs: Vec<&FoilSimulator<Naca4>> = elems.iter().map(|be| &be.fs).collect();
-            let res = lift_line::solve(&stations, n_blades, omega, u_0, &fs_refs, seed);
+            let res =
+                lift_line::solve_with_influence(&stations, n_blades, omega, u_0, &fs_refs, seed, &infl);
             for i in 0..m {
                 elems[i].set_twist(res.phi[i] + alphas[i]);
             }
@@ -528,7 +532,7 @@ impl Prop {
             // Warm start: evaluate the previous `da` first; if it already meets
             // the target, return immediately (a single circulation solve).
             if let Some(hd) = hint_da {
-                if (0.0..=DA_MAX).contains(&hd) {
+                if (DA_MIN..=DA_MAX).contains(&hd) {
                     let (t, q, alphas, chords, g, phis) = eval(controls, hd, elems, &cur);
                     cur = g;
                     let err = (t - thrust).abs() / thrust.max(1.0e-9);
@@ -548,9 +552,9 @@ impl Prop {
 
             // Full bounded scan (including the hint if not already scanned),
             // then bisection on the bracketing interval.
-            let mut cands: Vec<f64> = vec![0.0, DA_MAX / 2.0, DA_MAX];
+            let mut cands: Vec<f64> = vec![DA_MIN, 0.5 * (DA_MIN + DA_MAX), DA_MAX];
             if let Some(hd) = hint_da {
-                if (0.0..=DA_MAX).contains(&hd) && !cands.contains(&hd) {
+                if (DA_MIN..=DA_MAX).contains(&hd) && !cands.contains(&hd) {
                     cands.push(hd);
                 }
             }
@@ -652,7 +656,8 @@ impl Prop {
             meet_thrust(&controls, &mut elements, &pg, None)
         };
         for i in 0..m {
-            elements[i].set_twist(phis[i] + (alpha_base[i] + _da).clamp(-0.45, 0.45));
+            elements[i]
+                .set_twist(phis[i] + (alpha_base[i] + _da).clamp(-lift_line::ALPHA_MAX, lift_line::ALPHA_MAX));
         }
         let _ = best_f;
         self.blade_elements = elements;
@@ -724,7 +729,7 @@ mod tests {
     #[test]
     fn lift_line_design_finite_and_thrust_matching() {
         // Plate polar (no rust-foil) so this is fast; checks the coupled
-        // lifting-line produces finite thrust that converges toward a target.
+        // lifting-line produces finite thrust that converges to the target.
         let mut prop = test_prop();
         // coarser grid for speed
         prop.radial_steps = 12;
@@ -732,8 +737,14 @@ mod tests {
         let (q, t) = prop.lift_line_design(12000.0, 2.0, Some(4.0));
         assert!(t.is_finite() && t > 0.0, "thrust {} not finite/positive", t);
         assert!(q.is_finite() && q > 0.0, "torque {} not finite/positive", q);
-        // The coupled solve must be stable and bounded (well below the 
-        // unreachable target for this tiny prop at this rpm).
-        assert!(t < 2.0 && q < 0.5, "thrust/torque {} {} not bounded", t, q);
+        // The target must actually be met (a u/v-swap in the force projection
+        // once made the model thrust ~v/u times too small, so the design
+        // could never converge onto the target).
+        assert!(
+            (t - 2.0).abs() / 2.0 < 0.05,
+            "thrust {} does not match the 2.0 N target",
+            t
+        );
+        assert!(q < 0.5, "torque {} not bounded", q);
     }
 }

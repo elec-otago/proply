@@ -12,13 +12,16 @@
 //!    circulation `Gamma_i` (one value per station),
 //!  * discontinuities of `Gamma` across station boundaries shed trailed
 //!    helical vortex filaments whose strength equals the jump;
-//!  * each trailed filament is a rigid helix of pitch `2 pi r tan(phi)`,
-//!    updated each outer iteration to the converged inflow angle;
+//!  * the trailed filaments are azimuthally averaged into coaxial vortex
+//!    rings at the station edges; the rotor-plane calibration of the
+//!    helix pitch is folded into a single constant ([`AXIAL_K`]);
 //!  * the induced velocity at a station is the Biot–Savart sum (straight
-//!    segments) over every blade's trailed filaments;
-//!  * `Gamma` is iterated to self-consistency with the polar
-//!    `cl(alpha)` (`Gamma = 1/2 c V cl`), under-relaxed;
-//!  * forces follow Kutta–Joukowski plus profile drag.
+//!    segments) over every blade's trailed rings;
+//!  * `Gamma` is solved to self-consistency with the polar `cl(alpha)`
+//!    (`Gamma = 1/2 c V cl`) by damped Newton;
+//!  * forces follow Kutta–Joukowski plus profile drag: lift is perpendicular
+//!    to the relative velocity, so thrust goes with the tangential speed `v`
+//!    and torque with the axial speed `u`, summed over all `B` blades.
 //!
 //! Sign conventions match the existing BEMT (`blade_element.rs`):
 //!  * `u = u_0 + u_i` (axial; induced `u_i > 0` accelerates the slipstream),
@@ -32,9 +35,27 @@ use crate::simulator::FoilSimulator;
 pub const RHO: f64 = 1.225;
 
 /// Rotor-plane calibration for the axial trailed-ring induction: `u_i =
-/// AXIAL_K * B/(2π) * Σ dg * K`.  Tuned so a uniform/low-loading blade matches
-/// the actuator-disk axial inflow (`u_i ≈ dv = T/(2ρA(u_0))` at the disk).
-pub const AXIAL_K: f64 = 0.5;
+/// AXIAL_K * B/(2π) * Σ dg * K`.  Calibrated (against the corrected
+/// Kutta–Joukowski forces) so a lightly loaded blade's disk-averaged `u_i`
+/// matches the actuator-disk value `w/2`, `w = -u_0 + sqrt(u_0² + 2T/(ρA))`
+/// — see the `axial_induction_matches_actuator_disk` test.
+///
+/// Known limitation: a rigorous trailed-helix model carries a per-edge
+/// pitch factor `1/tan(phi)` (a semi-infinite helix of pitch
+/// `2 pi a tan(phi)` induces `B dg / (2 p)` at the rotor plane), which no
+/// constant can reproduce across operating points — this constant is
+/// effectively `1/tan(phi)` at the calibration point and under-induces far
+/// from it (e.g. in hover).  Iterating the true per-edge pitch inside the
+/// design loop made the frozen-pitch Newton subproblems ill-posed (the
+/// induction gain exceeds the circulation gain at tight pitch), so the
+/// constant is kept until that coupling is solved simultaneously.
+pub const AXIAL_K: f64 = 1.43;
+
+/// Magnitude bound on the prescribed attack angle (rad).  20 deg = the range
+/// the degree-9 polar fits are fitted over; beyond it the fit is an
+/// unreliable extrapolation (`get_cl` only falls back to the flat-plate model
+/// past 30 deg).
+pub const ALPHA_MAX: f64 = 0.35;
 
 /// One radial station of the blade for the lifting-line analysis.
 ///
@@ -172,10 +193,10 @@ fn ring_axial_unit(a: f64, rho: f64, core: f64, n: usize) -> f64 {
 /// from the trailed coaxial vortex rings.  This is the smooth far-field
 /// inflow that physically acts on the blade — no near-field singularity.
 ///
-///  * axial: `u_i(r) = s * B/(4 pi) * sum_j dg_j * K(r, a_j)`, where `K` is
-///    the axial velocity in the plane of a unit ring at radius `a_j` and the
-///    `B/(4 pi)` / rotor-plane factor maps the trailed-sheet circulation to
-///    the disk inflow;
+///  * axial: `u_i(r) = AXIAL_K * B/(2 pi) * sum_j dg_j * K(r, a_j)`, where
+///    `K` is the axial velocity in the plane of a unit ring at radius `a_j`
+///    and the prefactor maps the trailed-sheet circulation to the disk
+///    inflow (calibrated against actuator-disk momentum; see [`AXIAL_K`]);
 ///  * tangential: `v_i(r) = B * Gamma(r) / (4 pi r)` (swirl opposing the
 ///    rotor, reducing the relative tangential speed).
 #[cfg(test)]
@@ -197,7 +218,11 @@ fn induced_velocity(
     }
     dg[m] = gamma[m - 1];
 
+    // Helix-pitch calibration folded into the rotor-plane prefactor (see
+    // AXIAL_K).
+
     let nper = 512;
+    let pref = AXIAL_K * n_b / (2.0 * std::f64::consts::PI);
     let mut ui = vec![0.0; m];
     for (ci, &ri) in r.iter().enumerate() {
         for j in 0..=m {
@@ -205,11 +230,8 @@ fn induced_velocity(
                 continue;
             }
             let a_j = edge[j].max(1.0e-6);
-            ui[ci] += n_b * dg[j] * ring_axial_unit(a_j, ri, core, nper);
+            ui[ci] += pref * dg[j] * ring_axial_unit(a_j, ri, core, nper);
         }
-        // Calibrated rotor-plane factor: disk axial inflow equals half the
-        // fully-developed slipstream value (actuator-disk / Glauert limit).
-        ui[ci] *= AXIAL_K / (2.0 * std::f64::consts::PI);
     }
     // Swirl from the bound circulation (halved for the rotor plane).
     let tang: Vec<f64> = (0..m)
@@ -218,36 +240,20 @@ fn induced_velocity(
     (ui, tang)
 }
 
-/// Exact linear influence between the bound circulation and the induced
-/// flow.  `u_i = sum_j U[i*m+j] Gamma_j` (axial) and `v_i = Vdiag[i]*Gamma_i`
-/// (swirl), matching [`induced_velocity`].
-fn influence_matrices(
-    r: &[f64],
-    edge: &[f64],
-    n_blades: usize,
-    core: f64,
-) -> (Vec<f64>, Vec<f64>) {
+/// Raw trailed-ring kernels: `kmat[ci*(m+1)+k]` is the axial velocity at
+/// station `ci` in the plane of a unit-circulation ring at `edge[k]`.
+/// These are pitch-independent (and the expensive part); the helix-pitch
+/// factors are applied cheaply in [`Influence::matrices`].
+fn ring_kernels(r: &[f64], edge: &[f64], core: f64) -> Vec<f64> {
     let m = r.len();
-    let n_b = n_blades as f64;
     let nper = 512;
-    let pref = AXIAL_K * n_b / (2.0 * std::f64::consts::PI);
-    let mut u = vec![0.0; m * m];
+    let mut kmat = vec![0.0; m * (m + 1)];
     for ci in 0..m {
-        // K[ci][k] = axial velocity at r[ci] in the plane of a unit ring at
-        // edge[k]. Gamma_j feeds trailed rings at edges j and j+1 (the jump
-        // in Gamma), so U[ci][j] = pref*(K[j+1] - K[j]).
-        let mut kk = vec![0.0; m + 1];
         for k in 0..=m {
-            kk[k] = ring_axial_unit(edge[k].max(1.0e-6), r[ci], core, nper);
-        }
-        for j in 0..m {
-            u[ci * m + j] = pref * (kk[j + 1] - kk[j]);
+            kmat[ci * (m + 1) + k] = ring_axial_unit(edge[k].max(1.0e-6), r[ci], core, nper);
         }
     }
-    let vdiag: Vec<f64> = (0..m)
-        .map(|i| n_b / (4.0 * std::f64::consts::PI * r[i].max(1.0e-6)))
-        .collect();
-    (u, vdiag)
+    kmat
 }
 
 /// Per-element flow state induced by a circulation vector.
@@ -257,7 +263,6 @@ struct FlowState {
     vv: Vec<f64>,
     phi: Vec<f64>,
     alpha: Vec<f64>,
-    free: Vec<bool>,
     cl: Vec<f64>,
     residual: Vec<f64>,
 }
@@ -278,7 +283,6 @@ fn eval_flow<F: FoilLike>(
     let mut vv = vec![0.0; m];
     let mut phi = vec![0.0; m];
     let mut alpha = vec![0.0; m];
-    let mut free = vec![false; m];
     let mut cl = vec![0.0; m];
     let mut residual = vec![0.0; m];
     for i in 0..m {
@@ -291,9 +295,9 @@ fn eval_flow<F: FoilLike>(
         v[i] = omega * stations[i].r - vi;
         vv[i] = (u[i] * u[i] + v[i] * v[i]).sqrt();
         phi[i] = u[i].atan2(v[i]);
-        // Prescribed attack angle, clamped below deep stall for solver health.
-        alpha[i] = stations[i].alpha.clamp(-0.45, 0.45);
-        free[i] = stations[i].alpha > -0.45 && stations[i].alpha < 0.45;
+        // Prescribed attack angle, clamped to the polar fit range (see
+        // ALPHA_MAX).
+        alpha[i] = stations[i].alpha.clamp(-ALPHA_MAX, ALPHA_MAX);
         cl[i] = fs[i].get_cl(vv[i], alpha[i]);
         residual[i] = gamma[i] - 0.5 * stations[i].c * vv[i] * cl[i];
     }
@@ -303,7 +307,6 @@ fn eval_flow<F: FoilLike>(
         vv,
         phi,
         alpha,
-        free,
         cl,
         residual,
     }
@@ -382,35 +385,43 @@ fn newton_solve<F: FoilLike>(
     } else {
         vec![0.0; m]
     };
-    let clp_d = 1.0e-3;
     for _iter in 0..80 {
         let st = eval_flow(&gamma, stations, u_0, omega, u_mat, vdiag, fs);
         let rinf = st.residual.iter().fold(0.0f64, |a, x| a.max(x.abs()));
         if rinf < 1.0e-10 {
             break;
         }
+        // Runaway detector: if a subproblem's induction gain exceeds the
+        // circulation gain there is no finite fixed point and the solve
+        // limit-cycles instead (an over-loaded candidate).  Such candidates
+        // only need a deterministic, monotone "how bad is it" answer for the
+        // outer optimizer — return the no-induction circulation instead of a
+        // diverging iterate.
+        if _iter > 20 && rinf > 1.0e-2 {
+            let mut g0 = vec![0.0; m];
+            for i in 0..m {
+                let v0 =
+                    (u_0 * u_0 + (omega * stations[i].r).powi(2)).sqrt();
+                let a0 = stations[i].alpha.clamp(-ALPHA_MAX, ALPHA_MAX);
+                g0[i] = 0.5 * stations[i].c * v0 * fs[i].get_cl(v0, a0);
+            }
+            return g0;
+        }
         let r2 = st.residual.iter().map(|x| x * x).sum::<f64>();
 
-        // Build the analytic Jacobian J = dR/dGamma.
+        // Build the analytic Jacobian J = dR/dGamma.  alpha is prescribed
+        // (independent of Gamma), so cl depends on Gamma only through V; the
+        // weak Reynolds dependence of the polar is neglected.  Thus
+        // dR_i/dGamma_j = delta_ij - 1/2 c cl dV/dGamma_j.
         let mut jac = vec![0.0; m * m];
         for i in 0..m {
             let (u, v, vv, cl) = (st.u[i], st.v[i], st.vv[i], st.cl[i]);
-            let vv2 = (vv * vv).max(1.0e-30);
             for j in 0..m {
                 let du = u_mat[i * m + j];
                 let dv = if i == j { -vdiag[i] } else { 0.0 };
                 let dv_p = (u * du + v * dv) / vv.max(1.0e-30);
-                let mut dalpha = -(v * du + u * dv) / vv2;
-                let mut clp = 0.0;
-                if st.free[i] {
-                    clp = (fs[i].get_cl(vv, st.alpha[i] + clp_d)
-                        - fs[i].get_cl(vv, st.alpha[i] - clp_d))
-                        / (2.0 * clp_d);
-                } else {
-                    dalpha = 0.0;
-                }
                 let jv = if i == j { 1.0 } else { 0.0 }
-                    - 0.5 * stations[i].c * (cl * dv_p + vv * clp * dalpha);
+                    - 0.5 * stations[i].c * cl * dv_p;
                 jac[i * m + j] = jv;
             }
         }
@@ -442,24 +453,78 @@ fn newton_solve<F: FoilLike>(
     gamma
 }
 
-/// Solve the coupled lifting line for one operating point.
-///
-/// `stations[i].c` must equal `fs[i].chord()` (Reynolds/polar depend on
-/// chord).  `seed` is an optional warm-start circulation (ignored if the
-/// length mismatches; pass an empty slice to start cold).  Returns converged
-/// circulation, induced velocities, local angles and thrust/torque.
-pub fn solve<F: FoilLike>(
+/// Precomputed trailed-wake influence for a fixed set of station radii and
+/// blade count: the linear map from the bound circulation to the induced
+/// velocities.  Expensive to build (O(m^2) ring kernels); reuse it across
+/// solves whose station radii do not change (e.g. a design loop that only
+/// varies chord and attack angle).
+pub struct Influence {
+    /// Unit-ring axial kernels, `kmat[ci*(m+1)+k]` at edge `k` (see
+    /// [`ring_kernels`]).
+    kmat: Vec<f64>,
+    pub vdiag: Vec<f64>,
+    n_blades: usize,
+    dr: Vec<f64>,
+}
+
+impl Influence {
+    /// The axial influence matrix `U` (`u_i[i] = sum_j U[i*m+j] Gamma_j`),
+    /// matching the trailed-ring model of [`induced_velocity`]: `Gamma_j`
+    /// feeds the trailed rings at edges `j` and `j+1` (the jump in bound
+    /// circulation) with opposite signs, each scaled by the rotor-plane
+    /// calibration [`AXIAL_K`].
+    pub fn matrices(&self) -> Vec<f64> {
+        let m = self.vdiag.len();
+        let pref = AXIAL_K * self.n_blades as f64 / (2.0 * std::f64::consts::PI);
+        let mut u = vec![0.0; m * m];
+        for ci in 0..m {
+            let row = ci * (m + 1);
+            for j in 0..m {
+                u[ci * m + j] = pref * (self.kmat[row + j + 1] - self.kmat[row + j]);
+            }
+        }
+        u
+    }
+}
+
+/// Build the [`Influence`] for station radii `r` (monotone increasing).
+pub fn influence(r: &[f64], n_blades: usize) -> Influence {
+    let m = r.len();
+    // edges() and the trailing-vortex model need at least two stations.
+    assert!(m >= 2, "lifting line needs >= 2 stations");
+    let edge = edges(r);
+    let dr: Vec<f64> = (0..m).map(|i| edge[i + 1] - edge[i]).collect();
+    // Vortex-core radius, a small fraction of the mean blade element span.
+    let core = 0.15 * (r[m - 1] - r[0]) / m as f64;
+    let kmat = ring_kernels(r, &edge, core);
+    let vdiag: Vec<f64> = (0..m)
+        .map(|i| n_blades as f64 / (4.0 * std::f64::consts::PI * r[i].max(1.0e-6)))
+        .collect();
+    Influence {
+        kmat,
+        vdiag,
+        n_blades,
+        dr,
+    }
+}
+
+/// Solve the coupled lifting line for one operating point, reusing a
+/// precomputed [`Influence`] (see [`influence`]).  `stations[i].c` must equal
+/// `fs[i].chord()` and `stations[i].r` must match the radii `infl` was built
+/// with.  `seed` is an optional warm-start circulation (ignored if the length
+/// mismatches; pass an empty slice to start cold).
+pub fn solve_with_influence<F: FoilLike>(
     stations: &[Station],
     n_blades: usize,
     omega: f64,
     u_0: f64,
     fs: &[&FoilSimulator<F>],
     seed: &[f64],
+    infl: &Influence,
 ) -> LiftLineResult {
     let m = stations.len();
     let r: Vec<f64> = stations.iter().map(|s| s.r).collect();
-    let edge = edges(&r);
-    let dr: Vec<f64> = (0..m).map(|i| edge[i + 1] - edge[i]).collect();
+    let dr = &infl.dr;
 
     let mut res = LiftLineResult::default();
     res.gamma = vec![0.0; m];
@@ -470,23 +535,26 @@ pub fn solve<F: FoilLike>(
     res.d_thrust = vec![0.0; m];
     res.d_torque = vec![0.0; m];
 
-    // Vortex-core radius, a small fraction of the mean blade element span.
-    let core = 0.15 * (r[m - 1] - r[0]) / m as f64;
     // Exact linear influence, then a damped-Newton circulation solve.
-    let (u_mat, vdiag) = influence_matrices(&r, &edge, n_blades, core);
-    let gamma = newton_solve(stations, omega, u_0, &u_mat, &vdiag, fs, seed);
+    let u_mat = infl.matrices();
+    let gamma = newton_solve(stations, omega, u_0, &u_mat, &infl.vdiag, fs, seed);
     res.gamma = gamma.clone();
 
     // Final induced velocities and inflow angles from the converged gamma.
-    let flow = eval_flow(&gamma, stations, u_0, omega, &u_mat, &vdiag, fs);
+    let flow = eval_flow(&gamma, stations, u_0, omega, &u_mat, &infl.vdiag, fs);
     for i in 0..m {
         res.u_i[i] = flow.u[i] - u_0;
-        res.v_i[i] = vdiag[i] * gamma[i];
+        res.v_i[i] = infl.vdiag[i] * gamma[i];
         res.phi[i] = flow.phi[i];
         res.alpha[i] = flow.alpha[i];
     }
 
     // --- Kutta-Joukowski + profile drag forces ---
+    // Lift is perpendicular to the relative velocity V = (u, v), so its axial
+    // (thrust) component goes with `v` and its tangential (torque) component
+    // with `u`; drag is anti-parallel to V (axial with `u`, tangential with
+    // `v`).  `gamma` is the circulation of ONE blade: scale by the blade count.
+    let nb = n_blades as f64;
     let mut t = 0.0;
     let mut q = 0.0;
     for i in 0..m {
@@ -498,10 +566,8 @@ pub fn solve<F: FoilLike>(
         // Same prescribed (clamped) attack angle the circulation was solved for.
         let alpha = res.alpha[i];
         let cd = fs[i].get_cd(vv, alpha);
-        // Drag is anti-parallel to V: its axial (thrust-reducing) component is
-        // along `u`, its tangential (torque-adding) component along `v`.
-        let dt = (RHO * gamma[i] * u - 0.5 * RHO * vv * stations[i].c * cd * u) * dr[i];
-        let dq = (RHO * gamma[i] * v + 0.5 * RHO * vv * stations[i].c * cd * v) * r[i] * dr[i];
+        let dt = nb * (RHO * gamma[i] * v - 0.5 * RHO * vv * stations[i].c * cd * u) * dr[i];
+        let dq = nb * (RHO * gamma[i] * u + 0.5 * RHO * vv * stations[i].c * cd * v) * r[i] * dr[i];
         res.d_thrust[i] = dt;
         res.d_torque[i] = dq;
         t += dt;
@@ -512,9 +578,48 @@ pub fn solve<F: FoilLike>(
     res
 }
 
+/// Solve the coupled lifting line for one operating point (convenience
+/// wrapper that builds the [`Influence`] first; see [`solve_with_influence`]).
+pub fn solve<F: FoilLike>(
+    stations: &[Station],
+    n_blades: usize,
+    omega: f64,
+    u_0: f64,
+    fs: &[&FoilSimulator<F>],
+    seed: &[f64],
+) -> LiftLineResult {
+    let r: Vec<f64> = stations.iter().map(|s| s.r).collect();
+    let infl = influence(&r, n_blades);
+    solve_with_influence(stations, n_blades, omega, u_0, fs, seed, &infl)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A plate-polar blade: `alpha` is uniform and below the clamp, chord
+    /// uniform, so the converged solution is easy to reason about.
+    fn plate_setup(radii: &[f64], chord: f64, alpha: f64) -> (Vec<Station>, Vec<crate::simulator::FoilSimulator<crate::foil::Naca4>>) {
+        use crate::cache::PolarStore;
+        use crate::foil::Naca4;
+        use std::cell::RefCell;
+        use std::rc::Rc;
+        use std::sync::{Arc, Mutex};
+
+        let mut sims = Vec::new();
+        let mut stations = Vec::new();
+        for &r in radii {
+            let foil = Rc::new(RefCell::new(Naca4::new(chord, 0.10, 0.0, 0.4)));
+            let mut fs = FoilSimulator::new(
+                foil,
+                Arc::new(Mutex::new(PolarStore::load("/nonexistent/cache.json"))),
+            );
+            fs.set_plate_mode(true);
+            stations.push(Station { r, c: chord, alpha });
+            sims.push(fs);
+        }
+        (stations, sims)
+    }
 
     #[test]
     fn biot_savart_ring_matches_closed_form() {
@@ -594,8 +699,9 @@ mod tests {
             sims.push(fs);
         }
         let fs_refs: Vec<&FoilSimulator<Naca4>> = sims.iter().collect();
-        let edge = edges(&radii);
-        let (u_mat, vdiag) = influence_matrices(&radii, &edge, 2, 1.0e-4);
+        let infl = influence(&radii, 2);
+        let u_mat = infl.matrices();
+        let vdiag = infl.vdiag.clone();
         let gamma = newton_solve(&stations, omega, u_0, &u_mat, &vdiag, &fs_refs, &[]);
         let st = eval_flow(&gamma, &stations, u_0, omega, &u_mat, &vdiag, &fs_refs);
         let rinf = st.residual.iter().fold(0.0f64, |a, x| a.max(x.abs()));
@@ -604,5 +710,137 @@ mod tests {
         for g in &gamma {
             assert!(g.is_finite() && *g >= 0.0, "circulation {} not sane", g);
         }
+    }
+
+    #[test]
+    fn forces_match_blade_element_projection() {
+        // The Kutta-Joukowski force on each element must equal the textbook
+        // blade-element projection with cos(phi)=v/V, sin(phi)=u/V:
+        //   dT = B 1/2 rho V^2 c (cl cos(phi) - cd sin(phi)) dr
+        //   dQ = B r 1/2 rho V^2 c (cl sin(phi) + cd cos(phi)) dr
+        // (i.e. thrust goes with the *tangential* speed, torque with the
+        // *axial* speed).  This pins the projection independently of the
+        // implementation in `solve`.
+        let radii: Vec<f64> = (0..6).map(|i| 0.02 + 0.01 * i as f64).collect();
+        let (stations, sims) = plate_setup(&radii, 0.010, 0.10);
+        let fs_refs: Vec<&FoilSimulator<crate::foil::Naca4>> = sims.iter().collect();
+        let omega = crate::optimize::rpm2omega(9000.0);
+        let u_0 = 5.0;
+        let n_blades = 2;
+        let res = solve(&stations, n_blades, omega, u_0, &fs_refs, &[]);
+
+        let edge = edges(&radii);
+        let mut t_ref = 0.0;
+        let mut q_ref = 0.0;
+        for (i, s) in stations.iter().enumerate() {
+            let u = u_0 + res.u_i[i];
+            let v = omega * s.r - res.v_i[i];
+            let vv = (u * u + v * v).sqrt();
+            let (cosphi, sinphi) = (v / vv, u / vv);
+            let cl = 2.0 * std::f64::consts::PI * res.alpha[i];
+            let cd = 1.28 * res.alpha[i].sin();
+            let dr = edge[i + 1] - edge[i];
+            let dt = n_blades as f64 * 0.5 * RHO * vv * vv * s.c * (cl * cosphi - cd * sinphi) * dr;
+            let dq = n_blades as f64
+                * s.r
+                * 0.5
+                * RHO
+                * vv
+                * vv
+                * s.c
+                * (cl * sinphi + cd * cosphi)
+                * dr;
+            assert!(
+                (res.d_thrust[i] - dt).abs() < 1.0e-9 * dt.abs().max(1.0e-9),
+                "dT[{}] {} vs {}",
+                i,
+                res.d_thrust[i],
+                dt
+            );
+            assert!(
+                (res.d_torque[i] - dq).abs() < 1.0e-9 * dq.abs().max(1.0e-9),
+                "dQ[{}] {} vs {}",
+                i,
+                res.d_torque[i],
+                dq
+            );
+            t_ref += dt;
+            q_ref += dq;
+        }
+        assert!((res.thrust - t_ref).abs() < 1.0e-9, "{} vs {}", res.thrust, t_ref);
+        assert!((res.torque - q_ref).abs() < 1.0e-9, "{} vs {}", res.torque, q_ref);
+    }
+
+    #[test]
+    fn thrust_survives_the_hover_limit() {
+        // u_0 -> 0: the relative wind is almost purely tangential, so the
+        // Kutta-Joukowski thrust (rho Gamma v) stays large.  A projection
+        // that sends thrust with `u` instead collapses to ~rho Gamma u_i and
+        // under-predicts the thrust by ~v/u (order 10-40 here).
+        let radii: Vec<f64> = (0..6).map(|i| 0.02 + 0.01 * i as f64).collect();
+        let (stations, sims) = plate_setup(&radii, 0.010, 0.10);
+        let fs_refs: Vec<&FoilSimulator<crate::foil::Naca4>> = sims.iter().collect();
+        let omega = crate::optimize::rpm2omega(9000.0);
+        let res = solve(&stations, 2, omega, 0.001, &fs_refs, &[]);
+        assert!(res.thrust > 0.3, "hover thrust {} collapsed", res.thrust);
+    }
+
+    #[test]
+    fn doubling_blades_doubles_thrust() {
+        // gamma is per-blade: at light loading (large u_0) the converged
+        // circulation barely changes with blade count, so the total forces
+        // must scale with B.
+        let radii: Vec<f64> = (0..6).map(|i| 0.02 + 0.01 * i as f64).collect();
+        let (stations, sims) = plate_setup(&radii, 0.006, 0.06);
+        let fs_refs: Vec<&FoilSimulator<crate::foil::Naca4>> = sims.iter().collect();
+        let omega = crate::optimize::rpm2omega(6000.0);
+        let r1 = solve(&stations, 1, omega, 15.0, &fs_refs, &[]);
+        let r2 = solve(&stations, 2, omega, 15.0, &fs_refs, &[]);
+        let ratio = r2.thrust / r1.thrust;
+        assert!(
+            (ratio - 2.0).abs() < 0.3,
+            "thrust ratio {} for B=2 vs B=1",
+            ratio
+        );
+        let qratio = r2.torque / r1.torque;
+        assert!(
+            (qratio - 2.0).abs() < 0.3,
+            "torque ratio {} for B=2 vs B=1",
+            qratio
+        );
+    }
+
+    #[test]
+    fn axial_induction_matches_actuator_disk() {
+        // Calibration check on AXIAL_K: the disk-averaged axial induced
+        // velocity of a lightly loaded blade must match the actuator-disk
+        // value u_disk = w/2 with w = -u_0 + sqrt(u_0^2 + 2T/(rho A)) to
+        // ~25% (the trailed-ring model is a rotor-plane approximation).
+        // A constant prefactor cannot hold this at every operating point
+        // (see the AXIAL_K doc), but the check trips a gross
+        // mis-calibration such as the pre-correction 0.35x under-induction
+        // or a missing blade-count factor.
+        let radii: Vec<f64> = (0..6).map(|i| 0.02 + 0.01 * i as f64).collect();
+        let (stations, sims) = plate_setup(&radii, 0.006, 0.06);
+        let fs_refs: Vec<&FoilSimulator<crate::foil::Naca4>> = sims.iter().collect();
+        let omega = crate::optimize::rpm2omega(6000.0);
+        let u_0 = 15.0;
+        let res = solve(&stations, 2, omega, u_0, &fs_refs, &[]);
+
+        let area = std::f64::consts::PI * (radii[radii.len() - 1].powi(2) - radii[0].powi(2));
+        let w = -u_0 + (u_0 * u_0 + 2.0 * res.thrust / (RHO * area)).sqrt();
+        let u_disk = 0.5 * w;
+        let u_avg = res.u_i.iter().sum::<f64>() / res.u_i.len() as f64;
+        assert!(
+            u_avg > 0.0 && u_avg.is_finite(),
+            "mean axial induction {} not positive/finite",
+            u_avg
+        );
+        assert!(
+            (u_avg / u_disk - 1.0).abs() < 0.25,
+            "mean axial induction {} vs actuator-disk {}",
+            u_avg,
+            u_disk
+        );
     }
 }
