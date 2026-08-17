@@ -69,6 +69,10 @@ target/
 # proply-rs runtime polar cache
 foil_cache.json
 
+# proply-rs local artifacts
+llF/
+proply-rs/.zcode/
+
 # IPython Notebook
 .ipynb_checkpoints
 
