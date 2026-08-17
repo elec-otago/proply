@@ -20,7 +20,8 @@
     "trailing_edge": 0.25,
     "centre_hole": 0.0015,
     "hub_radius": 0.006,
-    "hub_depth": 0.005,
+    "hub_depth": 0.006,
+    "chord_spline_n": 2,
 
     "exclude_zone": [
         {"x":0.005, "z":0.005},
