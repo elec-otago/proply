@@ -20,6 +20,15 @@ impl Pchip {
         let h: Vec<f64> = (0..n - 1).map(|i| x[i + 1] - x[i]).collect();
         let delta: Vec<f64> = (0..n - 1).map(|i| (y[i + 1] - y[i]) / h[i]).collect();
 
+        // Two points collapse to a single linear segment.
+        if n == 2 {
+            return Self {
+                x: x.to_vec(),
+                y: y.to_vec(),
+                d: vec![delta[0], delta[0]],
+            };
+        }
+
         let mut d = vec![0.0; n];
         // Interior points
         for i in 1..n - 1 {
@@ -86,6 +95,22 @@ impl Pchip {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn two_points_are_a_linear_segment() {
+        let x = vec![0.0, 1.0];
+        let y = vec![1.0, 3.0];
+        let p = Pchip::new(&x, &y);
+        for (xi, yi) in x.iter().zip(y.iter()) {
+            assert!((p.eval(*xi) - yi).abs() < 1e-12);
+        }
+        // Linear interpolation at the midpoint (and elsewhere).
+        assert!((p.eval(0.5) - 2.0).abs() < 1e-12);
+        assert!((p.eval(0.25) - 1.5).abs() < 1e-12);
+        // Clamped outside the domain.
+        assert!((p.eval(-1.0) - 1.0).abs() < 1e-12);
+        assert!((p.eval(2.0) - 3.0).abs() < 1e-12);
+    }
 
     #[test]
     fn monotone_data_is_preserved() {
