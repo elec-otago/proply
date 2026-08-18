@@ -109,7 +109,11 @@ impl<F: FoilLike> BladeElement<F> {
     /// The 3-D profile points at this station: returns (lower_line,
     /// upper_line), each an `n`-element array of [x, y, z] points.  The
     /// profile is wrapped onto the cylinder of radius `r` and offset by the
-    /// scimitar angle (mirrors `get_foil_points`).
+    /// scimitar angle (mirrors `get_foil_points`), then re-centred
+    /// vertically: the twist rotation pivots on a point of the chord line
+    /// (see `get_points`), which swings a twisted section to one side of
+    /// z = 0 — without the re-centring the root sections ride high and
+    /// protrude above the hub (the hub is centred on z = 0).
     pub fn get_foil_points(&self, n: usize, scimitar_offset: f64) -> (Vec<[f64; 3]>, Vec<[f64; 3]>) {
         let (pl, pu) = {
             let f = self.foil.borrow();
@@ -118,6 +122,16 @@ impl<F: FoilLike> BladeElement<F> {
         let r = self.r;
         let scimitar_angle = (scimitar_offset / r).atan();
         let circumference = 2.0 * std::f64::consts::PI * r;
+
+        // Centre the station on its own vertical extent, so the stacking
+        // axis (z = 0) passes through the rotated section's midpoint.
+        let mut zmin = f64::INFINITY;
+        let mut zmax = f64::NEG_INFINITY;
+        for p in pl.iter().chain(pu.iter()) {
+            zmin = zmin.min(p[1]);
+            zmax = zmax.max(p[1]);
+        }
+        let zc = 0.5 * (zmin + zmax);
 
         let wrap = |y: f64| {
             let theta = 2.0 * std::f64::consts::PI * y / circumference + scimitar_angle;
@@ -129,9 +143,9 @@ impl<F: FoilLike> BladeElement<F> {
         for i in 0..n {
             // pl = (yl = foil x/chord dir, zl = foil y/thickness dir)
             let [lx, ly] = wrap(pl[i][0]);
-            lower.push([lx, ly, pl[i][1]]);
+            lower.push([lx, ly, pl[i][1] - zc]);
             let [ux, uy] = wrap(pu[i][0]);
-            upper.push([ux, uy, pu[i][1]]);
+            upper.push([ux, uy, pu[i][1] - zc]);
         }
         (lower, upper)
     }

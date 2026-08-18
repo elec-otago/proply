@@ -62,6 +62,34 @@ fn step_writer_errors_with_single_station() {
 }
 
 #[test]
+fn stations_are_vertically_centred_on_the_hub() {
+    // A twisted station must be centred on z = 0 (the hub's mid-plane).
+    // The twist rotation pivots on the chord line, which leaves a twisted
+    // section riding to one side of z = 0 — the blade root then protrudes
+    // above the hub instead of being centred on it.
+    let store: Arc<Mutex<PolarStore>> =
+        Arc::new(Mutex::new(PolarStore::load("/nonexistent/cache.json")));
+    for twist in [0.0, 0.4, -0.4] {
+        let foil = Rc::new(RefCell::new(Naca4::new(0.012, 0.12, 0.06, 0.4)));
+        let be = BladeElement::new(0.006, 0.002, foil, twist, 10000.0, 1.0, store.clone());
+        let (lower, upper) = be.get_foil_points(24, 0.0);
+        let mut zmin = f64::INFINITY;
+        let mut zmax = f64::NEG_INFINITY;
+        for p in lower.iter().chain(upper.iter()) {
+            zmin = zmin.min(p[2]);
+            zmax = zmax.max(p[2]);
+        }
+        assert!(
+            (0.5 * (zmin + zmax)).abs() < 1.0e-12,
+            "twist {}: station centre at z = {}",
+            twist,
+            0.5 * (zmin + zmax)
+        );
+        assert!(zmax - zmin > 1.0e-3, "twist {}: degenerate station", twist);
+    }
+}
+
+#[test]
 fn hub_step_round_trip() {
     let param = DesignParameters::default();
     let text = step_out::hub_only_step(&param).expect("hub_only_step");
