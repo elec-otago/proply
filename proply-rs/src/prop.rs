@@ -347,18 +347,21 @@ impl Prop {
     }
 
     /// Angle of attack (rad) giving the maximum CL/CD at speed `v`, found by
-    /// scanning the polar.  Uses the cached polar, so repeated calls are cheap
-    /// after the first.
+    /// scanning the polar and refining around the winner.  Uses the cached
+    /// polar, so repeated calls are cheap after the first.
     fn best_alpha<F: FoilLike>(fs: &FoilSimulator<F>, v: f64) -> f64 {
+        let ld = |alpha: f64| -> f64 {
+            let cl = fs.get_cl(v, alpha);
+            let cd = fs.get_cd(v, alpha).max(1.0e-6);
+            cl / cd
+        };
         let mut best = 0.0;
         let mut best_ld = f64::NEG_INFINITY;
         for a in -8..=16 {
             let alpha = (a as f64).to_radians();
-            let cl = fs.get_cl(v, alpha);
-            let cd = fs.get_cd(v, alpha).max(1.0e-6);
-            let ld = cl / cd;
-            if ld > best_ld {
-                best_ld = ld;
+            let l = ld(alpha);
+            if l > best_ld {
+                best_ld = l;
                 best = alpha;
             }
         }
@@ -366,9 +369,33 @@ impl Prop {
         // alpha; fall back to a working moderate attack angle instead of the
         // argmax tie (which would pick the scan start).
         if best_ld.is_finite() && best_ld <= 4.9 + 1.0e-6 {
-            best = 0.10;
+            return 0.10;
         }
-        best
+        // The scan quantises the angle to whole degrees; refine to a
+        // continuous maximum with a golden-section search in the +/- 1 deg
+        // neighbourhood of the winner (cl/cd is a smooth polynomial ratio of
+        // alpha there).
+        const INV_PHI: f64 = 0.618_033_988_749_895;
+        let step = 1.0_f64.to_radians();
+        let (mut lo, mut hi) = (best - step, best + step);
+        let (mut c, mut d) = (hi - INV_PHI * (hi - lo), lo + INV_PHI * (hi - lo));
+        let (mut fc, mut fd) = (ld(c), ld(d));
+        for _ in 0..40 {
+            if fc > fd {
+                hi = d;
+                d = c;
+                fd = fc;
+                c = hi - INV_PHI * (hi - lo);
+                fc = ld(c);
+            } else {
+                lo = c;
+                c = d;
+                fc = fd;
+                d = lo + INV_PHI * (hi - lo);
+                fd = ld(d);
+            }
+        }
+        0.5 * (lo + hi)
     }
 
     /// Free-chord law `tip_chord*R^2/r^2`, capped by the geometric limits
@@ -428,6 +455,13 @@ impl Prop {
             let vv = ((u_0 * u_0) + (omega * be.r).powi(2)).sqrt();
             alpha_base.push(Self::best_alpha::<Naca4>(&be.fs, vv));
         }
+        // The raw best-L/D angles are jagged station-to-station: quantised to
+        // whole degrees by the scan, and stepped wherever the Reynolds number
+        // crosses a polar bucket or the low-Re flat-plate cutoff.  Re and Mach
+        // vary smoothly with r, so the underlying optimum does too: use a
+        // least-squares fit (as the BEM path does for the twist) everywhere
+        // downstream (`eval`, `meet_thrust`, the final twist assembly).
+        alpha_base = smooth_alpha_curve(&rr, &alpha_base);
 
         const DA_MAX: f64 = 0.12; // ~7 deg above best-L/D, below deep stall
         // `da` may also trim the attack angle *below* best-L/D (through zero
@@ -645,19 +679,38 @@ impl Prop {
             }
         }
 
-        // Final measured candidate (its own converged forces/twist); hint=None
-        // forces the full bounded search so the reported result is the exact
-        // best (not a fast-path approximation).
+        // Final measured candidate, seeded with the optimizer's converged
+        // `da` so the reported geometry is exactly the design the outer loop
+        // evaluated as its best.  A cold full scan (hint=None) re-solves the
+        // candidates from a different Newton path and can land on another
+        // branch of the nonlinear system, reporting a *worse* thrust match
+        // than the optimizer actually achieved (and baking it into the STEP);
+        // the warm check still falls back to the full scan if it does not
+        // meet the target.
         let mut elements = state.into_inner();
         let controls: Vec<f64> = (0..n_ctrl)
             .map(|k| CH_FLOOR * (cap_ctl[k] / CH_FLOOR).powf(best_x[k].clamp(0.0, 1.0)))
             .collect();
-        let (_da, _err, r_t, r_q, _al, _ch, phis, _reach) = {
-            meet_thrust(&controls, &mut elements, &pg, None)
+        let (_da, _err, r_t, r_q, _al, chords, phis, _reach) = {
+            let hint = *da_hint.borrow();
+            meet_thrust(&controls, &mut elements, &pg, hint)
         };
         for i in 0..m {
             elements[i]
                 .set_twist(phis[i] + (alpha_base[i] + _da).clamp(-lift_line::ALPHA_MAX, lift_line::ALPHA_MAX));
+        }
+        println!("Lifting-line blade stations");
+        for i in 0..m {
+            let alpha = (alpha_base[i] + _da).clamp(-lift_line::ALPHA_MAX, lift_line::ALPHA_MAX);
+            println!(
+                "r={} alpha_base={} alpha={} phi={} twist={} chord={} ",
+                rr[i],
+                alpha_base[i].to_degrees(),
+                alpha.to_degrees(),
+                phis[i].to_degrees(),
+                (phis[i] + alpha).to_degrees(),
+                chords[i]
+            );
         }
         let _ = best_f;
         self.blade_elements = elements;
@@ -680,6 +733,15 @@ fn lin_interp(x: &[f64], y: &[f64], t: f64) -> f64 {
     }
     let f = (t - x[i]) / (x[i + 1] - x[i]);
     y[i] + f * (y[i + 1] - y[i])
+}
+
+/// Least-squares smoothing (degree-4 polynomial) of a per-station angle
+/// distribution: absorbs quantisation and polar-bucket steps while still
+/// tracking the data (the BEM path applies the same idea to the twist).
+fn smooth_alpha_curve(rr: &[f64], alpha: &[f64]) -> Vec<f64> {
+    let deg = 4.min(rr.len().saturating_sub(1));
+    let poly = polyfit(rr, alpha, deg);
+    rr.iter().map(|&r| polyval(&poly, r)).collect()
 }
 
 #[cfg(test)]
@@ -724,6 +786,42 @@ mod tests {
         let p = test_prop();
         let l = p.tip_loss(0.03, 0.2);
         assert!(l > 0.9 && l <= 1.0, "tip loss {}", l);
+    }
+
+    #[test]
+    fn smooth_alpha_curve_removes_staircase() {
+        // A jagged best-L/D distribution: a low-Re flat-plate region at the
+        // hub, then whole-degree quantised angles with neighbour flips.
+        let rr: Vec<f64> = (0..40).map(|i| 0.006 + 0.069 * i as f64 / 39.0).collect();
+        let raw: Vec<f64> = rr
+            .iter()
+            .enumerate()
+            .map(|(i, _)| {
+                if i < 6 {
+                    0.10 // low-Re flat-plate fallback region
+                } else {
+                    (5.0 + ((i * 7) % 3) as f64 * 0.5).to_radians()
+                }
+            })
+            .collect();
+        let s = smooth_alpha_curve(&rr, &raw);
+
+        // Smooth: small second differences station-to-station.
+        let mut max_d2 = 0.0_f64;
+        for i in 1..s.len() - 1 {
+            let d2 = (s[i + 1] - 2.0 * s[i] + s[i - 1]).abs();
+            max_d2 = max_d2.max(d2);
+        }
+        assert!(max_d2 < 1.0e-4, "second differences too large: {}", max_d2);
+
+        // Still tracks the data it was fit to.
+        let dev: f64 = s
+            .iter()
+            .zip(raw.iter())
+            .map(|(a, b)| (a - b).abs())
+            .sum::<f64>()
+            / s.len() as f64;
+        assert!(dev < 1.0_f64.to_radians(), "fit drifted from data: {} rad", dev);
     }
 
     #[test]

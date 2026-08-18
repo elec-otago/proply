@@ -14,11 +14,15 @@
 //!    helical vortex filaments whose strength equals the jump;
 //!  * the trailed filaments are azimuthally averaged into coaxial vortex
 //!    rings at the station edges; the rotor-plane calibration of the
-//!    helix pitch is folded into a single constant ([`AXIAL_K`]);
+//!    helix pitch is folded into a single constant ([`AXIAL_K`]), and the
+//!    ring field is evaluated a small axial distance downstream
+//!    ([`WAKE_OFFSET_K`]) so the blade does not sit in the singular plane
+//!    of its own wake;
 //!  * the induced velocity at a station is the Biot–Savart sum (straight
 //!    segments) over every blade's trailed rings;
 //!  * `Gamma` is solved to self-consistency with the polar `cl(alpha)`
-//!    (`Gamma = 1/2 c V cl`) by damped Newton;
+//!    (`Gamma = 1/2 c V cl`) by damped Newton, with a hub-loss factor
+//!    tapering the circulation to zero at the root (see [`hub_loss`]);
 //!  * forces follow Kutta–Joukowski plus profile drag: lift is perpendicular
 //!    to the relative velocity, so thrust goes with the tangential speed `v`
 //!    and torque with the axial speed `u`, summed over all `B` blades.
@@ -49,13 +53,50 @@ pub const RHO: f64 = 1.225;
 /// design loop made the frozen-pitch Newton subproblems ill-posed (the
 /// induction gain exceeds the circulation gain at tight pitch), so the
 /// constant is kept until that coupling is solved simultaneously.
-pub const AXIAL_K: f64 = 1.43;
+pub const AXIAL_K: f64 = 2.22;
 
 /// Magnitude bound on the prescribed attack angle (rad).  20 deg = the range
 /// the degree-9 polar fits are fitted over; beyond it the fit is an
 /// unreliable extrapolation (`get_cl` only falls back to the flat-plate model
 /// past 30 deg).
 pub const ALPHA_MAX: f64 = 0.35;
+
+/// Axial offset, as a fraction of the local radius, at which the trailed-ring
+/// field is evaluated: `z = WAKE_OFFSET_K * r`.  The trailed helix convects
+/// downstream, so the blade does not sit in the plane of its own wake; this
+/// offset is the constant stand-in for that (the exact per-edge offset
+/// `r*tan(phi)` is pitch-dependent, which the [`AXIAL_K`] doc rules out for
+/// the frozen-pitch design loop).
+///
+/// Without it (z = 0) the in-plane ring kernel has a core-capped O(1/core)
+/// spike at `rho ~ a`, so the straddling ring pair at every station
+/// ([`Influence::matrices`]) samples the *second difference* of the bound
+/// circulation with a huge gain — any station-to-station step in `Gamma`
+/// (e.g. a polar Reynolds-bucket jump in `cl`) becomes a multi-m/s spike in
+/// `u_i` and the inflow angle oscillates station-to-station.  The offset
+/// smooths the kernel at scale `z`, leaving the far-field induction
+/// structure intact.
+pub const WAKE_OFFSET_K: f64 = 0.1;
+
+/// Fraction of the blade span over which the root loading ramps up from
+/// zero (the hub-loss ramp, see [`hub_loss`]).  Deliberately wide: a narrow
+/// ramp concentrates the circulation curvature into the hub region, where
+/// the trailed-ring kernels are least regularised, and the ramp's own
+/// second difference then oscillates the innermost inflow angles.
+pub const HUB_RAMP_FRAC: f64 = 0.3;
+
+/// Hub-loss factor: the bound circulation must vanish at the root, where the
+/// blade meets the hub/spinner, and ramps smoothly (smoothstep) back to full
+/// loading over the first [`HUB_RAMP_FRAC`] of the span — the root analogue
+/// of a tip-loss factor.  Without it the model trails a full-strength root
+/// vortex ring just inside the first station, whose near-field dominates the
+/// innermost stations' inflow angles (a steep, near-singular `phi` at the
+/// hub that no amount of wake regularisation removes).
+fn hub_loss(r: f64, r_in: f64, r_out: f64) -> f64 {
+    let span = (r_out - r_in).max(1.0e-9);
+    let x = ((r - r_in) / (HUB_RAMP_FRAC * span)).clamp(0.0, 1.0);
+    x * x * (3.0 - 2.0 * x)
+}
 
 /// One radial station of the blade for the lifting-line analysis.
 ///
@@ -172,12 +213,15 @@ fn edges(centers: &[f64]) -> Vec<f64> {
     e
 }
 
-/// Axial velocity induced at radius `rho` (>= 0) in the plane of a unit
-/// circulation vortex ring of radius `a`, by Biot–Savart over straight
-/// segments.  On-axis (`rho = 0`) this equals `1/(2 a)` (matches
-/// [`vortex_ring_axial`]); a small Rankine core bounds the `rho ~ a` peak.
-fn ring_axial_unit(a: f64, rho: f64, core: f64, n: usize) -> f64 {
-    let p0 = [rho, 0.0, 0.0];
+/// Axial velocity induced at radius `rho` (>= 0), a height `z` above the
+/// plane of a unit-circulation vortex ring of radius `a`, by Biot–Savart over
+/// straight segments.  On-axis this equals the closed form
+/// `a^2/(2 (a^2+z^2)^(3/2))` (matches [`vortex_ring_axial`]); a small Rankine
+/// core bounds the `rho ~ a, z ~ 0` peak.  `z > 0` (see [`WAKE_OFFSET_K`])
+/// keeps the evaluation point out of the ring plane, where the kernel is
+/// singular.
+fn ring_axial_unit(a: f64, rho: f64, z: f64, core: f64, n: usize) -> f64 {
+    let p0 = [rho, 0.0, z];
     let mut vz = 0.0;
     for s in 0..n {
         let th0 = 2.0 * std::f64::consts::PI * s as f64 / n as f64;
@@ -230,7 +274,7 @@ fn induced_velocity(
                 continue;
             }
             let a_j = edge[j].max(1.0e-6);
-            ui[ci] += pref * dg[j] * ring_axial_unit(a_j, ri, core, nper);
+            ui[ci] += pref * dg[j] * ring_axial_unit(a_j, ri, WAKE_OFFSET_K * ri, core, nper);
         }
     }
     // Swirl from the bound circulation (halved for the rotor plane).
@@ -249,8 +293,9 @@ fn ring_kernels(r: &[f64], edge: &[f64], core: f64) -> Vec<f64> {
     let nper = 512;
     let mut kmat = vec![0.0; m * (m + 1)];
     for ci in 0..m {
+        let z = WAKE_OFFSET_K * r[ci];
         for k in 0..=m {
-            kmat[ci * (m + 1) + k] = ring_axial_unit(edge[k].max(1.0e-6), r[ci], core, nper);
+            kmat[ci * (m + 1) + k] = ring_axial_unit(edge[k].max(1.0e-6), r[ci], z, core, nper);
         }
     }
     kmat
@@ -278,6 +323,7 @@ fn eval_flow<F: FoilLike>(
     fs: &[&FoilSimulator<F>],
 ) -> FlowState {
     let m = stations.len();
+    let (r_in, r_out) = (stations[0].r, stations[m - 1].r);
     let mut u = vec![0.0; m];
     let mut v = vec![0.0; m];
     let mut vv = vec![0.0; m];
@@ -299,7 +345,10 @@ fn eval_flow<F: FoilLike>(
         // ALPHA_MAX).
         alpha[i] = stations[i].alpha.clamp(-ALPHA_MAX, ALPHA_MAX);
         cl[i] = fs[i].get_cl(vv[i], alpha[i]);
-        residual[i] = gamma[i] - 0.5 * stations[i].c * vv[i] * cl[i];
+        // The hub-loss factor scales the circulation target (the blade
+        // carries no circulation at the root).
+        let f = hub_loss(stations[i].r, r_in, r_out);
+        residual[i] = gamma[i] - f * 0.5 * stations[i].c * vv[i] * cl[i];
     }
     FlowState {
         u,
@@ -403,7 +452,8 @@ fn newton_solve<F: FoilLike>(
                 let v0 =
                     (u_0 * u_0 + (omega * stations[i].r).powi(2)).sqrt();
                 let a0 = stations[i].alpha.clamp(-ALPHA_MAX, ALPHA_MAX);
-                g0[i] = 0.5 * stations[i].c * v0 * fs[i].get_cl(v0, a0);
+                let f = hub_loss(stations[i].r, stations[0].r, stations[m - 1].r);
+                g0[i] = f * 0.5 * stations[i].c * v0 * fs[i].get_cl(v0, a0);
             }
             return g0;
         }
@@ -412,16 +462,18 @@ fn newton_solve<F: FoilLike>(
         // Build the analytic Jacobian J = dR/dGamma.  alpha is prescribed
         // (independent of Gamma), so cl depends on Gamma only through V; the
         // weak Reynolds dependence of the polar is neglected.  Thus
-        // dR_i/dGamma_j = delta_ij - 1/2 c cl dV/dGamma_j.
+        // dR_i/dGamma_j = delta_ij - F_i * 1/2 c cl dV/dGamma_j with F the
+        // hub-loss factor.
         let mut jac = vec![0.0; m * m];
         for i in 0..m {
             let (u, v, vv, cl) = (st.u[i], st.v[i], st.vv[i], st.cl[i]);
+            let f = hub_loss(stations[i].r, stations[0].r, stations[m - 1].r);
             for j in 0..m {
                 let du = u_mat[i * m + j];
                 let dv = if i == j { -vdiag[i] } else { 0.0 };
                 let dv_p = (u * du + v * dv) / vv.max(1.0e-30);
                 let jv = if i == j { 1.0 } else { 0.0 }
-                    - 0.5 * stations[i].c * cl * dv_p;
+                    - f * 0.5 * stations[i].c * cl * dv_p;
                 jac[i * m + j] = jv;
             }
         }
@@ -643,11 +695,89 @@ mod tests {
 
     #[test]
     fn ring_kernel_on_axis_is_one_over_2a() {
-        // ring_axial_unit evaluated on its own axis must recover 1/(2a).
+        // ring_axial_unit evaluated on its own axis must recover the closed
+        // form vortex_ring_axial(a, 1, z) = a^2 / (2 (a^2+z^2)^(3/2)), both
+        // near the ring plane and at the wake offset used by the design.
         let a = 0.05;
-        let k = ring_axial_unit(a, 0.0, a * 0.01, 2048);
-        let expect = 1.0 / (2.0 * a);
-        assert!((k - expect).abs() / expect < 1.0e-3, "{} vs {}", k, expect);
+        for z in [a * 0.01, WAKE_OFFSET_K * a] {
+            let k = ring_axial_unit(a, 0.0, z, a * 0.01, 2048);
+            let expect = vortex_ring_axial(a, 1.0, z);
+            assert!(
+                (k - expect).abs() / expect < 1.0e-3,
+                "z={}: {} vs {}",
+                z,
+                k,
+                expect
+            );
+        }
+    }
+
+    #[test]
+    fn hub_loss_tapers_root_circulation() {
+        // The bound circulation must vanish at the root (hub-loss factor):
+        // a full-strength root vortex ring just inside the first station
+        // otherwise dominates the innermost stations' inflow angles with a
+        // steep, near-singular phi.
+        let radii: Vec<f64> = (0..6).map(|i| 0.02 + 0.01 * i as f64).collect();
+        let (stations, sims) = plate_setup(&radii, 0.010, 0.10);
+        let fs_refs: Vec<&FoilSimulator<crate::foil::Naca4>> = sims.iter().collect();
+        let res = solve(
+            &stations,
+            2,
+            crate::optimize::rpm2omega(9000.0),
+            5.0,
+            &fs_refs,
+            &[],
+        );
+        assert!(res.gamma[0].abs() < 1.0e-9, "root gamma {}", res.gamma[0]);
+        assert!(
+            res.gamma[1] > 0.0 && res.gamma[1] < res.gamma[3],
+            "ramp {} vs {}",
+            res.gamma[1],
+            res.gamma[3]
+        );
+        // The factor itself is a smoothstep: mid-ramp is exactly one half.
+        let r_mid = 0.02 + 0.5 * HUB_RAMP_FRAC * (0.07 - 0.02);
+        let f_mid = hub_loss(r_mid, 0.02, 0.07);
+        assert!((f_mid - 0.5).abs() < 1.0e-12, "mid-ramp {}", f_mid);
+        assert!(hub_loss(0.02, 0.02, 0.07).abs() < 1.0e-12);
+        assert!((hub_loss(0.07, 0.02, 0.07) - 1.0).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn kernel_does_not_amplify_circulation_steps() {
+        // Regression: the in-plane (z=0) ring kernel has a core-capped
+        // O(1/core) spike at rho ~ a, so the straddling ring pair sampled the
+        // *second difference* of Gamma with a huge gain — a 10% step in Gamma
+        // at one station (e.g. a polar Reynolds-bucket jump in cl) produced a
+        // ~9 m/s spike in u_i and the inflow angle oscillated
+        // station-to-station.  With the wake offset the step must induce a
+        // smooth, bounded response.
+        let m = 43;
+        let radii: Vec<f64> = (0..m).map(|i| 0.006 + 0.069 * i as f64 / 42.0).collect();
+        let infl = influence(&radii, 3);
+        let u_mat = infl.matrices();
+
+        // Smooth (elliptic-ish) circulation with a 10% step at mid-span.
+        let gamma: Vec<f64> = radii
+            .iter()
+            .enumerate()
+            .map(|(i, &r)| {
+                let x = (r - 0.006) / 0.069;
+                let g = 0.12 * (1.0 - x * x);
+                g * if i == 21 { 0.9 } else { 1.0 }
+            })
+            .collect();
+
+        let ui: Vec<f64> = (0..m)
+            .map(|i| (0..m).map(|j| u_mat[i * m + j] * gamma[j]).sum())
+            .collect();
+        // Skip the root-vortex hub stations (their steep u_i gradient is
+        // physical, not an oscillation); the step at station 21 is mid-span.
+        for w in 5..m {
+            let step = (ui[w] - ui[w - 1]).abs();
+            assert!(step < 1.0, "u_i step {} m/s at station {}", step, w);
+        }
     }
 
     #[test]
@@ -737,7 +867,10 @@ mod tests {
             let v = omega * s.r - res.v_i[i];
             let vv = (u * u + v * v).sqrt();
             let (cosphi, sinphi) = (v / vv, u / vv);
-            let cl = 2.0 * std::f64::consts::PI * res.alpha[i];
+            // The hub-loss factor scales the circulation (lift) target only;
+            // profile drag still acts at zero circulation.
+            let f = hub_loss(s.r, radii[0], radii[radii.len() - 1]);
+            let cl = f * 2.0 * std::f64::consts::PI * res.alpha[i];
             let cd = 1.28 * res.alpha[i].sin();
             let dr = edge[i + 1] - edge[i];
             let dt = n_blades as f64 * 0.5 * RHO * vv * vv * s.c * (cl * cosphi - cd * sinphi) * dr;
@@ -827,10 +960,20 @@ mod tests {
         let u_0 = 15.0;
         let res = solve(&stations, 2, omega, u_0, &fs_refs, &[]);
 
-        let area = std::f64::consts::PI * (radii[radii.len() - 1].powi(2) - radii[0].powi(2));
+        // The hub-loss ramp unloads the root annulus; compare the actuator
+        // disk over the *loaded* area and average u_i over the loaded
+        // stations only (scaling the whole model to a mean that includes an
+        // unloaded root over-induces everything else).
+        let r_out = radii[radii.len() - 1];
+        let i0 = radii
+            .iter()
+            .position(|&r| hub_loss(r, radii[0], r_out) >= 1.0)
+            .unwrap_or(0);
+        let area = std::f64::consts::PI * (r_out.powi(2) - radii[i0].powi(2));
         let w = -u_0 + (u_0 * u_0 + 2.0 * res.thrust / (RHO * area)).sqrt();
         let u_disk = 0.5 * w;
-        let u_avg = res.u_i.iter().sum::<f64>() / res.u_i.len() as f64;
+        let loaded: Vec<f64> = (i0..radii.len()).map(|i| res.u_i[i]).collect();
+        let u_avg = loaded.iter().sum::<f64>() / loaded.len() as f64;
         assert!(
             u_avg > 0.0 && u_avg.is_finite(),
             "mean axial induction {} not positive/finite",
