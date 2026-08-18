@@ -21,10 +21,12 @@ use crate::smooth::smooth;
 
 /// Camber values scanned by the lifting-line design when no explicit camber
 /// is given (the JSON `camber` key / `--camber`): each candidate gets a full
-/// design pass and the best torque at matched thrust wins.  A small fixed
-/// set, not a continuous variable — the polar cache hashes camber at 0.01
-/// granularity, so a continuous camber would turn the objective into a
-/// staircase of discrete polar families.
+/// design pass, plus one composed per-station distribution (the best of
+/// these candidates at each radius, smoothed — see [`compose_camber`]);
+/// the best torque at matched thrust wins.  A small fixed set, not a
+/// continuous variable — the polar cache hashes camber at 0.01 granularity,
+/// so a continuous camber would turn the objective into a staircase of
+/// discrete polar families.
 pub const CAMBER_CANDIDATES: [f64; 3] = [0.0, 0.02, 0.04];
 
 /// A propeller: a collection of blade elements plus the design parameters.
@@ -361,10 +363,16 @@ impl Prop {
         (torque, thrust_final)
     }
 
-    /// Angle of attack (rad) giving the maximum CL/CD at speed `v`, found by
-    /// scanning the polar and refining around the winner.  Uses the cached
-    /// polar, so repeated calls are cheap after the first.
+    /// Angle of attack (rad) giving the maximum CL/CD at speed `v`.  See
+    /// [`best_ld`] for how it is found.
     fn best_alpha<F: FoilLike>(fs: &FoilSimulator<F>, v: f64) -> f64 {
+        Self::best_ld::<F>(fs, v).0
+    }
+
+    /// The maximum CL/CD at speed `v` and the angle of attack (rad) that
+    /// gives it, found by scanning the polar and refining around the winner.
+    /// Uses the cached polar, so repeated calls are cheap after the first.
+    fn best_ld<F: FoilLike>(fs: &FoilSimulator<F>, v: f64) -> (f64, f64) {
         let ld = |alpha: f64| -> f64 {
             let cl = fs.get_cl(v, alpha);
             let cd = fs.get_cd(v, alpha).max(1.0e-6);
@@ -384,7 +392,7 @@ impl Prop {
         // alpha; fall back to a working moderate attack angle instead of the
         // argmax tie (which would pick the scan start).
         if best_ld.is_finite() && best_ld <= 4.9 + 1.0e-6 {
-            return 0.10;
+            return (0.10, best_ld);
         }
         // The scan quantises the angle to whole degrees; refine to a
         // continuous maximum with a golden-section search in the +/- 1 deg
@@ -410,7 +418,7 @@ impl Prop {
                 fd = ld(d);
             }
         }
-        0.5 * (lo + hi)
+        (0.5 * (lo + hi), fc.max(fd))
     }
 
     /// Free-chord law `tip_chord*R^2/r^2`, capped by the geometric limits
@@ -461,17 +469,29 @@ impl Prop {
         // --- Camber: one full design pass per candidate, best wins -------
         // An explicit `camber` parameter pins a single value; otherwise the
         // [`CAMBER_CANDIDATES`] set is scanned (see its docs for why a fixed
-        // set rather than a continuous variable).
+        // set rather than a continuous variable) plus a composed per-station
+        // distribution: the best section L/D at each radius, smoothed.
         let cambers: Vec<f64> = match self.param.camber {
             Some(m) => vec![m],
             None => CAMBER_CANDIDATES.to_vec(),
         };
 
+        /// One camber candidate's seed: the station elements and their
+        /// prescribed attack angles.  `uniform` is `Some(m)` for the
+        /// scanned uniform candidates; the composed distribution carries
+        /// `None` (its per-station camber lives in the elements' foils).
+        struct CamberSeed {
+            uniform: Option<f64>,
+            elements: Vec<BladeElement<Naca4>>,
+            alpha_base: Vec<f64>,
+        }
+
         // Per-candidate seeds, built up-front (before the closures below
         // borrow `self`): station foils at camber `m`, and the best-L/D
         // attack angles their polars produce.
-        let mut seeds: Vec<(f64, Vec<BladeElement<Naca4>>, Vec<f64>)> =
-            Vec::with_capacity(cambers.len());
+        let mut seeds: Vec<CamberSeed> = Vec::with_capacity(cambers.len() + 1);
+        let mut raw_alphas: Vec<Vec<f64>> = Vec::with_capacity(cambers.len());
+        let mut lds: Vec<Vec<f64>> = Vec::with_capacity(cambers.len());
         for &m_c in &cambers {
             let mut elements: Vec<BladeElement<Naca4>> = Vec::with_capacity(m);
             for &r in &rr {
@@ -479,10 +499,13 @@ impl Prop {
                 let c = self.chord_law(r, 0.0, s_cap);
                 elements.push(self.new_blade_element_with_chord(r, rpm, phi0 + 0.12, c, m_c));
             }
-            let mut alpha_base: Vec<f64> = Vec::with_capacity(m);
+            let mut alpha_raw: Vec<f64> = Vec::with_capacity(m);
+            let mut ld_row: Vec<f64> = Vec::with_capacity(m);
             for be in &elements {
                 let vv = ((u_0 * u_0) + (omega * be.r).powi(2)).sqrt();
-                alpha_base.push(Self::best_alpha::<Naca4>(&be.fs, vv));
+                let (a, l) = Self::best_ld::<Naca4>(&be.fs, vv);
+                alpha_raw.push(a);
+                ld_row.push(l);
             }
             // The raw best-L/D angles are jagged station-to-station: quantised to
             // whole degrees by the scan, and stepped wherever the Reynolds number
@@ -490,8 +513,45 @@ impl Prop {
             // vary smoothly with r, so the underlying optimum does too: use a
             // least-squares fit (as the BEM path does for the twist) everywhere
             // downstream (`eval`, `meet_thrust`, the final twist assembly).
-            let alpha_base = smooth_alpha_curve(&rr, &alpha_base);
-            seeds.push((m_c, elements, alpha_base));
+            let alpha_base = smooth_alpha_curve(&rr, &alpha_raw);
+            seeds.push(CamberSeed {
+                uniform: Some(m_c),
+                elements,
+                alpha_base,
+            });
+            raw_alphas.push(alpha_raw);
+            lds.push(ld_row);
+        }
+
+        // The composed per-station distribution: best candidate at each
+        // radius (thick root sections prefer little or no camber, thin
+        // outboard sections benefit from it), smoothed and quantised to the
+        // 0.01 polar-hash grid, competing against the uniform candidates on
+        // the same objective.
+        if self.param.camber.is_none() {
+            let (m_dist, winners) = compose_camber(&rr, &lds, &cambers);
+            let mut elements: Vec<BladeElement<Naca4>> = Vec::with_capacity(m);
+            for (i, &r) in rr.iter().enumerate() {
+                let phi0 = u_0.atan2(omega * r).max(1.0e-3);
+                let c = self.chord_law(r, 0.0, s_cap);
+                elements.push(self.new_blade_element_with_chord(r, rpm, phi0 + 0.12, c, m_dist[i]));
+            }
+            // Each station keeps its winning candidate's attack angle.
+            let alpha_raw: Vec<f64> = (0..m).map(|i| raw_alphas[winners[i]][i]).collect();
+            let alpha_base = smooth_alpha_curve(&rr, &alpha_raw);
+            println!(
+                "lift-line composed camber m(r): [{}]",
+                m_dist
+                    .iter()
+                    .map(|&m| format!("{:.2}", m))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            );
+            seeds.push(CamberSeed {
+                uniform: None,
+                elements,
+                alpha_base,
+            });
         }
 
         const DA_MAX: f64 = 0.12; // ~7 deg above best-L/D, below deep stall
@@ -701,7 +761,7 @@ impl Prop {
             f: f64,
             q: f64,
             t: f64,
-            camber: f64,
+            label: String,
             da: f64,
             alpha_base: Vec<f64>,
             phis: Vec<f64>,
@@ -710,15 +770,19 @@ impl Prop {
         }
         let mut best: Option<Outcome> = None;
 
-        for (m_c, cand_elements, cand_alpha) in seeds {
+        for seed in seeds {
+            let camber_label = match seed.uniform {
+                Some(m) => format!("m={:.2}", m),
+                None => "m(r) per-station".to_string(),
+            };
             // Install the candidate: fresh elements, attack angles and warm
             // state (a previous candidate's converged gamma/da belong to a
             // different foil family).
-            *state.borrow_mut() = cand_elements;
-            *alpha_base.borrow_mut() = cand_alpha;
+            *state.borrow_mut() = seed.elements;
+            *alpha_base.borrow_mut() = seed.alpha_base;
             *pg.borrow_mut() = vec![0.0; m];
             *da_hint.borrow_mut() = None;
-            *cur_m.borrow_mut() = m_c;
+            *cur_m.borrow_mut() = seed.uniform.unwrap_or(0.0);
 
             let mut nm = optimize::NelderMead::default();
             nm.maxiter = 120;
@@ -773,8 +837,8 @@ impl Prop {
             }
             let f = r_q + 50.0 * err;
             println!(
-                "lift-line camber m={:.2}: T={:.4} Q={:.4} (obj {:.4})",
-                m_c, r_t, r_q, f
+                "lift-line camber {}: T={:.4} Q={:.4} (obj {:.4})",
+                camber_label, r_t, r_q, f
             );
             let wins = match &best {
                 None => true,
@@ -785,7 +849,7 @@ impl Prop {
                     f,
                     q: r_q,
                     t: r_t,
-                    camber: m_c,
+                    label: camber_label,
                     da,
                     alpha_base: ab,
                     phis,
@@ -802,16 +866,18 @@ impl Prop {
             None => return (0.0, 0.0),
         };
         println!(
-            "Lifting-line design: camber m={:.2} da={:.3} T={:.4} Q={:.4}",
-            win.camber, win.da, win.t, win.q
+            "Lifting-line design: camber {} da={:.3} T={:.4} Q={:.4}",
+            win.label, win.da, win.t, win.q
         );
         println!("Lifting-line blade stations");
         for i in 0..m {
             let alpha =
                 (win.alpha_base[i] + win.da).clamp(-lift_line::ALPHA_MAX, lift_line::ALPHA_MAX);
+            let camber = win.elements[i].foil.borrow().m;
             println!(
-                "r={} alpha_base={} alpha={} phi={} twist={} chord={} ",
+                "r={} camber={} alpha_base={} alpha={} phi={} twist={} chord={} ",
                 rr[i],
+                camber,
                 win.alpha_base[i].to_degrees(),
                 alpha.to_degrees(),
                 win.phis[i].to_degrees(),
@@ -848,6 +914,41 @@ fn smooth_alpha_curve(rr: &[f64], alpha: &[f64]) -> Vec<f64> {
     let deg = 4.min(rr.len().saturating_sub(1));
     let poly = polyfit(rr, alpha, deg);
     rr.iter().map(|&r| polyval(&poly, r)).collect()
+}
+
+/// Compose a per-station camber distribution from `lds[c][i]`, the section
+/// L/D of candidate camber `c` at station `i`: each station takes its best
+/// candidate's camber, the resulting step distribution is smoothed with a
+/// low-order polynomial fit (like the attack angles), clamped to the
+/// candidate range, and quantised to the 0.01 polar-hash grid — the built
+/// foil then hashes to exactly the polars it was selected on.  Returns the
+/// camber per station and each station's winning candidate index (for its
+/// attack-angle seed).
+fn compose_camber(rr: &[f64], lds: &[Vec<f64>], candidates: &[f64]) -> (Vec<f64>, Vec<usize>) {
+    let n = rr.len();
+    let mut winners = vec![0usize; n];
+    let mut raw = vec![candidates[0]; n];
+    for i in 0..n {
+        let mut best = f64::NEG_INFINITY;
+        for (c, l) in lds.iter().enumerate() {
+            if l[i] > best {
+                best = l[i];
+                winners[i] = c;
+                raw[i] = candidates[c];
+            }
+        }
+    }
+    let deg = 3.min(n.saturating_sub(1));
+    let poly = polyfit(rr, &raw, deg);
+    let hi = candidates.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let m_dist = rr
+        .iter()
+        .map(|&r| {
+            let v = polyval(&poly, r).clamp(0.0, hi);
+            (100.0 * v).round() / 100.0
+        })
+        .collect();
+    (m_dist, winners)
 }
 
 #[cfg(test)]
@@ -928,6 +1029,46 @@ mod tests {
             .sum::<f64>()
             / s.len() as f64;
         assert!(dev < 1.0_f64.to_radians(), "fit drifted from data: {} rad", dev);
+    }
+
+    #[test]
+    fn compose_camber_smooths_and_quantises() {
+        // A span where the thick root prefers no camber and the outboard
+        // sections prefer 0.04: the composed distribution must rise
+        // smoothly from ~0 at the root to ~0.04 outboard, quantised to the
+        // 0.01 polar-hash grid and clamped to the candidate range.
+        let n = 30;
+        let rr: Vec<f64> = (0..n).map(|i| 0.006 + 0.062 * i as f64 / (n - 1) as f64).collect();
+        let candidates = [0.0_f64, 0.02, 0.04];
+        // lds[c][i]: the flat candidate wins the inner ~20% of the span,
+        // the cambered one the rest (the middle candidate never wins).
+        let lds: Vec<Vec<f64>> = [0, 1, 2]
+            .iter()
+            .map(|&c| {
+                rr.iter()
+                    .map(|&r| {
+                        let x = (r - 0.006) / 0.062;
+                        match c {
+                            0 => 55.0 - 25.0 * x,
+                            1 => 30.0,
+                            _ => 45.0 + 25.0 * x,
+                        }
+                    })
+                    .collect()
+            })
+            .collect();
+
+        let (m_dist, winners) = compose_camber(&rr, &lds, &candidates);
+        // Root region takes the flat candidate, outboard the cambered one.
+        assert_eq!(winners[0], 0);
+        assert_eq!(winners[n - 1], 2);
+        // Quantised to the 0.01 grid, clamped to [0, 0.04].
+        for &m in &m_dist {
+            let on_grid = (m * 100.0).fract().abs() < 1.0e-9;
+            assert!(on_grid && (0.0..=0.04).contains(&m), "m = {}", m);
+        }
+        // Monotone rise (small tolerance for fit wiggle at the ends).
+        assert!(m_dist[n - 1] > m_dist[0] + 0.02, "no rise: {} -> {}", m_dist[0], m_dist[n - 1]);
     }
 
     #[test]

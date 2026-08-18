@@ -63,7 +63,8 @@ DESIGN OPTIONS:
                            chord (lifting line; default: 3).
     --camber <M>           Fixed foil camber (fraction of chord).  Without
                            it, the lifting-line design scans {{0, 0.02, 0.04}}
-                           and keeps the best-performing camber.
+                           plus a per-station distribution composed from them,
+                           keeping the best performer.
     --plate                Use analytic flat-plate polars (testing only).
 
 OUTPUT OPTIONS:

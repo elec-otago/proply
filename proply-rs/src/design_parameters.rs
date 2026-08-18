@@ -37,7 +37,8 @@ pub struct DesignParameters {
     /// Foil camber (max camber as a fraction of chord, NACA 4-series `m`).
     /// When set, every station uses exactly this camber; when absent, the
     /// lifting-line design scans the [`crate::prop::CAMBER_CANDIDATES`] set
-    /// and keeps the best-performing one.
+    /// plus a composed per-station distribution and keeps the
+    /// best-performing one.
     #[serde(default)]
     pub camber: Option<f64>,
     // ---- run / design options (mirror the CLI flags so a JSON file can
