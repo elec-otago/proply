@@ -2,9 +2,18 @@
 //! `proply/foil_simulator.py` (the `XfoilSimulatedFoil` class).
 //!
 //! A polar is a 41-point alpha sweep from -20° to 20° at a Reynolds number
-//! rounded onto a log-spaced grid; the (cl, cd) data is fitted with a
-//! degree-9 polynomial in alpha (radians).  Results are cached per foil per
-//! Reynolds number, both in memory and on disk.
+//! on a log-spaced grid; the (cl, cd) data is fitted with a degree-9
+//! polynomial in alpha (radians).  Results are cached per foil per Reynolds
+//! number, both in memory and on disk.
+//!
+//! Polars are *simulated* at the grid points only, but *evaluated* by
+//! log-Re interpolation between the two bracketing buckets' fits (blending
+//! the fitted coefficients, which is exact for linear interpolation of the
+//! polar functions).  Below the grid floor the same blend runs from the
+//! first bucket down to the analytic flat-plate model, so cl/cd — and
+//! everything derived from them (best-L/D angles, circulation) — are
+//! continuous in Reynolds number instead of stepping at every bucket
+//! boundary.
 //!
 //! Note: the Python code passes a Mach number into the cache key but never
 //! applies it to the XFOIL run (only `Re` and `max_iter` are set), so the
@@ -21,6 +30,53 @@ use crate::foil::FoilLike;
 use crate::polyfit::{polyfit, polyval};
 
 const DEG2RAD: f64 = std::f64::consts::PI / 180.0;
+
+/// Reynolds grid the polars are simulated at: np.geomspace(30000, 2e6, 20).
+const RE_MIN: f64 = 30000.0;
+const RE_MAX: f64 = 2.0e6;
+const N_RE: usize = 20;
+/// Below the grid floor the polars blend from the first bucket down to the
+/// analytic flat-plate model, reaching it at this Reynolds number (XFOIL is
+/// not trustworthy there, but a continuous blend beats a hard switch —
+/// low-Re hub stations would otherwise jump between two very different
+/// cl/cd models across one radius).
+const RE_FLAT_PLATE: f64 = 10000.0;
+
+/// Grid point `i` of the Reynolds grid (log-spaced, `RE_MIN..=RE_MAX`).
+fn re_grid(i: usize) -> f64 {
+    RE_MIN * (RE_MAX / RE_MIN).powf(i as f64 / (N_RE - 1) as f64)
+}
+
+/// Bracket `re >= RE_MIN` on the Reynolds grid: `(lo, hi, w)` with `lo`/`hi`
+/// adjacent grid indices and `w` the log-Re blend weight toward `hi`
+/// (0 at `re_grid(lo)`, 1 at `re_grid(hi)`).  Clamped at the top of the
+/// grid — no extrapolation past `RE_MAX`.
+fn re_bracket(re: f64) -> (usize, usize, f64) {
+    let mut lo = 0;
+    while lo + 2 < N_RE && re_grid(lo + 1) <= re {
+        lo += 1;
+    }
+    let (g_lo, g_hi) = (re_grid(lo), re_grid(lo + 1));
+    let w = ((re / g_lo).ln() / (g_hi / g_lo).ln()).clamp(0.0, 1.0);
+    (lo, lo + 1, w)
+}
+
+/// Linear blend of two polynomial coefficient vectors (highest power first,
+/// as `polyfit` returns), padding the shorter with zero high-order
+/// coefficients.
+fn blend_poly(lo: &[f64], hi: &[f64], w: f64) -> Vec<f64> {
+    let n = lo.len().max(hi.len());
+    let lift = |p: &[f64]| -> Vec<f64> {
+        let mut v = vec![0.0; n - p.len()];
+        v.extend_from_slice(p);
+        v
+    };
+    let (a, b) = (lift(lo), lift(hi));
+    a.iter()
+        .zip(b.iter())
+        .map(|(&x, &y)| (1.0 - w) * x + w * y)
+        .collect()
+}
 
 /// A simulated foil: returns CL and CD for a velocity and angle of attack,
 /// simulating polars with rust-foil on demand.
@@ -61,27 +117,6 @@ impl<F: FoilLike> FoilSimulator<F> {
         self.plate_mode = on;
     }
 
-    /// Reynolds number rounded onto np.geomspace(30000, 2e6, 20).
-    fn get_reynolds(&self, v: f64) -> f64 {
-        let re = self.foil.borrow().reynolds(v);
-        let mut best = 30000.0;
-        let mut best_d = (best - re).abs();
-        let geom_ratio: f64 = 2.0e6 / 30000.0;
-        for i in 1..20 {
-            let cand = 30000.0 * geom_ratio.powf(i as f64 / 19.0);
-            let d = (cand - re).abs();
-            if d < best_d {
-                best_d = d;
-                best = cand;
-            }
-        }
-        if best < 30000.0 {
-            30000.0
-        } else {
-            best
-        }
-    }
-
     /// Mach number rounded to the nearest 0.05 (np.round(Ma*2, 1) / 2).
     fn get_mach(&self, v: f64) -> f64 {
         let ma = self.foil.borrow().mach(v);
@@ -93,7 +128,7 @@ impl<F: FoilLike> FoilSimulator<F> {
             return 2.0 * std::f64::consts::PI * alpha;
         }
         let ma = self.foil.borrow().mach(v);
-        if ma > 0.97 || alpha.abs() > 30.0 * DEG2RAD || self.foil.borrow().reynolds(v) < 30000.0 {
+        if ma > 0.97 || alpha.abs() > 30.0 * DEG2RAD || self.foil.borrow().reynolds(v) < RE_FLAT_PLATE {
             return 2.0 * std::f64::consts::PI * alpha;
         }
         let (cl_poly, _) = self.get_polars(v);
@@ -105,17 +140,48 @@ impl<F: FoilLike> FoilSimulator<F> {
             return 1.28 * alpha.sin();
         }
         let ma = self.foil.borrow().mach(v);
-        if ma > 0.97 || alpha.abs() > 30.0 * DEG2RAD || self.foil.borrow().reynolds(v) < 30000.0 {
+        if ma > 0.97 || alpha.abs() > 30.0 * DEG2RAD || self.foil.borrow().reynolds(v) < RE_FLAT_PLATE {
             return 1.28 * alpha.sin();
         }
         let (_, cd_poly) = self.get_polars(v);
         polyval(&cd_poly, alpha)
     }
 
-    /// The fitted (cl, cd) polynomials for the velocity `v`.
+    /// The fitted (cl, cd) polynomials for the velocity `v`, interpolated
+    /// across Reynolds buckets (see the module docs): the bracketing grid
+    /// buckets' fits are blended in log-Re, and below the grid floor the
+    /// blend runs from the first bucket down to the flat-plate model.
     pub fn get_polars(&self, v: f64) -> (Vec<f64>, Vec<f64>) {
-        let reynolds = self.get_reynolds(v);
+        let re = self.foil.borrow().reynolds(v);
         let mach = self.get_mach(v);
+
+        if re < RE_FLAT_PLATE {
+            return flat_plate_polys();
+        }
+        if re < RE_MIN {
+            let (fp_cl, fp_cd) = flat_plate_polys();
+            let w = (re / RE_FLAT_PLATE).ln() / (RE_MIN / RE_FLAT_PLATE).ln();
+            let (cl_hi, cd_hi) = self.bucket_polars(RE_MIN, mach);
+            return (
+                blend_poly(&fp_cl, &cl_hi, w),
+                blend_poly(&fp_cd, &cd_hi, w),
+            );
+        }
+
+        let (lo, hi, w) = re_bracket(re);
+        let (cl_lo, cd_lo) = self.bucket_polars(re_grid(lo), mach);
+        let (cl_hi, cd_hi) = self.bucket_polars(re_grid(hi), mach);
+        (
+            blend_poly(&cl_lo, &cl_hi, w),
+            blend_poly(&cd_lo, &cd_hi, w),
+        )
+    }
+
+    /// The fitted (cl, cd) polynomials of the single grid bucket at
+    /// `reynolds` (a [`re_grid`] point): the memoized degree-9 fit of the
+    /// cached polar, simulated with rust-foil on first use.  This is the
+    /// bucket-level fetch the interpolation blends.
+    fn bucket_polars(&self, reynolds: f64, mach: f64) -> (Vec<f64>, Vec<f64>) {
         let key = (self.foil.borrow().hash(), reynolds.to_bits());
 
         if let Some(p) = self.poly_cache.borrow().get(&key) {
@@ -279,15 +345,30 @@ mod tests {
     }
 
     #[test]
-    fn reynolds_grid_rounding() {
+    fn reynolds_bracket_on_log_grid() {
+        // v = 10 m/s, chord 0.05: Re = 1.225*10*0.05/15.11e-6 = 40536,
+        // which lies between grid points 1 and 2.
         let f = Naca4::new(0.05, 0.12, 0.0, 0.4);
         let fs = FoilSimulator::new(Rc::new(RefCell::new(f)), test_store());
-        // v = 10 m/s, chord 0.05: Re = 1.225*10*0.05/15.11e-6 = 40536
-        let re = fs.get_reynolds(10.0);
-        // Nearest geomspace(30000, 2e6, 20) point: index 1 = 30000*(2e6/3e4)^(1/19)
-        let ratio: f64 = 2.0e6 / 30000.0;
-        let expected = 30000.0 * ratio.powf(1.0 / 19.0);
-        assert!((re - expected).abs() < 1e-6, "re = {}", re);
+        let re = 1.225 * 10.0 * 0.05 / 15.11e-6;
+        let (lo, hi, w) = re_bracket(re);
+        assert_eq!((lo, hi), (1, 2), "re = {}", re);
+        assert!(
+            w > 0.0 && w < 1.0,
+            "w = {} for re = {} between {} and {}",
+            w,
+            re,
+            re_grid(lo),
+            re_grid(hi)
+        );
+        // Exactly on a grid point: weight zero, bracket starts there.
+        let (lo, _hi, w) = re_bracket(re_grid(5));
+        assert_eq!(lo, 5);
+        assert!(w.abs() < 1.0e-12);
+        // Above the grid: clamped to the top pair, no extrapolation.
+        let (lo, hi, w) = re_bracket(RE_MAX * 10.0);
+        assert_eq!((lo, hi), (N_RE - 2, N_RE - 1));
+        assert!((w - 1.0).abs() < 1.0e-12);
     }
 
     #[test]
@@ -311,59 +392,123 @@ mod tests {
         assert!((cd - 1.28 * alpha.sin()).abs() < 1e-12);
     }
 
-    #[test]
-    fn polar_fit_matches_stored_data() {
-        // A smooth synthetic polar is inserted under the exact cache key the
-        // simulator computes for a chosen velocity; get_polars must find it
-        // and fit degree-9 polynomials that reproduce the data.
-        let v = 22.0; // Re = 1.225*22*0.05/15.11e-6 ~ 89179
-        let f = Naca4::new(0.05, 0.12, 0.0, 0.4);
-        let store = test_store();
-        let fs = FoilSimulator::new(Rc::new(RefCell::new(f.clone())), store.clone());
-
-        // Compute the same key the simulator does.
-        let re_raw = f.reynolds(v);
-        let geom_ratio: f64 = 2.0e6 / 30000.0;
-        let mut re_grid = 30000.0;
-        let mut best_d = (re_grid - re_raw).abs();
-        for i in 1..20 {
-            let cand = 30000.0 * geom_ratio.powf(i as f64 / 19.0);
-            let d = (cand - re_raw).abs();
-            if d < best_d {
-                best_d = d;
-                re_grid = cand;
-            }
-        }
-        let key = cache_key(&f.hash(), re_grid, fs.get_mach(v));
-
-        // Smooth degree-5 synthetic polar (in radians).
+    /// Seed `k`-scaled synthetic polar data (cl = k * 2 pi alpha, exact under
+    /// the degree-9 fit) under the store keys for the given grid Reynolds
+    /// numbers, at the snapped Mach the simulator will query for `v_for(re)`.
+    fn seed_bucket(
+        f: &Naca4,
+        store: &Arc<Mutex<PolarStore>>,
+        fs: &FoilSimulator<Naca4>,
+        g: f64,
+        v_for_g: f64,
+        k: f64,
+    ) {
         let mut alpha = Vec::new();
         let mut cl = Vec::new();
         let mut cd = Vec::new();
         for i in 0..81 {
             let a = (-20.0 + 0.5 * i as f64) * DEG2RAD;
             alpha.push(a);
-            cl.push(2.0 * std::f64::consts::PI * a + 3.0 * a * a - 20.0 * a.powi(3));
-            cd.push(0.005 + 0.5 * a * a);
+            cl.push(k * 2.0 * std::f64::consts::PI * a);
+            cd.push(0.005 + 0.3 * a * a);
         }
-        store.lock().unwrap().insert(
-            key,
-            StoredPolar {
-                alpha,
-                cl,
-                cd,
-            },
-        );
+        let key = cache_key(&f.hash(), g, fs.get_mach(v_for_g));
+        store.lock().unwrap().insert(key, StoredPolar { alpha, cl, cd });
+    }
+
+    #[test]
+    fn polar_fit_matches_stored_data() {
+        // get_polars must find the stored bucket data and reproduce it with
+        // the degree-9 fit.  The interpolation fetches both bracketing
+        // buckets, so seed them with the same polar.
+        let chord = 0.05;
+        let v_for = |re: f64| re * 15.11e-6 / (1.225 * chord);
+        let v = 22.0; // Re = 1.225*22*0.05/15.11e-6 ~ 89179
+        let f = Naca4::new(chord, 0.12, 0.0, 0.4);
+        let store = test_store();
+        let fs = FoilSimulator::new(Rc::new(RefCell::new(f.clone())), store.clone());
+
+        let re_raw = f.reynolds(v);
+        let (lo, hi, _w) = re_bracket(re_raw);
+        seed_bucket(&f, &store, &fs, re_grid(lo), v_for(re_grid(lo)), 1.0);
+        seed_bucket(&f, &store, &fs, re_grid(hi), v_for(re_grid(hi)), 1.0);
 
         let (cl_p, cd_p) = fs.get_polars(v);
-        // A degree-9 fit of the degree-5 data reproduces it to ~1e-10.
+        // A degree-9 fit of linear/quadratic data reproduces it to ~1e-10.
         let a = 5.0 * DEG2RAD;
-        let cl_ref = 2.0 * std::f64::consts::PI * a + 3.0 * a * a - 20.0 * a.powi(3);
+        let cl_ref = 2.0 * std::f64::consts::PI * a;
         let cl_est = polyval(&cl_p, a);
         assert!((cl_est - cl_ref).abs() < 1e-6, "cl_est {} cl_ref {}", cl_est, cl_ref);
-        let cd_ref = 0.005 + 0.5 * a * a;
+        let cd_ref = 0.005 + 0.3 * a * a;
         let cd_est = polyval(&cd_p, a);
         assert!((cd_est - cd_ref).abs() < 1e-6, "cd_est {} cd_ref {}", cd_est, cd_ref);
+    }
+
+    #[test]
+    fn polars_interpolate_across_reynolds() {
+        // Adjacent buckets carry different polars; cl must move continuously
+        // from one to the other in log-Re, with no step at the bucket
+        // boundary (the snapped behaviour jumped by the full
+        // bucket-to-bucket difference).
+        let chord = 0.05;
+        let v_for = |re: f64| re * 15.11e-6 / (1.225 * chord);
+        let f = Naca4::new(chord, 0.12, 0.0, 0.4);
+        let store = test_store();
+        let fs = FoilSimulator::new(Rc::new(RefCell::new(f.clone())), store.clone());
+
+        // cl_k(alpha) = k * 2 pi alpha; buckets 1..3 get k = 1, 3, 5.
+        seed_bucket(&f, &store, &fs, re_grid(1), v_for(re_grid(1)), 1.0);
+        seed_bucket(&f, &store, &fs, re_grid(2), v_for(re_grid(2)), 3.0);
+        seed_bucket(&f, &store, &fs, re_grid(3), v_for(re_grid(3)), 5.0);
+
+        let a = 5.0 * DEG2RAD;
+        let tau = 2.0 * std::f64::consts::PI;
+        let cl_at = |re: f64| fs.get_cl(v_for(re), a);
+
+        // On grid points the bucket's own polar is returned.
+        assert!((cl_at(re_grid(1)) - tau * a).abs() < 1e-9);
+        assert!((cl_at(re_grid(2)) - 3.0 * tau * a).abs() < 1e-9);
+        // Log-midpoint: exactly the mean of the bracketing polars.
+        let re_mid = (re_grid(1) * re_grid(2)).sqrt();
+        assert!((cl_at(re_mid) - 2.0 * tau * a).abs() < 1e-9);
+        // Continuity across a bucket boundary (this is the regression: the
+        // snapped code stepped by the full (3-1) * tau * a here).
+        let eps = 1.0e-6;
+        let below = cl_at(re_grid(2) * (1.0 - eps));
+        let above = cl_at(re_grid(2) * (1.0 + eps));
+        assert!(
+            (below - above).abs() < 1.0e-4 * tau * a,
+            "bucket-boundary step: {} vs {}",
+            below,
+            above
+        );
+    }
+
+    #[test]
+    fn low_re_blends_flat_plate_with_first_bucket() {
+        // Below the grid floor the polar blends from the first bucket down
+        // to the flat-plate model over [RE_FLAT_PLATE, RE_MIN); below
+        // RE_FLAT_PLATE the analytic branch is exact.
+        let chord = 0.05;
+        let v_for = |re: f64| re * 15.11e-6 / (1.225 * chord);
+        let f = Naca4::new(chord, 0.12, 0.0, 0.4);
+        let store = test_store();
+        let fs = FoilSimulator::new(Rc::new(RefCell::new(f.clone())), store.clone());
+
+        // A distinctive first bucket: cl = 0.5 * 2 pi alpha.
+        seed_bucket(&f, &store, &fs, RE_MIN, v_for(RE_MIN), 0.5);
+
+        let a = 5.0 * DEG2RAD;
+        let tau = 2.0 * std::f64::consts::PI;
+        // Just below the grid floor: nearly the first bucket's polar.
+        let cl = fs.get_cl(v_for(RE_MIN * (1.0 - 1.0e-9)), a);
+        assert!((cl - 0.5 * tau * a).abs() < 1e-6, "cl {}", cl);
+        // Near the bottom of the blend: nearly the flat plate.
+        let cl = fs.get_cl(v_for(RE_FLAT_PLATE * (1.0 + 1.0e-9)), a);
+        assert!((cl - tau * a).abs() < 1e-6, "cl {}", cl);
+        // Below the blend floor the analytic flat plate is exact.
+        let cl = fs.get_cl(v_for(RE_FLAT_PLATE * 0.999), a);
+        assert!((cl - tau * a).abs() < 1e-12, "cl {}", cl);
     }
 
     #[test]
