@@ -41,6 +41,32 @@ const N_RE: usize = 20;
 /// low-Re hub stations would otherwise jump between two very different
 /// cl/cd models across one radius).
 const RE_FLAT_PLATE: f64 = 10000.0;
+/// Physical floor on the profile drag: at these Reynolds numbers a smooth
+/// airfoil's cd never drops below ~0.008 over the working alpha range, but
+/// rust-foil occasionally "converges" with cd ~ 0 (a failed viscous solve
+/// flagged as converged).  A degree-9 fit of such a sweep produces spurious
+/// cl/cd peaks of 200+ that `best_alpha` happily chases, so those buckets
+/// are treated as degenerate (flat-plate fallback), exactly like sweeps
+/// with too few converged points.
+const CD_FLOOR: f64 = 0.004;
+
+/// Reject sweeps whose drag is unphysical (see [`CD_FLOOR`]): the minimum
+/// cd over the |alpha| <= 15 deg working window must clear the floor.
+fn polar_is_physical(p: &StoredPolar) -> bool {
+    let win = 15.0 * DEG2RAD;
+    let mut min_cd = f64::INFINITY;
+    let mut n_win = 0;
+    for (&a, &cd) in p.alpha.iter().zip(p.cd.iter()) {
+        if a.abs() <= win {
+            if cd.is_nan() {
+                return false;
+            }
+            min_cd = min_cd.min(cd);
+            n_win += 1;
+        }
+    }
+    n_win > 0 && min_cd > CD_FLOOR
+}
 
 /// Grid point `i` of the Reynolds grid (log-spaced, `RE_MIN..=RE_MAX`).
 fn re_grid(i: usize) -> f64 {
@@ -194,15 +220,16 @@ impl<F: FoilLike> FoilSimulator<F> {
             store.get(&ck).cloned()
         };
         let (cl_poly, cd_poly) = match cached {
-            Some(p) if p.alpha.len() > 20 => fit_polar(&p),
+            Some(p) if p.alpha.len() > 20 && polar_is_physical(&p) => fit_polar(&p),
             _ => {
                 self.xfoil_simulate_polars(reynolds, mach);
                 let store = self.store.lock().unwrap();
                 match store.get(&ck) {
-                    Some(p) if p.alpha.len() > 20 => fit_polar(p),
-                    // Degenerate case: too few converged points.  The Python
-                    // code recurses forever here (its fallback never writes
-                    // to the DB); we return the flat-plate model instead.
+                    Some(p) if p.alpha.len() > 20 && polar_is_physical(p) => fit_polar(p),
+                    // Degenerate case: too few converged points, or an
+                    // unphysical (near-zero drag) sweep.  The Python code
+                    // recurses forever here (its fallback never writes to
+                    // the DB); we return the flat-plate model instead.
                     _ => flat_plate_polys(),
                 }
             }
@@ -482,6 +509,42 @@ mod tests {
             below,
             above
         );
+    }
+
+    #[test]
+    fn polar_physicality_guard() {
+        // rust-foil sometimes "converges" with cd ~ 0 (a failed viscous
+        // solve); the degree-9 fit of such a sweep gives spurious cl/cd
+        // peaks of 200+ that best_alpha chases.  The guard must reject those
+        // sweeps (and NaNs) while accepting healthy drag levels.  (A
+        // rejected cached sweep is re-simulated; the flat-plate fallback only
+        // applies when that fails too, which cannot be forced here.)
+        let mk = |cd_val: f64| {
+            let mut alpha = Vec::new();
+            let mut cl = Vec::new();
+            let mut cd = Vec::new();
+            for i in 0..41 {
+                let a = (-20.0 + i as f64) * DEG2RAD;
+                alpha.push(a);
+                cl.push(2.0 * std::f64::consts::PI * a);
+                cd.push(cd_val.max(0.01 + 0.3 * a.abs()));
+            }
+            StoredPolar { alpha, cl, cd }
+        };
+        // Healthy drag passes.
+        assert!(polar_is_physical(&mk(0.02)));
+        // Near-zero drag inside the working window is rejected...
+        let mut garbage = mk(0.02);
+        for (i, cdv) in garbage.cd.iter_mut().enumerate() {
+            if garbage.alpha[i].abs() <= 10.0 * DEG2RAD {
+                *cdv = 1.0e-9;
+            }
+        }
+        assert!(!polar_is_physical(&garbage), "zero-drag sweep accepted");
+        // ...as is NaN drag.
+        let mut nan_p = mk(0.02);
+        nan_p.cd[20] = f64::NAN;
+        assert!(!polar_is_physical(&nan_p), "NaN-drag sweep accepted");
     }
 
     #[test]

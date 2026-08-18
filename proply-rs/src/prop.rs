@@ -19,6 +19,14 @@ use crate::polyfit::{polyfit, polyval};
 use crate::simulator::FoilSimulator;
 use crate::smooth::smooth;
 
+/// Camber values scanned by the lifting-line design when no explicit camber
+/// is given (the JSON `camber` key / `--camber`): each candidate gets a full
+/// design pass and the best torque at matched thrust wins.  A small fixed
+/// set, not a continuous variable — the polar cache hashes camber at 0.01
+/// granularity, so a continuous camber would turn the objective into a
+/// staircase of discrete polar families.
+pub const CAMBER_CANDIDATES: [f64; 3] = [0.0, 0.02, 0.04];
+
 /// A propeller: a collection of blade elements plus the design parameters.
 pub struct Prop {
     pub param: DesignParameters,
@@ -60,7 +68,12 @@ impl Prop {
         let x_limit = self.get_max_chord(r, twist);
         let thickness = self.get_foil_thickness(r);
 
-        let foil = Rc::new(RefCell::new(Naca4::new(x_limit, thickness / x_limit, 0.0, 0.4)));
+        let foil = Rc::new(RefCell::new(Naca4::new(
+            x_limit,
+            thickness / x_limit,
+            self.param.camber.unwrap_or(0.0),
+            0.4,
+        )));
         foil.borrow_mut().set_trailing_edge(self.param.trailing_edge / 1000.0);
 
         let c_max = {
@@ -86,16 +99,18 @@ impl Prop {
     }
 
     /// Create a blade element with an explicit chord `c` (the lifting-line
-    /// design sizes the chord directly instead of the geometric fit).
+    /// design sizes the chord directly instead of the geometric fit) and
+    /// camber fraction `camber` (NACA 4-series `m`).
     fn new_blade_element_with_chord(
         &mut self,
         r: f64,
         rpm: f64,
         twist: f64,
         c: f64,
+        camber: f64,
     ) -> BladeElement<Naca4> {
         let thickness = self.get_foil_thickness(r);
-        let foil = Rc::new(RefCell::new(Naca4::new(c, thickness / c, 0.0, 0.4)));
+        let foil = Rc::new(RefCell::new(Naca4::new(c, thickness / c, camber, 0.4)));
         foil.borrow_mut().set_trailing_edge(self.param.trailing_edge / 1000.0);
         foil.borrow_mut().modify_chord(c);
 
@@ -443,25 +458,41 @@ impl Prop {
             .map(|k| r_hub + (r_tip - r_hub) * k as f64 / (n_ctrl.max(2) - 1) as f64)
             .collect();
 
-        // Initial elements (used only to seed best-L/D angles).
-        let mut elements: Vec<BladeElement<Naca4>> = Vec::with_capacity(m);
-        for &r in &rr {
-            let phi0 = u_0.atan2(omega * r).max(1.0e-3);
-            let c = self.chord_law(r, 0.0, s_cap);
-            elements.push(self.new_blade_element_with_chord(r, rpm, phi0 + 0.12, c));
+        // --- Camber: one full design pass per candidate, best wins -------
+        // An explicit `camber` parameter pins a single value; otherwise the
+        // [`CAMBER_CANDIDATES`] set is scanned (see its docs for why a fixed
+        // set rather than a continuous variable).
+        let cambers: Vec<f64> = match self.param.camber {
+            Some(m) => vec![m],
+            None => CAMBER_CANDIDATES.to_vec(),
+        };
+
+        // Per-candidate seeds, built up-front (before the closures below
+        // borrow `self`): station foils at camber `m`, and the best-L/D
+        // attack angles their polars produce.
+        let mut seeds: Vec<(f64, Vec<BladeElement<Naca4>>, Vec<f64>)> =
+            Vec::with_capacity(cambers.len());
+        for &m_c in &cambers {
+            let mut elements: Vec<BladeElement<Naca4>> = Vec::with_capacity(m);
+            for &r in &rr {
+                let phi0 = u_0.atan2(omega * r).max(1.0e-3);
+                let c = self.chord_law(r, 0.0, s_cap);
+                elements.push(self.new_blade_element_with_chord(r, rpm, phi0 + 0.12, c, m_c));
+            }
+            let mut alpha_base: Vec<f64> = Vec::with_capacity(m);
+            for be in &elements {
+                let vv = ((u_0 * u_0) + (omega * be.r).powi(2)).sqrt();
+                alpha_base.push(Self::best_alpha::<Naca4>(&be.fs, vv));
+            }
+            // The raw best-L/D angles are jagged station-to-station: quantised to
+            // whole degrees by the scan, and stepped wherever the Reynolds number
+            // crosses a polar bucket or the low-Re flat-plate cutoff.  Re and Mach
+            // vary smoothly with r, so the underlying optimum does too: use a
+            // least-squares fit (as the BEM path does for the twist) everywhere
+            // downstream (`eval`, `meet_thrust`, the final twist assembly).
+            let alpha_base = smooth_alpha_curve(&rr, &alpha_base);
+            seeds.push((m_c, elements, alpha_base));
         }
-        let mut alpha_base: Vec<f64> = Vec::with_capacity(m);
-        for be in &elements {
-            let vv = ((u_0 * u_0) + (omega * be.r).powi(2)).sqrt();
-            alpha_base.push(Self::best_alpha::<Naca4>(&be.fs, vv));
-        }
-        // The raw best-L/D angles are jagged station-to-station: quantised to
-        // whole degrees by the scan, and stepped wherever the Reynolds number
-        // crosses a polar bucket or the low-Re flat-plate cutoff.  Re and Mach
-        // vary smoothly with r, so the underlying optimum does too: use a
-        // least-squares fit (as the BEM path does for the twist) everywhere
-        // downstream (`eval`, `meet_thrust`, the final twist assembly).
-        alpha_base = smooth_alpha_curve(&rr, &alpha_base);
 
         const DA_MAX: f64 = 0.12; // ~7 deg above best-L/D, below deep stall
         // `da` may also trim the attack angle *below* best-L/D (through zero
@@ -481,7 +512,13 @@ impl Prop {
         // chord at any radius is the smooth PCHIP spline through the
         // controls at `ref_r` (clipped to the local geometric cap for
         // safety), so there are no taper/cap kinks.
-        let state = RefCell::new(elements);
+        // Shared, per-candidate design state: the station elements under
+        // design (`state`), their prescribed attack angles (`alpha_base`)
+        // and the current candidate's camber (for the progress logs).  The
+        // camber loop below swaps these between passes.
+        let state = RefCell::new(Vec::<BladeElement<Naca4>>::new());
+        let alpha_base = RefCell::new(Vec::<f64>::new());
+        let cur_m = RefCell::new(0.0_f64);
         let pg = RefCell::new(vec![0.0; m]); // warm-start gamma
         // The trailed-wake influence depends only on the station radii and the
         // blade count, so build it once and reuse it for every evaluation.
@@ -503,6 +540,7 @@ impl Prop {
                     seed: &[f64]|
          -> (f64, f64, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
             let alphas: Vec<f64> = alpha_base
+                .borrow()
                 .iter()
                 .map(|&ab| (ab + da).clamp(-lift_line::ALPHA_MAX, lift_line::ALPHA_MAX))
                 .collect();
@@ -573,7 +611,8 @@ impl Prop {
                     if err <= 0.03 {
                         *pg_r.borrow_mut() = cur.clone();
                         println!(
-                            "lift-line ctrl=[{}] da={:.3} (warm): T={:.4} Q={:.4}",
+                            "lift-line m={:.2} ctrl=[{}] da={:.3} (warm): T={:.4} Q={:.4}",
+                            *cur_m.borrow(),
                             controls.iter().map(|c| format!("{:.4}", c)).collect::<Vec<_>>().join(" "),
                             hd, t, q
                         );
@@ -644,7 +683,8 @@ impl Prop {
             *da_hint.borrow_mut() = Some(da);
             if hint.is_none() {
                 println!(
-                    "lift-line ctrl=[{}] da={:.3}: T={:.4} Q={:.4}",
+                    "lift-line m={:.2} ctrl=[{}] da={:.3}: T={:.4} Q={:.4}",
+                    *cur_m.borrow(),
                     controls.iter().map(|c| format!("{:.4}", c)).collect::<Vec<_>>().join(" "),
                     da, t, q
                 );
@@ -653,68 +693,134 @@ impl Prop {
             q + 50.0 * err
         };
 
-        let mut nm = optimize::NelderMead::default();
-        nm.maxiter = 120;
-        let bounds: Vec<Option<(f64, f64)>> = vec![Some((0.0, 1.0)); n_ctrl];
-        // First start at the full chord (the thrust-capable geometry); each
-        // later start warm-starts from the running best point so the simplex
-        // keeps working the promising region (and the shared gamma/da warm
-        // state — pg / da_hint — is already near the solution).
-        let mut best_x: Vec<f64> = vec![1.0; n_ctrl];
-        let mut best_f = f64::INFINITY;
-        for i in 0..3 {
-            let x0: Vec<f64> = if i == 0 {
-                vec![1.0; n_ctrl]
-            } else {
-                let scale = if i == 1 { 0.85 } else { 0.7 };
-                best_x.iter().map(|&v| (scale * v).clamp(0.0, 1.0)).collect()
-            };
-            let (x, f) = nm.minimize(&obj, &x0, &bounds);
-            if f < best_f {
-                best_f = f;
-                best_x = x;
+        // One full design pass per camber candidate.  Selection uses the
+        // same objective the outer optimizer minimises (`q + 50*err`), so
+        // camber competes with chord shape on equal terms: thrust target
+        // first, then torque.
+        struct Outcome {
+            f: f64,
+            q: f64,
+            t: f64,
+            camber: f64,
+            da: f64,
+            alpha_base: Vec<f64>,
+            phis: Vec<f64>,
+            chords: Vec<f64>,
+            elements: Vec<BladeElement<Naca4>>,
+        }
+        let mut best: Option<Outcome> = None;
+
+        for (m_c, cand_elements, cand_alpha) in seeds {
+            // Install the candidate: fresh elements, attack angles and warm
+            // state (a previous candidate's converged gamma/da belong to a
+            // different foil family).
+            *state.borrow_mut() = cand_elements;
+            *alpha_base.borrow_mut() = cand_alpha;
+            *pg.borrow_mut() = vec![0.0; m];
+            *da_hint.borrow_mut() = None;
+            *cur_m.borrow_mut() = m_c;
+
+            let mut nm = optimize::NelderMead::default();
+            nm.maxiter = 120;
+            let bounds: Vec<Option<(f64, f64)>> = vec![Some((0.0, 1.0)); n_ctrl];
+            // First start at the full chord (the thrust-capable geometry); each
+            // later start warm-starts from the running best point so the simplex
+            // keeps working the promising region (and the shared gamma/da warm
+            // state — pg / da_hint — is already near the solution).
+            let mut best_x: Vec<f64> = vec![1.0; n_ctrl];
+            let mut best_f = f64::INFINITY;
+            for i in 0..3 {
+                let x0: Vec<f64> = if i == 0 {
+                    vec![1.0; n_ctrl]
+                } else {
+                    let scale = if i == 1 { 0.85 } else { 0.7 };
+                    best_x.iter().map(|&v| (scale * v).clamp(0.0, 1.0)).collect()
+                };
+                let (x, f) = nm.minimize(&obj, &x0, &bounds);
+                if f < best_f {
+                    best_f = f;
+                    best_x = x;
+                }
+                if best_f < 0.03 {
+                    break;
+                }
             }
-            if best_f < 0.03 {
-                break;
+
+            // Final measured candidate, seeded with the optimizer's converged
+            // `da` so the reported geometry is exactly the design the outer loop
+            // evaluated as its best.  A cold full scan (hint=None) re-solves the
+            // candidates from a different Newton path and can land on another
+            // branch of the nonlinear system, reporting a *worse* thrust match
+            // than the optimizer actually achieved (and baking it into the STEP);
+            // the warm check still falls back to the full scan if it does not
+            // meet the target.
+            let mut elements = std::mem::take(&mut *state.borrow_mut());
+            let controls: Vec<f64> = (0..n_ctrl)
+                .map(|k| CH_FLOOR * (cap_ctl[k] / CH_FLOOR).powf(best_x[k].clamp(0.0, 1.0)))
+                .collect();
+            let (da, err, r_t, r_q, _al, chords, phis, _reach) = {
+                let hint = *da_hint.borrow();
+                meet_thrust(&controls, &mut elements, &pg, hint)
+            };
+            let ab = alpha_base.borrow().clone();
+            let assembled = phis.len() == m;
+            if assembled {
+                for i in 0..m {
+                    elements[i].set_twist(
+                        phis[i] + (ab[i] + da).clamp(-lift_line::ALPHA_MAX, lift_line::ALPHA_MAX),
+                    );
+                }
+            }
+            let f = r_q + 50.0 * err;
+            println!(
+                "lift-line camber m={:.2}: T={:.4} Q={:.4} (obj {:.4})",
+                m_c, r_t, r_q, f
+            );
+            let wins = match &best {
+                None => true,
+                Some(b) => f < b.f,
+            };
+            if assembled && wins {
+                best = Some(Outcome {
+                    f,
+                    q: r_q,
+                    t: r_t,
+                    camber: m_c,
+                    da,
+                    alpha_base: ab,
+                    phis,
+                    chords,
+                    elements,
+                });
             }
         }
 
-        // Final measured candidate, seeded with the optimizer's converged
-        // `da` so the reported geometry is exactly the design the outer loop
-        // evaluated as its best.  A cold full scan (hint=None) re-solves the
-        // candidates from a different Newton path and can land on another
-        // branch of the nonlinear system, reporting a *worse* thrust match
-        // than the optimizer actually achieved (and baking it into the STEP);
-        // the warm check still falls back to the full scan if it does not
-        // meet the target.
-        let mut elements = state.into_inner();
-        let controls: Vec<f64> = (0..n_ctrl)
-            .map(|k| CH_FLOOR * (cap_ctl[k] / CH_FLOOR).powf(best_x[k].clamp(0.0, 1.0)))
-            .collect();
-        let (_da, _err, r_t, r_q, _al, chords, phis, _reach) = {
-            let hint = *da_hint.borrow();
-            meet_thrust(&controls, &mut elements, &pg, hint)
+        let win = match best {
+            Some(w) => w,
+            // No candidate produced a usable design (every pass failed to
+            // meet the thrust target); nothing to report or export.
+            None => return (0.0, 0.0),
         };
-        for i in 0..m {
-            elements[i]
-                .set_twist(phis[i] + (alpha_base[i] + _da).clamp(-lift_line::ALPHA_MAX, lift_line::ALPHA_MAX));
-        }
+        println!(
+            "Lifting-line design: camber m={:.2} da={:.3} T={:.4} Q={:.4}",
+            win.camber, win.da, win.t, win.q
+        );
         println!("Lifting-line blade stations");
         for i in 0..m {
-            let alpha = (alpha_base[i] + _da).clamp(-lift_line::ALPHA_MAX, lift_line::ALPHA_MAX);
+            let alpha =
+                (win.alpha_base[i] + win.da).clamp(-lift_line::ALPHA_MAX, lift_line::ALPHA_MAX);
             println!(
                 "r={} alpha_base={} alpha={} phi={} twist={} chord={} ",
                 rr[i],
-                alpha_base[i].to_degrees(),
+                win.alpha_base[i].to_degrees(),
                 alpha.to_degrees(),
-                phis[i].to_degrees(),
-                (phis[i] + alpha).to_degrees(),
-                chords[i]
+                win.phis[i].to_degrees(),
+                (win.phis[i] + alpha).to_degrees(),
+                win.chords[i]
             );
         }
-        let _ = best_f;
-        self.blade_elements = elements;
-        (r_q, r_t)
+        self.blade_elements = win.elements;
+        (win.q, win.t)
     }
 }
 
@@ -822,6 +928,18 @@ mod tests {
             .sum::<f64>()
             / s.len() as f64;
         assert!(dev < 1.0_f64.to_radians(), "fit drifted from data: {} rad", dev);
+    }
+
+    #[test]
+    fn blade_element_camber_is_applied() {
+        // The camber candidate must reach the NACA 4-series foil (it keys
+        // the polar cache, so a wrong m silently designs a different blade).
+        let mut p = test_prop();
+        let be = p.new_blade_element_with_chord(0.02, 1000.0, 0.1, 0.008, 0.04);
+        assert!(
+            (be.foil.borrow().m - 0.04).abs() < 1.0e-12,
+            "camber not applied"
+        );
     }
 
     #[test]

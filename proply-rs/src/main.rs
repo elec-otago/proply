@@ -29,6 +29,7 @@ struct Args {
     plate: Option<bool>,
     ar: Option<f64>,
     chord_spline_n: Option<usize>,
+    camber: Option<f64>,
     help: bool,
 }
 
@@ -60,6 +61,9 @@ DESIGN OPTIONS:
                            caps the chord (thinner blade) in the lifting line.
     --chord-spline-n <N>   Number of control points for the smooth spline
                            chord (lifting line; default: 3).
+    --camber <M>           Fixed foil camber (fraction of chord).  Without
+                           it, the lifting-line design scans {{0, 0.02, 0.04}}
+                           and keeps the best-performing camber.
     --plate                Use analytic flat-plate polars (testing only).
 
 OUTPUT OPTIONS:
@@ -71,8 +75,8 @@ OUTPUT OPTIONS:
 ALL OPTIONS IN JSON:
     Every design/run option above can instead be set in the --param JSON
     file (keys: bem, lifting_line, auto, resolution, n, ar, plate, dir,
-    step_file, chord_spline_n).  An explicit CLI flag overrides the JSON
-    value, which overrides the built-in default.
+    step_file, chord_spline_n, camber).  An explicit CLI flag overrides the
+    JSON value, which overrides the built-in default.
 
 OTHER:
     --help, -h             Print this help and exit.
@@ -93,6 +97,7 @@ fn parse_args() -> Result<Args, String> {
         lifting_line: None,
         ar: None,
         chord_spline_n: None,
+        camber: None,
         help: false,
     };
     let mut it = std::env::args().skip(1);
@@ -123,6 +128,9 @@ fn parse_args() -> Result<Args, String> {
             "--ar" => a.ar = Some(value()?.parse().map_err(|_| "bad --ar".to_string())?),
             "--chord-spline-n" => {
                 a.chord_spline_n = Some(value()?.parse().map_err(|_| "bad --chord-spline-n".to_string())?)
+            }
+            "--camber" => {
+                a.camber = Some(value()?.parse().map_err(|_| "bad --camber".to_string())?)
             }
             "--help" | "-h" => a.help = true,
             "--mesh" => return Err("--mesh (GMSH) is not yet ported".into()),
@@ -177,6 +185,9 @@ fn main() {
     }
     if let Some(v) = args.chord_spline_n {
         param.chord_spline_n = v;
+    }
+    if let Some(v) = args.camber {
+        param.camber = Some(v);
     }
     if let Some(v) = args.plate {
         param.plate = v;

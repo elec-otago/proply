@@ -34,6 +34,12 @@ pub struct DesignParameters {
     /// distribution used by the lifting-line design (default 3).
     #[serde(default = "default_chord_spline_n")]
     pub chord_spline_n: usize,
+    /// Foil camber (max camber as a fraction of chord, NACA 4-series `m`).
+    /// When set, every station uses exactly this camber; when absent, the
+    /// lifting-line design scans the [`crate::prop::CAMBER_CANDIDATES`] set
+    /// and keeps the best-performing one.
+    #[serde(default)]
+    pub camber: Option<f64>,
     // ---- run / design options (mirror the CLI flags so a JSON file can
     // carry the whole design) ----
     pub bem: bool,
@@ -71,6 +77,7 @@ impl Default for DesignParameters {
             motor_no_load_current: d(0.5),
             scimitar_percent: d(0.0),
             chord_spline_n: 3,
+            camber: None,
             bem: true,
             lifting_line: false,
             auto: false,
@@ -160,7 +167,8 @@ mod tests {
             "plate": true,
             "dir": "out",
             "step_file": "x.step",
-            "chord_spline_n": 5
+            "chord_spline_n": 5,
+            "camber": 0.03
         }"#;
         let p = DesignParameters::from_json(json).unwrap();
         assert!(!p.bem);
@@ -173,6 +181,7 @@ mod tests {
         assert_eq!(p.dir, "out");
         assert_eq!(p.step_file, "x.step");
         assert_eq!(p.chord_spline_n, 5);
+        assert!((p.camber.unwrap() - 0.03).abs() < 1e-12);
 
         // Absent keys fall back to the defaults.
         let p2 = DesignParameters::from_json(r#"{
@@ -187,6 +196,7 @@ mod tests {
         assert_eq!(p2.ar, None);
         assert!(!p2.plate);
         assert_eq!(p2.chord_spline_n, 3);
+        assert!(p2.camber.is_none());
     }
 
     #[test]
