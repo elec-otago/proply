@@ -1,3 +1,4 @@
+# Copyright (c) Tim Molteno tim@elec.ac.nz 2026
 #!/usr/bin/env python3
 """Generate golden reference values for the proply-rs tests.
 

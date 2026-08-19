@@ -1,3 +1,4 @@
+// Copyright (c) Tim Molteno tim@elec.ac.nz 2026
 //! Verifies the custom block solver (blsolv) against a dense gauss solve on
 //! a hand-built 2-station Newton system with the same block structure that
 //! setbl produces.

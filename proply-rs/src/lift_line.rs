@@ -1,3 +1,4 @@
+// Copyright (c) Tim Molteno tim@elec.ac.nz 2026
 //! Propeller lifting-line analysis and design.
 //!
 //! Replaces the independent-annulus blade-element momentum balance with a

@@ -1,3 +1,4 @@
+// Copyright (c) Tim Molteno tim@elec.ac.nz 2026
 //! Top-level XFOIL driver routines (port of `m_xfoil.f90`): init, naca,
 //! pangen.  The interactive top-level menu is not ported.
 

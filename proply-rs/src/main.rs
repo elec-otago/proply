@@ -1,3 +1,4 @@
+// Copyright (c) Tim Molteno tim@elec.ac.nz 2026
 //! proply-rs: propeller design in Rust.
 //!
 //! Port of the Python `proply` command: design a propeller blade with blade

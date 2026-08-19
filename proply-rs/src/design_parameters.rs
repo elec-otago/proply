@@ -1,3 +1,4 @@
+// Copyright (c) Tim Molteno tim@elec.ac.nz 2026
 //! Propeller design parameters, parsed from a JSON file.
 //!
 //! Mirrors `proply/design_parameters.py`: the same JSON schema, with the

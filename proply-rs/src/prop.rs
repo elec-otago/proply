@@ -1,3 +1,4 @@
+// Copyright (c) Tim Molteno tim@elec.ac.nz 2026
 //! The propeller design loop, ported from `proply/prop.py`.
 //!
 //! `full_optimize` sweeps radial stations from tip to hub, sizing each

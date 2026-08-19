@@ -1,3 +1,4 @@
+// Copyright (c) Tim Molteno tim@elec.ac.nz 2026
 //! Blade element: a single radial slice of the propeller blade, ported from
 //! `proply/blade_element.py`.
 

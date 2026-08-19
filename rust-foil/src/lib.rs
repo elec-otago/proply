@@ -1,3 +1,4 @@
+// Copyright (c) Tim Molteno tim@elec.ac.nz 2026
 //! rust-foil: a Rust port of the XFOIL airfoil analysis program.
 //!
 //! The library computes inviscid and viscous (integral boundary layer) flow

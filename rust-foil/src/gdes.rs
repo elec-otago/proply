@@ -1,3 +1,4 @@
+// Copyright (c) Tim Molteno tim@elec.ac.nz 2026
 //! Geometry design utilities (port of `m_xgdes.f90`).
 //!
 //! Only `abcopy` is needed by the analysis path.

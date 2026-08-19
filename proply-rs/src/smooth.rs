@@ -1,3 +1,4 @@
+// Copyright (c) Tim Molteno tim@elec.ac.nz 2026
 //! Windowed smoothing of a 1-D signal, ported from `proply/smooth.py`
 //! (which in turn is the classic numpy cookbook recipe).
 //!

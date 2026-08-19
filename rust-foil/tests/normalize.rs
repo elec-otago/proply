@@ -1,3 +1,4 @@
+// Copyright (c) Tim Molteno tim@elec.ac.nz 2026
 //! `set_airfoil` normalizes the input coordinates to unit chord by default
 //! (canonical XFOIL behaviour): a chord-scaled airfoil must produce the same
 //! polars as the same airfoil at unit chord.

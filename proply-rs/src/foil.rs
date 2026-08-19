@@ -1,3 +1,4 @@
+// Copyright (c) Tim Molteno tim@elec.ac.nz 2026
 //! Foil geometry, ported from `proply/foil.py`.
 //!
 //! `Foil` is the base class (a flat plate); `Naca4` generates the NACA

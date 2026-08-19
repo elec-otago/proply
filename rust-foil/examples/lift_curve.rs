@@ -1,3 +1,4 @@
+// Copyright (c) Tim Molteno tim@elec.ac.nz 2026
 //! Generates the NACA 0012 lift/drag polar at Re = 1e6 (the classic XFOIL
 //! demo case) and prints the CL(alpha) and CD(CL) curves.
 //!

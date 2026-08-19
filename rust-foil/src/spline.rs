@@ -1,3 +1,4 @@
+// Copyright (c) Tim Molteno tim@elec.ac.nz 2026
 //! Spline utilities (port of `m_spline.f90`).
 //!
 //! All routines work on slices; the number of points is the slice length.

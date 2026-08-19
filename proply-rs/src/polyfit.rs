@@ -1,3 +1,4 @@
+// Copyright (c) Tim Molteno tim@elec.ac.nz 2026
 //! Least-squares polynomial fitting (replaces `numpy.polyfit`) and Horner
 //! evaluation (replaces `numpy.poly1d`).
 //!

@@ -1,3 +1,4 @@
+// Copyright (c) Tim Molteno tim@elec.ac.nz 2026
 //! Motor model: optimum torque and RPM at maximum efficiency.
 //!
 //! Ported 1:1 from `proply/motor_model.py`.  `Kv` is in RPM per volt,

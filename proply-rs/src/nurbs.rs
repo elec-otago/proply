@@ -1,3 +1,4 @@
+// Copyright (c) Tim Molteno tim@elec.ac.nz 2026
 //! NURBS curve and surface construction for the STEP blade loft.
 //!
 //! The blade side surfaces are lofts through the station profiles: each

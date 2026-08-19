@@ -1,3 +1,4 @@
+// Copyright (c) Tim Molteno tim@elec.ac.nz 2026
 //! Miscellaneous utilities (port of `m_xutils.f90`).
 
 /// Sets a geometrically stretched array S:

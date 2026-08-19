@@ -1,3 +1,4 @@
+// Copyright (c) Tim Molteno tim@elec.ac.nz 2026
 //! PCHIP — piecewise cubic Hermite interpolating polynomial with monotone
 //! slopes (Fritsch & Carlson 1980), matching `scipy.interpolate.PchipInterpolator`.
 //!

@@ -1,3 +1,4 @@
+// Copyright (c) Tim Molteno tim@elec.ac.nz 2026
 //! Operating-point routines (port of `m_xoper.f90`): specal, speccl,
 //! viscal, fcpmin.  The interactive `.OPER` menu is not ported.
 

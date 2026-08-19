@@ -1,3 +1,4 @@
+// Copyright (c) Tim Molteno tim@elec.ac.nz 2026
 //! Benchmark the serial vs parallel alpha sweep on the canonical workload
 //! (NACA 0012 at Re = 1e6, 80-point sweep from -20° to 20°), and report
 //! the per-point parity between the two.

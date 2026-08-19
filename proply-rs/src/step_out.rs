@@ -1,3 +1,4 @@
+// Copyright (c) Tim Molteno tim@elec.ac.nz 2026
 //! STEP (AP242) output via the step-io crate.
 //!
 //! The propeller is written as an assembly: one blade part (a single

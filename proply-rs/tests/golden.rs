@@ -1,3 +1,4 @@
+// Copyright (c) Tim Molteno tim@elec.ac.nz 2026
 //! Golden-value tests: compare the Rust port against reference values
 //! generated from the Python implementation (numpy/scipy) by
 //! `build/golden/gen_golden.py`.

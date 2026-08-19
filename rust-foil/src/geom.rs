@@ -1,3 +1,4 @@
+// Copyright (c) Tim Molteno tim@elec.ac.nz 2026
 //! Airfoil geometry routines (port of `m_xgeom.f90`).
 //!
 //! Only the routines used by the analysis path are ported (lefind, sopps,

@@ -1,3 +1,4 @@
+// Copyright (c) Tim Molteno tim@elec.ac.nz 2026
 //! Validation against canonical-XFOIL reference values for NACA 0012.
 //!
 //! `rust-foil` targets upstream Drela XFOIL, not the `xfoil-python` port: the

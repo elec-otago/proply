@@ -1,3 +1,4 @@
+// Copyright (c) Tim Molteno tim@elec.ac.nz 2026
 //! Airfoil polars via rust-foil, with the flat-plate fallback — a port of
 //! `proply/foil_simulator.py` (the `XfoilSimulatedFoil` class).
 //!

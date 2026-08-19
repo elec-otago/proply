@@ -1,3 +1,4 @@
+// Copyright (c) Tim Molteno tim@elec.ac.nz 2026
 //! Round-trip test for the STEP writer: build a small synthetic propeller,
 //! write the STEP text, and re-read it with step-io's own parser.
 

@@ -1,3 +1,4 @@
+// Copyright (c) Tim Molteno tim@elec.ac.nz 2026
 //! Write just the hub solid as a STEP file, for debugging FreeCAD imports
 //! without running the full design loop.
 //!

@@ -1,3 +1,4 @@
+// Copyright (c) Tim Molteno tim@elec.ac.nz 2026
 //! Global state for the XFOIL port.
 //!
 //! This is the Rust translation of the Fortran module `i_xfoil` (plus the

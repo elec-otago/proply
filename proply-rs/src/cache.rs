@@ -1,3 +1,4 @@
+// Copyright (c) Tim Molteno tim@elec.ac.nz 2026
 //! Persistent polar cache, replacing the Python sqlite `foil_simulator.db`.
 //!
 //! Polars are stored keyed by `"<foil hash>|<reynolds>|<mach>"` in a single

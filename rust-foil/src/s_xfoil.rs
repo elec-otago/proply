@@ -1,3 +1,4 @@
+// Copyright (c) Tim Molteno tim@elec.ac.nz 2026
 //! Shared coefficient routines (port of `s_xfoil.f90`).
 
 use crate::state::Xfoil;

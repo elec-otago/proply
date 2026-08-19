@@ -1,3 +1,4 @@
+// Copyright (c) Tim Molteno tim@elec.ac.nz 2026
 //! Wake-gap (`wgap`) regression tests.
 //!
 //! `wgap[0..nw-1]` holds the "dead air" TE-flap thickness along the wake.  It

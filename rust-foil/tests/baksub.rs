@@ -1,3 +1,4 @@
+// Copyright (c) Tim Molteno tim@elec.ac.nz 2026
 //! Regression tests for the LU factor/back-substitution pair
 //! (`ludcmp`/`baksub`).
 //!

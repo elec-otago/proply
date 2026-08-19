@@ -1,3 +1,4 @@
+// Copyright (c) Tim Molteno tim@elec.ac.nz 2026
 //! NACA airfoil generation (port of `m_naca.f90`).
 //!
 //! Generates a 4- or 5-digit NACA airfoil into the buffer arrays (XB, YB).

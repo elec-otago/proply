@@ -1,3 +1,4 @@
+// Copyright (c) Tim Molteno tim@elec.ac.nz 2026
 //! Panel method (port of `m_xpanel.f90`).
 //!
 //! Computes the inviscid streamfunction/vorticity solution and the

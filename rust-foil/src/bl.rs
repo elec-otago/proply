@@ -1,3 +1,4 @@
+// Copyright (c) Tim Molteno tim@elec.ac.nz 2026
 //! Boundary-layer marching and Newton update (port of `m_xbl.f90`).
 //!
 //! `setbl` assembles the coupled viscous-inviscid Newton system by marching

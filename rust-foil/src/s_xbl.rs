@@ -1,3 +1,4 @@
+// Copyright (c) Tim Molteno tim@elec.ac.nz 2026
 //! Shared BL routines (port of `s_xbl.f90`).
 
 use crate::state::{IVX, Xfoil};

@@ -1,3 +1,4 @@
+// Copyright (c) Tim Molteno tim@elec.ac.nz 2026
 //! Linear solvers (port of `m_xsolve.f90`).
 //!
 //! Matrices use the Fortran column-major layout: element (i, j) [1-based] of
