@@ -5,8 +5,10 @@
 //! distributions and re-evaluates the forces with `get_forces`.
 
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
+use std::thread;
 
 use crate::blade_element::BladeElement;
 use crate::cache::PolarStore;
@@ -28,6 +30,59 @@ use crate::smooth::smooth;
 /// so a continuous camber would turn the objective into a staircase of
 /// discrete polar families.
 pub const CAMBER_CANDIDATES: [f64; 3] = [0.0, 0.02, 0.04];
+
+/// Minimum chord (m) anywhere on the blade.
+const CH_FLOOR: f64 = 0.002;
+/// Bounds on the common attack-angle offset `da` over the best-L/D angles
+/// (rad).  `DA_MAX` sits ~7 deg above best-L/D, below deep stall; `DA_MIN`
+/// may also trim *through* zero lift: thrust is monotone in `da` across the
+/// whole range, so the inner bisection can match a low thrust target at any
+/// chord — without it, a full-chord blade whose thrust already exceeds the
+/// target could never converge, as `da > 0` only adds thrust.
+const DA_MIN: f64 = -0.45;
+const DA_MAX: f64 = 0.12;
+
+/// Allowed chord as a function of radius (m): `tip_chord*R^2/r^2`, capped by
+/// the blade-count spacing (and the local twist).  The parameter form shared
+/// by the design passes (worker threads cannot borrow `Prop`).
+fn max_chord(param: &DesignParameters, n_blades: usize, r: f64, twist: f64) -> f64 {
+    let k = param.tip_chord * param.radius.powi(2);
+    let c = k / r.powi(2);
+    let upper_limit = (2.0 * std::f64::consts::PI * r / (n_blades as f64 + 2.0)) / twist.cos();
+    c.min(upper_limit)
+}
+
+/// Free-chord law `tip_chord*R^2/r^2`, capped by the geometric limits
+/// ([`max_chord`]).  `scale < 1` thins the blade for a higher aspect ratio.
+/// The operation order matches the original method exactly — the optimizer
+/// trajectories are sensitive to last-ulp changes.
+fn chord_law(param: &DesignParameters, n_blades: usize, r: f64, twist: f64, scale: f64) -> f64 {
+    let k = param.tip_chord * param.radius.powi(2);
+    let cap = max_chord(param, n_blades, r, twist);
+    (scale * k / r.powi(2)).min(cap).max(1.0e-6)
+}
+
+/// Allowed foil thickness (m) as a function of radius: a p = 0.3 power law
+/// between the hub depth and a tenth of it at the tip.
+fn foil_thickness(param: &DesignParameters, r: f64) -> f64 {
+    let thickness_root = param.hub_depth * 1.0;
+    let thickness_end = param.hub_depth * 0.1;
+    let p = 0.3;
+    let k = (thickness_root - thickness_end)
+        / (param.hub_radius.powf(p) - param.radius.powf(p));
+    let s = thickness_end - k * param.radius.powf(p);
+    s + k * r.powf(p)
+}
+
+/// The NACA 4-series foil of one station: the thickness law at radius `r`,
+/// chord `c`, camber fraction `camber` and the parameter trailing edge.
+/// Plain data (clonable, sendable) so worker threads can build their own.
+fn station_foil(param: &DesignParameters, r: f64, c: f64, camber: f64) -> Naca4 {
+    let thickness = foil_thickness(param, r);
+    let mut f = Naca4::new(c, thickness / c, camber, 0.4);
+    f.base.set_trailing_edge(param.trailing_edge / 1000.0);
+    f
+}
 
 /// A propeller: a collection of blade elements plus the design parameters.
 pub struct Prop {
@@ -111,10 +166,7 @@ impl Prop {
         c: f64,
         camber: f64,
     ) -> BladeElement<Naca4> {
-        let thickness = self.get_foil_thickness(r);
-        let foil = Rc::new(RefCell::new(Naca4::new(c, thickness / c, camber, 0.4)));
-        foil.borrow_mut().set_trailing_edge(self.param.trailing_edge / 1000.0);
-        foil.borrow_mut().modify_chord(c);
+        let foil = Rc::new(RefCell::new(station_foil(&self.param, r, c, camber)));
 
         let mut be = BladeElement::new(
             r,
@@ -132,12 +184,10 @@ impl Prop {
     }
 
     /// Allowed chord as a function of radius (m): k / r^2, capped by the
-    /// blade-count spacing.
+    /// blade-count spacing.  See [`max_chord`] (the parameter form the
+    /// design passes use).
     pub fn get_max_chord(&self, r: f64, twist: f64) -> f64 {
-        let k = self.param.tip_chord * self.param.radius.powi(2);
-        let c = k / r.powi(2);
-        let upper_limit = (2.0 * std::f64::consts::PI * r / (self.n_blades as f64 + 2.0)) / twist.cos();
-        c.min(upper_limit)
+        max_chord(&self.param, self.n_blades, r, twist)
     }
 
     /// Scimitar offset (m) as a function of radius.
@@ -154,15 +204,10 @@ impl Prop {
     }
 
     /// Allowed foil thickness (m) as a function of radius: a p = 0.3 power
-    /// law between the hub depth and a tenth of it at the tip.
+    /// law between the hub depth and a tenth of it at the tip.  See
+    /// [`foil_thickness`] (the parameter form the design passes use).
     pub fn get_foil_thickness(&self, r: f64) -> f64 {
-        let thickness_root = self.param.hub_depth * 1.0;
-        let thickness_end = self.param.hub_depth * 0.1;
-        let p = 0.3;
-        let k = (thickness_root - thickness_end)
-            / (self.param.hub_radius.powf(p) - self.param.radius.powf(p));
-        let s = thickness_end - k * self.param.radius.powf(p);
-        s + k * r.powf(p)
+        foil_thickness(&self.param, r)
     }
 
     /// Allowed depth of the prop as a function of radius (m), from the
@@ -421,147 +466,79 @@ impl Prop {
         (0.5 * (lo + hi), fc.max(fd))
     }
 
-    /// Free-chord law `tip_chord*R^2/r^2`, capped by the geometric limits
-    /// ([`get_max_chord`]).  `scale < 1` thins the blade for a higher aspect
-    /// ratio.
-    fn chord_law(&self, r: f64, twist: f64, scale: f64) -> f64 {
-        let k = self.param.tip_chord * self.param.radius.powi(2);
-        let cap = self.get_max_chord(r, twist);
-        (scale * k / r.powi(2)).min(cap).max(1.0e-6)
+    /// Populate the polar cache for `(foil, v)` work items on all available
+    /// cores: the first-touch rust-foil sweeps dominate a cold design run,
+    /// and the pool overlaps them.  The caller must deduplicate items
+    /// (workers do not coordinate).  No-op in plate mode.
+    fn warm_polar_pool(&self, work: &[(Naca4, f64)]) {
+        if work.is_empty() || self.plate_mode {
+            return;
+        }
+        let queue = Mutex::new(work.to_vec());
+        let n_workers = thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1)
+            .min(work.len());
+        let store = self.store.clone();
+        thread::scope(|s| {
+            for _ in 0..n_workers {
+                let queue = &queue;
+                let store = store.clone();
+                s.spawn(move || {
+                    while let Some((foil, v)) = queue.lock().unwrap().pop() {
+                        let fs = FoilSimulator::new(Rc::new(RefCell::new(foil)), store.clone());
+                        fs.warm_polars(v);
+                    }
+                });
+            }
+        });
     }
 
-    /// Design a blade with the coupled lifting line, targeting `thrust`.
-    ///
-    /// `ar` optionally forces a minimum blade aspect ratio
-    /// `(R - hub) / mean_chord`, which thins the blade (lowers induced loss
-    /// and raises efficiency).  Returns `(torque, thrust)` of the converged
-    /// design.
-    pub fn lift_line_design(&mut self, rpm: f64, thrust: f64, ar: Option<f64>) -> (f64, f64) {
-        let u_0 = self.param.forward_airspeed;
-        let omega = optimize::rpm2omega(rpm);
-        let r_hub = self.param.hub_radius;
-        let r_tip = self.param.radius;
-        let n_blades = self.n_blades;
-        let m = self.radial_steps.max(2);
-        let rr: Vec<f64> = (0..m)
-            .map(|i| r_hub + (r_tip - r_hub) * i as f64 / (m - 1) as f64)
-            .collect();
+    /// One camber candidate's design pass: build the station elements from
+    /// `camber_dist`, prescribe the attack angles `alpha_base` (plus a common
+    /// offset `da` matched to the thrust target by an inner monotone
+    /// bisection) and optimise the chord-spline controls with three
+    /// warm-chained Nelder-Mead starts.  Self-contained (own elements and
+    /// warm state, parameter-only geometry laws) so the camber candidates can
+    /// run in parallel on scoped threads; returns the measured geometry, or
+    /// `None` when no thrust match was found.
+    #[allow(clippy::too_many_arguments)]
+    fn run_design_pass(
+        param: &DesignParameters,
+        n_blades: usize,
+        plate_mode: bool,
+        store: &Arc<Mutex<PolarStore>>,
+        radial_res: f64,
+        rr: &[f64],
+        ref_r: &[f64],
+        cap_ctl: &[f64],
+        infl: &lift_line::Influence,
+        rpm: f64,
+        omega: f64,
+        u_0: f64,
+        thrust: f64,
+        n_ctrl: usize,
+        s_cap: f64,
+        label: &str,
+        camber_dist: &[f64],
+        alpha_base: &[f64],
+    ) -> Option<PassOutcome> {
+        let m = rr.len();
 
-        // --- Chord is a smooth (shape-preserving cubic / PCHIP) spline ---
-        // through `chord_spline_n` control values at radii spread hub->tip.
-        // Those control values are the design variables, so the optimum
-        // *shape* (not just a global scale) is found.  `--ar` only caps the
-        // upper bound each control may take.
-        let shape: f64 = rr
-            .iter()
-            .map(|&r| self.chord_law(r, 0.0, 1.0))
-            .sum::<f64>()
-            / m as f64;
-        let ar_shape = (r_tip - r_hub) / shape;
-        const S_FLOOR: f64 = 0.2;
-        let s_cap = ar.map(|a| (ar_shape / a).clamp(S_FLOOR, 1.0)).unwrap_or(1.0);
-        const CH_FLOOR: f64 = 0.002; // min chord floor (m)
-        let n_ctrl = self.param.chord_spline_n.max(2);
-        let ref_r: Vec<f64> = (0..n_ctrl)
-            .map(|k| r_hub + (r_tip - r_hub) * k as f64 / (n_ctrl.max(2) - 1) as f64)
-            .collect();
-
-        // --- Camber: one full design pass per candidate, best wins -------
-        // An explicit `camber` parameter pins a single value; otherwise the
-        // [`CAMBER_CANDIDATES`] set is scanned (see its docs for why a fixed
-        // set rather than a continuous variable) plus a composed per-station
-        // distribution: the best section L/D at each radius, smoothed.
-        let cambers: Vec<f64> = match self.param.camber {
-            Some(m) => vec![m],
-            None => CAMBER_CANDIDATES.to_vec(),
-        };
-
-        /// One camber candidate's seed: the station elements and their
-        /// prescribed attack angles.  `uniform` is `Some(m)` for the
-        /// scanned uniform candidates; the composed distribution carries
-        /// `None` (its per-station camber lives in the elements' foils).
-        struct CamberSeed {
-            uniform: Option<f64>,
-            elements: Vec<BladeElement<Naca4>>,
-            alpha_base: Vec<f64>,
+        // Station elements: the seed chord law at each radius, twisted to a
+        // first guess (the circulation solve sets the final twist).
+        let mut elements: Vec<BladeElement<Naca4>> = Vec::with_capacity(m);
+        for (i, &r) in rr.iter().enumerate() {
+            let phi0 = u_0.atan2(omega * r).max(1.0e-3);
+            let c = chord_law(param, n_blades, r, 0.0, s_cap);
+            let foil = Rc::new(RefCell::new(station_foil(param, r, c, camber_dist[i])));
+            let mut be = BladeElement::new(r, radial_res, foil, phi0 + 0.12, rpm, u_0, store.clone());
+            if plate_mode {
+                be.set_plate_mode(true);
+            }
+            elements.push(be);
         }
 
-        // Per-candidate seeds, built up-front (before the closures below
-        // borrow `self`): station foils at camber `m`, and the best-L/D
-        // attack angles their polars produce.
-        let mut seeds: Vec<CamberSeed> = Vec::with_capacity(cambers.len() + 1);
-        let mut raw_alphas: Vec<Vec<f64>> = Vec::with_capacity(cambers.len());
-        let mut lds: Vec<Vec<f64>> = Vec::with_capacity(cambers.len());
-        for &m_c in &cambers {
-            let mut elements: Vec<BladeElement<Naca4>> = Vec::with_capacity(m);
-            for &r in &rr {
-                let phi0 = u_0.atan2(omega * r).max(1.0e-3);
-                let c = self.chord_law(r, 0.0, s_cap);
-                elements.push(self.new_blade_element_with_chord(r, rpm, phi0 + 0.12, c, m_c));
-            }
-            let mut alpha_raw: Vec<f64> = Vec::with_capacity(m);
-            let mut ld_row: Vec<f64> = Vec::with_capacity(m);
-            for be in &elements {
-                let vv = ((u_0 * u_0) + (omega * be.r).powi(2)).sqrt();
-                let (a, l) = Self::best_ld::<Naca4>(&be.fs, vv);
-                alpha_raw.push(a);
-                ld_row.push(l);
-            }
-            // The raw best-L/D angles are jagged station-to-station: quantised to
-            // whole degrees by the scan, and stepped wherever the Reynolds number
-            // crosses a polar bucket or the low-Re flat-plate cutoff.  Re and Mach
-            // vary smoothly with r, so the underlying optimum does too: use a
-            // least-squares fit (as the BEM path does for the twist) everywhere
-            // downstream (`eval`, `meet_thrust`, the final twist assembly).
-            let alpha_base = smooth_alpha_curve(&rr, &alpha_raw);
-            seeds.push(CamberSeed {
-                uniform: Some(m_c),
-                elements,
-                alpha_base,
-            });
-            raw_alphas.push(alpha_raw);
-            lds.push(ld_row);
-        }
-
-        // The composed per-station distribution: best candidate at each
-        // radius (thick root sections prefer little or no camber, thin
-        // outboard sections benefit from it), smoothed and quantised to the
-        // 0.01 polar-hash grid, competing against the uniform candidates on
-        // the same objective.
-        if self.param.camber.is_none() {
-            let (m_dist, winners) = compose_camber(&rr, &lds, &cambers);
-            let mut elements: Vec<BladeElement<Naca4>> = Vec::with_capacity(m);
-            for (i, &r) in rr.iter().enumerate() {
-                let phi0 = u_0.atan2(omega * r).max(1.0e-3);
-                let c = self.chord_law(r, 0.0, s_cap);
-                elements.push(self.new_blade_element_with_chord(r, rpm, phi0 + 0.12, c, m_dist[i]));
-            }
-            // Each station keeps its winning candidate's attack angle.
-            let alpha_raw: Vec<f64> = (0..m).map(|i| raw_alphas[winners[i]][i]).collect();
-            let alpha_base = smooth_alpha_curve(&rr, &alpha_raw);
-            println!(
-                "lift-line composed camber m(r): [{}]",
-                m_dist
-                    .iter()
-                    .map(|&m| format!("{:.2}", m))
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            );
-            seeds.push(CamberSeed {
-                uniform: None,
-                elements,
-                alpha_base,
-            });
-        }
-
-        const DA_MAX: f64 = 0.12; // ~7 deg above best-L/D, below deep stall
-        // `da` may also trim the attack angle *below* best-L/D (through zero
-        // lift): thrust is monotone in `da` across the whole range, so the
-        // inner bisection can match a low thrust target at any chord —
-        // without this, a full-chord blade whose thrust already exceeds the
-        // target (e.g. a light target on a fast, wide prop) could never
-        // converge, as `da > 0` only adds thrust.
-        const DA_MIN: f64 = -0.45;
         // Design variables `x ∈ [0,1]^n_ctrl` log-map to the control chords;
         // the common attack offset `da ∈ [DA_MIN, DA_MAX]` over the best-L/D
         // angles is matched to the thrust target by an inner monotone
@@ -572,24 +549,9 @@ impl Prop {
         // chord at any radius is the smooth PCHIP spline through the
         // controls at `ref_r` (clipped to the local geometric cap for
         // safety), so there are no taper/cap kinks.
-        // Shared, per-candidate design state: the station elements under
-        // design (`state`), their prescribed attack angles (`alpha_base`)
-        // and the current candidate's camber (for the progress logs).  The
-        // camber loop below swaps these between passes.
-        let state = RefCell::new(Vec::<BladeElement<Naca4>>::new());
-        let alpha_base = RefCell::new(Vec::<f64>::new());
-        let cur_m = RefCell::new(0.0_f64);
+        let state = RefCell::new(elements);
         let pg = RefCell::new(vec![0.0; m]); // warm-start gamma
-        // The trailed-wake influence depends only on the station radii and the
-        // blade count, so build it once and reuse it for every evaluation.
-        let infl = lift_line::influence(&rr, n_blades);
-        // Per-control upper bound: the geometrically-allowed chord (taper
-        // capped by blade spacing) at each reference radius, thinned by `s_cap`
-        // when a minimum aspect ratio was requested.
-        let cap_ctl: Vec<f64> = ref_r
-            .iter()
-            .map(|&r| (s_cap * self.get_max_chord(r, 0.0)).max(CH_FLOOR))
-            .collect();
+        let da_hint = RefCell::new(None::<f64>);
 
         // eval(controls, da): chord = smooth shape-preserving cubic (PCHIP)
         // spline through the N control values at `ref_r` (kink-free, clipped to
@@ -600,13 +562,12 @@ impl Prop {
                     seed: &[f64]|
          -> (f64, f64, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
             let alphas: Vec<f64> = alpha_base
-                .borrow()
                 .iter()
                 .map(|&ab| (ab + da).clamp(-lift_line::ALPHA_MAX, lift_line::ALPHA_MAX))
                 .collect();
-            let spl = Pchip::new(&ref_r, controls);
+            let spl = Pchip::new(ref_r, controls);
             for i in 0..m {
-                let cap_i = self.get_max_chord(rr[i], alphas[i]).max(CH_FLOOR);
+                let cap_i = max_chord(param, n_blades, rr[i], alphas[i]).max(CH_FLOOR);
                 let c = spl.eval(rr[i]).clamp(CH_FLOOR, cap_i);
                 elems[i].set_chord(c);
             }
@@ -618,8 +579,7 @@ impl Prop {
                 })
                 .collect();
             let fs_refs: Vec<&FoilSimulator<Naca4>> = elems.iter().map(|be| &be.fs).collect();
-            let res =
-                lift_line::solve_with_influence(&stations, n_blades, omega, u_0, &fs_refs, seed, &infl);
+            let res = lift_line::solve_with_influence(&stations, n_blades, omega, u_0, &fs_refs, seed, infl);
             for i in 0..m {
                 elems[i].set_twist(res.phi[i] + alphas[i]);
             }
@@ -633,11 +593,6 @@ impl Prop {
         // torque (efficiency) among shapes that meet the target.  Seeded at the
         // full chord — the thrust-capable geometry — so it cannot be trapped in
         // a thin/low-thrust region.
-        // `hint_da` carries the previous objective call's converged `da` so the
-        // next `meet_thrust` warm-starts the root find: near the optimum the
-        // controls (and hence the da needed to hit the target) barely change,
-        // so we fast-path on a single evaluation instead of the full scan.
-        let da_hint = RefCell::new(None::<f64>);
         let meet_thrust = |controls: &[f64],
                            elems: &mut Vec<BladeElement<Naca4>>,
                            pg_r: &RefCell<Vec<f64>>,
@@ -671,8 +626,8 @@ impl Prop {
                     if err <= 0.03 {
                         *pg_r.borrow_mut() = cur.clone();
                         println!(
-                            "lift-line m={:.2} ctrl=[{}] da={:.3} (warm): T={:.4} Q={:.4}",
-                            *cur_m.borrow(),
+                            "lift-line [{}] ctrl=[{}] da={:.3} (warm): T={:.4} Q={:.4}",
+                            label,
                             controls.iter().map(|c| format!("{:.4}", c)).collect::<Vec<_>>().join(" "),
                             hd, t, q
                         );
@@ -743,8 +698,8 @@ impl Prop {
             *da_hint.borrow_mut() = Some(da);
             if hint.is_none() {
                 println!(
-                    "lift-line m={:.2} ctrl=[{}] da={:.3}: T={:.4} Q={:.4}",
-                    *cur_m.borrow(),
+                    "lift-line [{}] ctrl=[{}] da={:.3}: T={:.4} Q={:.4}",
+                    label,
                     controls.iter().map(|c| format!("{:.4}", c)).collect::<Vec<_>>().join(" "),
                     da, t, q
                 );
@@ -753,113 +708,257 @@ impl Prop {
             q + 50.0 * err
         };
 
-        // One full design pass per camber candidate.  Selection uses the
-        // same objective the outer optimizer minimises (`q + 50*err`), so
-        // camber competes with chord shape on equal terms: thrust target
-        // first, then torque.
-        struct Outcome {
-            f: f64,
-            q: f64,
-            t: f64,
-            label: String,
-            da: f64,
-            alpha_base: Vec<f64>,
-            phis: Vec<f64>,
-            chords: Vec<f64>,
-            elements: Vec<BladeElement<Naca4>>,
+        let mut nm = optimize::NelderMead::default();
+        nm.maxiter = 120;
+        let bounds: Vec<Option<(f64, f64)>> = vec![Some((0.0, 1.0)); n_ctrl];
+        // First start at the full chord (the thrust-capable geometry); each
+        // later start warm-starts from the running best point so the simplex
+        // keeps working the promising region (and the shared gamma/da warm
+        // state — pg / da_hint — is already near the solution).
+        let mut best_x: Vec<f64> = vec![1.0; n_ctrl];
+        let mut best_f = f64::INFINITY;
+        for i in 0..3 {
+            let x0: Vec<f64> = if i == 0 {
+                vec![1.0; n_ctrl]
+            } else {
+                let scale = if i == 1 { 0.85 } else { 0.7 };
+                best_x.iter().map(|&v| (scale * v).clamp(0.0, 1.0)).collect()
+            };
+            let (x, f) = nm.minimize(&obj, &x0, &bounds);
+            if f < best_f {
+                best_f = f;
+                best_x = x;
+            }
+            if best_f < 0.03 {
+                break;
+            }
         }
-        let mut best: Option<Outcome> = None;
+        let _ = best_f;
 
-        for seed in seeds {
-            let camber_label = match seed.uniform {
-                Some(m) => format!("m={:.2}", m),
-                None => "m(r) per-station".to_string(),
-            };
-            // Install the candidate: fresh elements, attack angles and warm
-            // state (a previous candidate's converged gamma/da belong to a
-            // different foil family).
-            *state.borrow_mut() = seed.elements;
-            *alpha_base.borrow_mut() = seed.alpha_base;
-            *pg.borrow_mut() = vec![0.0; m];
-            *da_hint.borrow_mut() = None;
-            *cur_m.borrow_mut() = seed.uniform.unwrap_or(0.0);
-
-            let mut nm = optimize::NelderMead::default();
-            nm.maxiter = 120;
-            let bounds: Vec<Option<(f64, f64)>> = vec![Some((0.0, 1.0)); n_ctrl];
-            // First start at the full chord (the thrust-capable geometry); each
-            // later start warm-starts from the running best point so the simplex
-            // keeps working the promising region (and the shared gamma/da warm
-            // state — pg / da_hint — is already near the solution).
-            let mut best_x: Vec<f64> = vec![1.0; n_ctrl];
-            let mut best_f = f64::INFINITY;
-            for i in 0..3 {
-                let x0: Vec<f64> = if i == 0 {
-                    vec![1.0; n_ctrl]
-                } else {
-                    let scale = if i == 1 { 0.85 } else { 0.7 };
-                    best_x.iter().map(|&v| (scale * v).clamp(0.0, 1.0)).collect()
-                };
-                let (x, f) = nm.minimize(&obj, &x0, &bounds);
-                if f < best_f {
-                    best_f = f;
-                    best_x = x;
-                }
-                if best_f < 0.03 {
-                    break;
-                }
-            }
-
-            // Final measured candidate, seeded with the optimizer's converged
-            // `da` so the reported geometry is exactly the design the outer loop
-            // evaluated as its best.  A cold full scan (hint=None) re-solves the
-            // candidates from a different Newton path and can land on another
-            // branch of the nonlinear system, reporting a *worse* thrust match
-            // than the optimizer actually achieved (and baking it into the STEP);
-            // the warm check still falls back to the full scan if it does not
-            // meet the target.
-            let mut elements = std::mem::take(&mut *state.borrow_mut());
-            let controls: Vec<f64> = (0..n_ctrl)
-                .map(|k| CH_FLOOR * (cap_ctl[k] / CH_FLOOR).powf(best_x[k].clamp(0.0, 1.0)))
-                .collect();
-            let (da, err, r_t, r_q, _al, chords, phis, _reach) = {
-                let hint = *da_hint.borrow();
-                meet_thrust(&controls, &mut elements, &pg, hint)
-            };
-            let ab = alpha_base.borrow().clone();
-            let assembled = phis.len() == m;
-            if assembled {
-                for i in 0..m {
-                    elements[i].set_twist(
-                        phis[i] + (ab[i] + da).clamp(-lift_line::ALPHA_MAX, lift_line::ALPHA_MAX),
-                    );
-                }
-            }
-            let f = r_q + 50.0 * err;
+        // Final measured candidate, seeded with the optimizer's converged
+        // `da` so the reported geometry is exactly the design the outer loop
+        // evaluated as its best.  A cold full scan (hint=None) re-solves the
+        // candidates from a different Newton path and can land on another
+        // branch of the nonlinear system, reporting a *worse* thrust match
+        // than the optimizer actually achieved; the warm check still falls
+        // back to the full scan if it does not meet the target.
+        let mut elements = std::mem::take(&mut *state.borrow_mut());
+        let controls: Vec<f64> = (0..n_ctrl)
+            .map(|k| CH_FLOOR * (cap_ctl[k] / CH_FLOOR).powf(best_x[k].clamp(0.0, 1.0)))
+            .collect();
+        let (da, err, r_t, r_q, _al, chords, phis, _reach) = {
+            let hint = *da_hint.borrow();
+            meet_thrust(&controls, &mut elements, &pg, hint)
+        };
+        if phis.len() != m {
             println!(
-                "lift-line camber {}: T={:.4} Q={:.4} (obj {:.4})",
-                camber_label, r_t, r_q, f
+                "lift-line camber {}: no thrust match (T={:.4}, err {:.3})",
+                label, r_t, err
             );
-            let wins = match &best {
-                None => true,
-                Some(b) => f < b.f,
-            };
-            if assembled && wins {
-                best = Some(Outcome {
-                    f,
-                    q: r_q,
-                    t: r_t,
-                    label: camber_label,
-                    da,
-                    alpha_base: ab,
-                    phis,
-                    chords,
-                    elements,
-                });
+            return None;
+        }
+        for i in 0..m {
+            elements[i].set_twist(
+                phis[i] + (alpha_base[i] + da).clamp(-lift_line::ALPHA_MAX, lift_line::ALPHA_MAX),
+            );
+        }
+        let f = r_q + 50.0 * err;
+        println!(
+            "lift-line camber {}: T={:.4} Q={:.4} (obj {:.4})",
+            label, r_t, r_q, f
+        );
+        Some(PassOutcome {
+            f,
+            q: r_q,
+            t: r_t,
+            label: label.to_string(),
+            da,
+            alpha_base: alpha_base.to_vec(),
+            phis,
+            chords,
+            camber_dist: camber_dist.to_vec(),
+        })
+    }
+
+    /// Design a blade with the coupled lifting line, targeting `thrust`.
+    ///
+    /// `ar` optionally forces a minimum blade aspect ratio
+    /// `(R - hub) / mean_chord`, which thins the blade (lowers induced loss
+    /// and raises efficiency).  Returns `(torque, thrust)` of the converged
+    /// design.
+    pub fn lift_line_design(&mut self, rpm: f64, thrust: f64, ar: Option<f64>) -> (f64, f64) {
+        let u_0 = self.param.forward_airspeed;
+        let omega = optimize::rpm2omega(rpm);
+        let r_hub = self.param.hub_radius;
+        let r_tip = self.param.radius;
+        let n_blades = self.n_blades;
+        let m = self.radial_steps.max(2);
+        let rr: Vec<f64> = (0..m)
+            .map(|i| r_hub + (r_tip - r_hub) * i as f64 / (m - 1) as f64)
+            .collect();
+
+        // --- Chord is a smooth (shape-preserving cubic / PCHIP) spline ---
+        // through `chord_spline_n` control values at radii spread hub->tip.
+        // Those control values are the design variables, so the optimum
+        // *shape* (not just a global scale) is found.  `--ar` only caps the
+        // upper bound each control may take.
+        let shape: f64 = rr
+            .iter()
+            .map(|&r| chord_law(&self.param, n_blades, r, 0.0, 1.0))
+            .sum::<f64>()
+            / m as f64;
+        let ar_shape = (r_tip - r_hub) / shape;
+        const S_FLOOR: f64 = 0.2;
+        let s_cap = ar.map(|a| (ar_shape / a).clamp(S_FLOOR, 1.0)).unwrap_or(1.0);
+        let n_ctrl = self.param.chord_spline_n.max(2);
+        let ref_r: Vec<f64> = (0..n_ctrl)
+            .map(|k| r_hub + (r_tip - r_hub) * k as f64 / (n_ctrl.max(2) - 1) as f64)
+            .collect();
+        // The trailed-wake influence depends only on the station radii and the
+        // blade count, so build it once and share it across the passes.
+        let infl = lift_line::influence(&rr, n_blades);
+        // Per-control upper bound: the geometrically-allowed chord (taper
+        // capped by blade spacing) at each reference radius, thinned by `s_cap`
+        // when a minimum aspect ratio was requested.
+        let cap_ctl: Vec<f64> = ref_r
+            .iter()
+            .map(|&r| (s_cap * self.get_max_chord(r, 0.0)).max(CH_FLOOR))
+            .collect();
+
+        // --- Camber: one full design pass per candidate, best wins -------
+        // An explicit `camber` parameter pins a single value; otherwise the
+        // [`CAMBER_CANDIDATES`] set is scanned (see its docs for why a fixed
+        // set rather than a continuous variable) plus a composed per-station
+        // distribution: the best section L/D at each radius, smoothed.
+        let cambers: Vec<f64> = match self.param.camber {
+            Some(m) => vec![m],
+            None => CAMBER_CANDIDATES.to_vec(),
+        };
+
+        // Candidate seeds as plain per-station data (the passes build their
+        // own blade elements: `Rc`-based elements cannot cross threads).  The
+        // station foils are collected for every candidate first so a single
+        // worker pool can warm all the polar buckets the seeding queries
+        // (the first-touch rust-foil sweeps dominate a cold run).
+        let mut rows: Vec<Vec<(Naca4, f64)>> = Vec::with_capacity(cambers.len());
+        let mut work: Vec<(Naca4, f64)> = Vec::new();
+        let mut seen: HashSet<(String, u64)> = HashSet::new();
+        for &m_c in &cambers {
+            let row: Vec<(Naca4, f64)> = rr
+                .iter()
+                .map(|&r| {
+                    let vv = ((u_0 * u_0) + (omega * r).powi(2)).sqrt();
+                    let c = chord_law(&self.param, n_blades, r, 0.0, s_cap);
+                    (station_foil(&self.param, r, c, m_c), vv)
+                })
+                .collect();
+            for (f, vv) in &row {
+                let key = (f.hash(), f.reynolds(*vv).to_bits());
+                if seen.insert(key) {
+                    work.push((f.clone(), *vv));
+                }
             }
+            rows.push(row);
+        }
+        self.warm_polar_pool(&work);
+
+        // Seed the best-L/D attack angles from the (now cached) polars.
+        // Each seed is (label, per-station camber, smoothed attack angles).
+        let mut seeds: Vec<(String, Vec<f64>, Vec<f64>)> = Vec::with_capacity(cambers.len() + 1);
+        let mut raw_alphas: Vec<Vec<f64>> = Vec::with_capacity(cambers.len());
+        let mut lds: Vec<Vec<f64>> = Vec::with_capacity(cambers.len());
+        for (row, &m_c) in rows.iter().zip(cambers.iter()) {
+            let mut alpha_raw: Vec<f64> = Vec::with_capacity(m);
+            let mut ld_row: Vec<f64> = Vec::with_capacity(m);
+            for (f, vv) in row {
+                let mut fs = FoilSimulator::new(Rc::new(RefCell::new(f.clone())), self.store.clone());
+                if self.plate_mode {
+                    fs.set_plate_mode(true);
+                }
+                let (a, l) = Self::best_ld::<Naca4>(&fs, *vv);
+                alpha_raw.push(a);
+                ld_row.push(l);
+            }
+            // The raw best-L/D angles are jagged station-to-station: quantised to
+            // whole degrees by the scan, and stepped wherever the Reynolds number
+            // crosses a polar bucket or the low-Re flat-plate cutoff.  Re and Mach
+            // vary smoothly with r, so the underlying optimum does too: use a
+            // least-squares fit (as the BEM path does for the twist) everywhere
+            // downstream (`eval`, `meet_thrust`, the final twist assembly).
+            let alpha_base = smooth_alpha_curve(&rr, &alpha_raw);
+            seeds.push((format!("m={:.2}", m_c), vec![m_c; m], alpha_base));
+            raw_alphas.push(alpha_raw);
+            lds.push(ld_row);
         }
 
-        let win = match best {
+        // The composed per-station distribution: best candidate at each
+        // radius (thick root sections prefer little or no camber, thin
+        // outboard sections benefit from it), smoothed and quantised to the
+        // 0.01 polar-hash grid, competing against the uniform candidates on
+        // the same objective.
+        if self.param.camber.is_none() {
+            let (m_dist, winners) = compose_camber(&rr, &lds, &cambers);
+            let mut work: Vec<(Naca4, f64)> = Vec::new();
+            for (i, &r) in rr.iter().enumerate() {
+                let vv = ((u_0 * u_0) + (omega * r).powi(2)).sqrt();
+                let c = chord_law(&self.param, n_blades, r, 0.0, s_cap);
+                let f = station_foil(&self.param, r, c, m_dist[i]);
+                let key = (f.hash(), f.reynolds(vv).to_bits());
+                if seen.insert(key) {
+                    work.push((f, vv));
+                }
+            }
+            self.warm_polar_pool(&work);
+            // Each station keeps its winning candidate's attack angle.
+            let alpha_raw: Vec<f64> = (0..m).map(|i| raw_alphas[winners[i]][i]).collect();
+            let alpha_base = smooth_alpha_curve(&rr, &alpha_raw);
+            println!(
+                "lift-line composed camber m(r): [{}]",
+                m_dist
+                    .iter()
+                    .map(|&m| format!("{:.2}", m))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            );
+            seeds.push(("m(r) per-station".into(), m_dist, alpha_base));
+        }
+
+        // --- One full design pass per candidate, in parallel --------------
+        // The passes are independent (separate elements, attack angles and
+        // warm state), so they run on scoped threads; the best objective
+        // (`q + 50*err` — the same one the optimizer minimises) wins, so
+        // camber competes with chord shape on equal terms.
+        let param = &self.param;
+        let store = self.store.clone();
+        let radial_res = self.radial_resolution;
+        let plate_mode = self.plate_mode;
+        let mut outcomes: Vec<PassOutcome> = Vec::new();
+        thread::scope(|s| {
+            let handles: Vec<_> = seeds
+                .into_iter()
+                .map(|(label, camber_dist, alpha_base)| {
+                    let (store, rr, ref_r, cap_ctl, infl) =
+                        (&store, &rr, &ref_r, &cap_ctl, &infl);
+                    s.spawn(move || {
+                        Self::run_design_pass(
+                            param, n_blades, plate_mode, store, radial_res, rr, ref_r, cap_ctl,
+                            infl, rpm, omega, u_0, thrust, n_ctrl, s_cap, &label, &camber_dist,
+                            &alpha_base,
+                        )
+                    })
+                })
+                .collect();
+            for h in handles {
+                if let Some(o) = h.join().expect("design pass panicked") {
+                    outcomes.push(o);
+                }
+            }
+        });
+
+        let win = match outcomes
+            .into_iter()
+            .min_by(|a, b| a.f.partial_cmp(&b.f).unwrap())
+        {
             Some(w) => w,
             // No candidate produced a usable design (every pass failed to
             // meet the thrust target); nothing to report or export.
@@ -869,25 +968,48 @@ impl Prop {
             "Lifting-line design: camber {} da={:.3} T={:.4} Q={:.4}",
             win.label, win.da, win.t, win.q
         );
+
+        // Rebuild the winning elements on this thread from the pass's plain
+        // geometry outcome (chord and twist per station).
         println!("Lifting-line blade stations");
+        let mut elements: Vec<BladeElement<Naca4>> = Vec::with_capacity(m);
         for i in 0..m {
             let alpha =
                 (win.alpha_base[i] + win.da).clamp(-lift_line::ALPHA_MAX, lift_line::ALPHA_MAX);
-            let camber = win.elements[i].foil.borrow().m;
+            let phi0 = u_0.atan2(omega * rr[i]).max(1.0e-3);
+            let c = chord_law(&self.param, n_blades, rr[i], 0.0, s_cap);
+            let foil =
+                Rc::new(RefCell::new(station_foil(&self.param, rr[i], c, win.camber_dist[i])));
+            let mut be = BladeElement::new(
+                rr[i],
+                self.radial_resolution,
+                foil,
+                phi0 + 0.12,
+                rpm,
+                u_0,
+                self.store.clone(),
+            );
+            if self.plate_mode {
+                be.set_plate_mode(true);
+            }
+            be.set_chord(win.chords[i]);
+            be.set_twist(win.phis[i] + alpha);
             println!(
                 "r={} camber={} alpha_base={} alpha={} phi={} twist={} chord={} ",
                 rr[i],
-                camber,
+                win.camber_dist[i],
                 win.alpha_base[i].to_degrees(),
                 alpha.to_degrees(),
                 win.phis[i].to_degrees(),
                 (win.phis[i] + alpha).to_degrees(),
                 win.chords[i]
             );
+            elements.push(be);
         }
-        self.blade_elements = win.elements;
+        self.blade_elements = elements;
         (win.q, win.t)
     }
+
 }
 
 /// Piecewise-linear interpolation (scipy `interp1d(x, y, "linear")`).
@@ -949,6 +1071,22 @@ fn compose_camber(rr: &[f64], lds: &[Vec<f64>], candidates: &[f64]) -> (Vec<f64>
         })
         .collect();
     (m_dist, winners)
+}
+
+/// One camber candidate's converged design pass: the objective the
+/// candidates compete on (`f = q + 50*err`), the measured operating point
+/// and the per-station geometry.  Plain data so the passes can run on
+/// worker threads; the caller rebuilds the winning blade elements from it.
+struct PassOutcome {
+    f: f64,
+    q: f64,
+    t: f64,
+    label: String,
+    da: f64,
+    alpha_base: Vec<f64>,
+    phis: Vec<f64>,
+    chords: Vec<f64>,
+    camber_dist: Vec<f64>,
 }
 
 #[cfg(test)]

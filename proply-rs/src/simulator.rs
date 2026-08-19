@@ -68,6 +68,22 @@ fn polar_is_physical(p: &StoredPolar) -> bool {
     n_win > 0 && min_cd > CD_FLOOR
 }
 
+/// Per-key in-flight simulations (process-wide).  A worker pool and the
+/// parallel design passes can miss the same cache key concurrently; the
+/// gate makes the expensive sweep run once per key, with waiters blocking
+/// on the condvar instead of duplicating it.  Lives outside the polar
+/// store so a waiter never blocks while holding the store's data lock.
+fn sim_keys() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
+    static KEYS: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+        std::sync::OnceLock::new();
+    KEYS.get_or_init(|| std::sync::Mutex::new(std::collections::HashSet::new()))
+}
+
+fn sim_cv() -> &'static std::sync::Condvar {
+    static CV: std::sync::OnceLock<std::sync::Condvar> = std::sync::OnceLock::new();
+    CV.get_or_init(std::sync::Condvar::new)
+}
+
 /// Grid point `i` of the Reynolds grid (log-spaced, `RE_MIN..=RE_MAX`).
 fn re_grid(i: usize) -> f64 {
     RE_MIN * (RE_MAX / RE_MIN).powf(i as f64 / (N_RE - 1) as f64)
@@ -222,16 +238,46 @@ impl<F: FoilLike> FoilSimulator<F> {
         let (cl_poly, cd_poly) = match cached {
             Some(p) if p.alpha.len() > 20 && polar_is_physical(&p) => fit_polar(&p),
             _ => {
-                self.xfoil_simulate_polars(reynolds, mach);
-                let store = self.store.lock().unwrap();
-                match store.get(&ck) {
-                    Some(p) if p.alpha.len() > 20 && polar_is_physical(p) => fit_polar(p),
-                    // Degenerate case: too few converged points, or an
-                    // unphysical (near-zero drag) sweep.  The Python code
-                    // recurses forever here (its fallback never writes to
-                    // the DB); we return the flat-plate model instead.
-                    _ => flat_plate_polys(),
+                // Claim the key (blocking while another thread simulates
+                // it), then re-check the store once the claim is ours — the
+                // previous holder may have stored it in the meantime.
+                {
+                    let mut keys = sim_keys().lock().unwrap();
+                    while keys.contains(&ck) {
+                        keys = sim_cv().wait(keys).unwrap();
+                    }
+                    keys.insert(ck.clone());
                 }
+                let raced = {
+                    let store = self.store.lock().unwrap();
+                    store.get(&ck).and_then(|p| {
+                        if p.alpha.len() > 20 && polar_is_physical(p) {
+                            Some(fit_polar(p))
+                        } else {
+                            None
+                        }
+                    })
+                };
+                let polys = match raced {
+                    Some(polys) => polys,
+                    None => {
+                        self.xfoil_simulate_polars(reynolds, mach);
+                        let store = self.store.lock().unwrap();
+                        match store.get(&ck) {
+                            Some(p) if p.alpha.len() > 20 && polar_is_physical(p) => fit_polar(p),
+                            // Degenerate case: too few converged points, or an
+                            // unphysical (near-zero drag) sweep.  The Python
+                            // code recurses forever here (its fallback never
+                            // writes to the DB); we return the flat-plate
+                            // model instead.
+                            _ => flat_plate_polys(),
+                        }
+                    }
+                };
+                let mut keys = sim_keys().lock().unwrap();
+                keys.remove(&ck);
+                sim_cv().notify_all();
+                polys
             }
         };
 
@@ -239,6 +285,30 @@ impl<F: FoilLike> FoilSimulator<F> {
             .borrow_mut()
             .insert(key, (cl_poly.clone(), cd_poly.clone()));
         (cl_poly, cd_poly)
+    }
+
+    /// Simulate and cache the polar buckets an evaluation at speed `v` would
+    /// need: the two Reynolds-grid buckets bracketing the foil's raw
+    /// Reynolds number there (the low-Re blend zone needs only the first
+    /// bucket).  This is the expensive first-touch path of [`get_polars`],
+    /// exposed so a worker pool can populate the shared store before a
+    /// design loop runs.  No-op in plate mode (no polars are consulted).
+    pub fn warm_polars(&self, v: f64) {
+        if self.plate_mode {
+            return;
+        }
+        let re = self.foil.borrow().reynolds(v);
+        let mach = self.get_mach(v);
+        if re < RE_FLAT_PLATE {
+            return; // analytic branch: nothing is simulated
+        }
+        if re < RE_MIN {
+            self.bucket_polars(RE_MIN, mach);
+            return;
+        }
+        let (lo, hi, _) = re_bracket(re);
+        self.bucket_polars(re_grid(lo), mach);
+        self.bucket_polars(re_grid(hi), mach);
     }
 
     /// Simulate the polar with rust-foil and store it in the shared cache.
