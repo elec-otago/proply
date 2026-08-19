@@ -12,16 +12,16 @@
     "motor_winding_resistance": 0.405,
 
     "blades": 3,
-    "thrust": 1.0,
+    "thrust": 3,
 
-    "radius": 0.075,
-    "tip_chord": 0.007,
+    "radius": 0.068,
+    "tip_chord": 0.005,
     "scimitar_percent": 0.0,
     "trailing_edge": 0.25,
-    "centre_hole": 0.0015,
+    "center_hole": 0.0015,
     "hub_radius": 0.006,
     "hub_depth": 0.006,
-    "chord_spline_n": 2,
+    "chord_spline_n": 3,
 
     "exclude_zone": [
         {"x":0.005, "z":0.005},

@@ -1,3 +1,4 @@
+import argparse
 import sys
 import FreeCAD
 import Import
@@ -36,8 +37,9 @@ def render_step_to_png(step_path, png_path, width=1920, height=1080):
     print("Render complete!")
 
 if __name__ == "__main__":
-    # Define your file paths here or pass them as arguments
-    input_step = "model.step"
-    output_png = "output_render.png"
-    
-    render_step_to_png(input_step, output_png)
+    parser = argparse.ArgumentParser(description="Render a STEP file to PNG")
+    parser.add_argument("--step", default="model.step", help="input STEP file (default: model.step)")
+    parser.add_argument("--png", default="output_render.png", help="output PNG file (default: output_render.png)")
+    args = parser.parse_args()
+
+    render_step_to_png(args.step, args.png)
