@@ -1,8 +1,9 @@
 # Prop Gallery
 
-Every propeller in [`props/`](props/) designed by `proply-rs` (BEM design loop,
-STEP output) and rendered headlessly with FreeCAD via
-[`props/renderprop.py`](props/renderprop.py).
+Every propeller in [`props/`](props/) designed by `proply-rs` with the
+coupled lifting-line / vortex design loop (STEP output; see
+[proply-rs/README.md](proply-rs/README.md)) and rendered headlessly with
+FreeCAD via [`props/renderprop.py`](props/renderprop.py).
 
 To regenerate everything after changing a prop JSON, the design code, or the
 render script:

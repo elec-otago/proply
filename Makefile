@@ -4,14 +4,19 @@
 #   make steps              design all props (STEP files in build/out/)
 #   make clean              remove generated STEP and PNG files
 #
-# The design flags can be overridden on the command line, e.g.
-#   make gallery DESIGN_FLAGS="--lifting-line --ar 6"
+# Designs use the coupled lifting-line solver by default.  Switch design
+# modes by overriding DESIGN_FLAGS, e.g.
+#   make gallery DESIGN_FLAGS="--naca --bem --n 40 --resolution 30"
 
-DESIGN_FLAGS ?= --naca --bem --n 40 --resolution 30
+DESIGN_FLAGS ?= --naca --lifting-line --n 40 --resolution 30
 
 PROPS := $(wildcard props/*.json)
 STEPS := $(PROPS:props/%.json=build/out/%.step)
 PNGS  := $(PROPS:props/%.json=images/%.png)
+
+# Changing DESIGN_FLAGS must redesign every prop: the flags are recorded in
+# a stamp the STEP rules depend on, refreshed only when they change.
+STAMP := build/out/.design_flags
 
 all: gallery
 
@@ -19,9 +24,14 @@ steps: $(STEPS)
 
 gallery: $(PNGS)
 
+$(STAMP): Makefile
+	@mkdir -p $(dir $@)
+	@printf '%s\n' "$(DESIGN_FLAGS)" > $@.tmp
+	@if cmp -s $@.tmp $@; then rm -f $@.tmp; else mv $@.tmp $@; echo "design flags changed -> redesigning all props"; fi
+
 # --step-file pins the output name to the JSON file stem: the "name" field
 # inside the JSON does not always match (and ntm_28_26_1200Kv.json omits it).
-build/out/%.step: props/%.json
+build/out/%.step: props/%.json $(STAMP)
 	@mkdir -p $(dir $@)
 	cargo run --release -p proply-rs -- $(DESIGN_FLAGS) --step-file=$@ --param=$<
 
@@ -34,7 +44,7 @@ images/%.png: build/out/%.step props/renderprop.py
 	test -f $@
 
 clean:
-	rm -f $(STEPS) $(PNGS)
+	rm -f $(STEPS) $(PNGS) $(STAMP)
 
 .PHONY: all steps gallery clean
 .DELETE_ON_ERROR:
