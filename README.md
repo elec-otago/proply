@@ -16,6 +16,7 @@ OpenSCAD, no STL.
 - `proply-rs/` — the propeller design tool (BEM design loop, STEP output)
 - `rust-foil/` — airfoil simulation (Rust port of XFOIL)
 - `props/` — JSON propeller parameter files (motor, geometry, thrust target)
+- `images/` — rendered PNG of each prop (see [GALLERY.md](GALLERY.md))
 - `legacy/` — the original Python implementation, kept for reference
 
 ## Building
@@ -50,6 +51,11 @@ This writes `build/out/<name>.step` — an assembly containing the hub and
 - The first run simulates an 80-point alpha sweep per blade station; polars
   are cached in `foil_cache.json` in the working directory, so reruns are
   fast.
+
+`make gallery` designs every prop in `props/` and renders each STEP file to
+`images/<name>.png` with FreeCAD (headless, via
+[`props/renderprop.py`](props/renderprop.py)); the results are collected in
+[GALLERY.md](GALLERY.md).
 
 The full CLI reference and port notes (deviations from the Python
 implementation, deferred features) are in
