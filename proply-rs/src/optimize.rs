@@ -258,7 +258,28 @@ pub fn a_buhl(ct: f64, f: f64) -> f64 {
 
 /// `optimize.error`: relative residual between two momentum states.
 pub fn error(dv: f64, dv2: f64, a_prime: f64, a_prime2: f64) -> f64 {
-    ((dv - dv2) / (dv + dv2)).abs() + ((a_prime - a_prime2) / (a_prime + a_prime2)).abs()
+    rel_residual(dv, dv2) + rel_residual(a_prime, a_prime2)
+}
+
+/// `|x − y| / |x + y|` — the relative residual between a state and its
+/// momentum-map image.  Where both states are zero the residual is zero
+/// (they agree); where they are equal and opposite it is infinite.  Both
+/// cases must be defined explicitly: the raw division returns 0/0 = NaN
+/// when a Nelder–Mead vertex puts chord and a_prime at their zero lower
+/// bounds (the momentum step maps (0, 0) to (0, 0)), and that NaN used to
+/// panic the simplex sort (multistar_2209_980kv).
+fn rel_residual(x: f64, y: f64) -> f64 {
+    let num = (x - y).abs();
+    let den = (x + y).abs();
+    if den == 0.0 {
+        if num == 0.0 {
+            0.0
+        } else {
+            f64::INFINITY
+        }
+    } else {
+        num / den
+    }
 }
 
 /// Box-constrained Nelder-Mead (replaces scipy SLSQP/COBYLA here).
@@ -312,7 +333,15 @@ impl NelderMead {
                     }
                 }
             }
-            f(x) + self.penalty * pen
+            let v = f(x) + self.penalty * pen;
+            // A NaN objective compares as the worst point — the same role
+            // the +inf from the eff term already plays — instead of
+            // panicking the simplex sort.
+            if v.is_nan() {
+                f64::INFINITY
+            } else {
+                v
+            }
         };
 
         // Initial simplex (scipy default).
@@ -567,5 +596,77 @@ mod tests {
         assert!(err < 1e-6, "err {}", err);
         assert!((dv - 7.1164).abs() < 0.2, "dv {}", dv);
         assert!((ap - 0.0866).abs() < 0.01, "a_prime {}", ap);
+    }
+
+    #[test]
+    fn error_defined_when_both_states_are_zero() {
+        // The zero-chord / zero-a_prime corner of the simplex: the momentum
+        // step maps (0, 0) to (0, 0), so the residual is 0/0.  It used to be
+        // NaN, which panicked the simplex sort (multistar_2209_980kv).
+        assert_eq!(error(0.0, 0.0, 0.0, 0.0), 0.0);
+        // Equal-and-opposite states disagree maximally — finite numerator
+        // over a zero denominator is +inf, never NaN.
+        assert!(error(1.0, -1.0, 0.0, 0.0).is_infinite());
+        // Unchanged for ordinary states.
+        assert!((error(2.0, 1.0, 0.02, 0.01) - (1.0 / 3.0 + 1.0 / 3.0)).abs() < 1e-12);
+    }
+
+    #[test]
+    fn min_all_finite_at_zero_chord_vertex() {
+        // Regression (multistar_2209_980kv, first station: u_0 = 20 m/s,
+        // five blades, 5 mm max chord): a Nelder–Mead vertex with chord and
+        // a_prime at their zero lower bounds evaluates the objective through
+        // the (0, 0) momentum state.  min_all must stay finite there.
+        let fs = PlateSim { chord: 0.005 };
+        let x = [0.3921571, 3.9707275, 0.0, 0.0];
+        let v = min_all(&x, &fs, 3.9707, 9734.3, 0.0625, 0.0575, 20.0, 5.0);
+        assert!(v.is_finite(), "min_all = {}", v);
+        // The zero-chord state misses the goal entirely, so the objective is
+        // dominated by the thrust-miss penalty (10 * ((0 - goal)/(0 +
+        // goal))^2 = 10) plus the momentum residual (1); the eff term is 0
+        // (torque = 0).  Require "large", not an exact value.
+        assert!((v - 11.0).abs() < 2.0, "min_all = {}", v);
+    }
+
+    #[test]
+    fn nelder_mead_treats_nan_objective_as_worst() {
+        // The objective can evaluate to NaN at the initial point (0/0
+        // residuals — see `min_all_finite_at_zero_chord_vertex`); the
+        // simplex sort used to panic on partial_cmp().unwrap().  A NaN must
+        // instead sort as the worst vertex so the minimizer walks away from
+        // it and still finds the real minimum.  x[0]/x[0] is NaN at the
+        // start point and 1 elsewhere.
+        let nm = NelderMead::default();
+        let (x, f) = nm.minimize(
+            |x| x[0] / x[0] + (x[1] + 1.0).powi(2),
+            &[0.0, 0.0],
+            &[Some((0.0, 2.0)), Some((-2.0, 0.0))],
+        );
+        assert!(x[0] > 0.0 && x[0] <= 2.0, "x0 {}", x[0]);
+        assert!((x[1] + 1.0).abs() < 1e-4, "x1 {}", x[1]);
+        assert!(f.is_finite() && (f - 1.0).abs() < 1e-3, "f {}", f);
+    }
+
+    #[test]
+    fn optimize_all_zero_chord_station_is_finite() {
+        // The full station solve for the multistar_2209_980kv tip station
+        // (u_0 = 20 m/s, five blades, 5 mm max chord, only two stations at
+        // --resolution 30).  Guards the whole chain: objective, bounds and
+        // multi-start polish must all return finite design variables.
+        let fs = PlateSim { chord: 0.005 };
+        let (x, fun) = optimize_all(
+            &fs,
+            3.9707,   // dv goal at the tip after tip-loss
+            9734.3,   // motor max-efficiency RPM (Kv 980, 11 V, Rm 0.207, I0 0.5)
+            0.0625,   // tip radius (m)
+            0.0575,   // station span
+            20.0,     // forward airspeed (m/s)
+            5.0,      // blades
+            0.005003, // max chord (m)
+        );
+        for (i, v) in x.iter().enumerate() {
+            assert!(v.is_finite(), "x[{}] = {}", i, v);
+        }
+        assert!(fun.is_finite(), "fun = {}", fun);
     }
 }

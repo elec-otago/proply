@@ -60,9 +60,11 @@ static. [JSON](props/flywoo_robo_rb1202.5_11500kv.json)
 
 ## multistar_2209_980kv
 
-Not yet buildable: the optimizer's Nelder–Mead objective evaluates to NaN for
-this parameter set (5 blades, Ø 125 mm, 980 Kv @ 11 V, 5 N at 20 m/s) and the
-sort at `proply-rs/src/optimize.rs:335` panics on `unwrap()`.
+[![multistar_2209_980kv](images/multistar_2209_980kv.png)](images/multistar_2209_980kv.png)
+
+5 blades, Ø 125 mm — Multistar 2209 980 Kv @ 11 V, 5 N thrust target,
+V = 20 m/s. The design converges to ~2.9 N, short of the 5 N target —
+this parameter set is energetically marginal at 20 m/s forward speed.
 [JSON](props/multistar_2209_980kv.json)
 
 ## ntm_28_26_1200Kv
