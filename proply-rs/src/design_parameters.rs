@@ -42,6 +42,13 @@ pub struct DesignParameters {
     /// best-performing one.
     #[serde(default)]
     pub camber: Option<f64>,
+    /// Explicit motor operating point (engine-style): when *both* are given,
+    /// the design runs at this torque (N m) and RPM instead of the electric
+    /// motor model's maximum-efficiency point derived from `motor_Kv` & co.
+    #[serde(default)]
+    pub motor_torque: Option<f64>,
+    #[serde(default)]
+    pub motor_RPM: Option<f64>,
     /// Use the CST (Kulfan) foil family instead of the NACA 4-series: every
     /// station foil is the default 18-parameter section, re-thicknessed and
     /// cambered to the same radial laws.
@@ -85,6 +92,8 @@ impl Default for DesignParameters {
             scimitar_percent: d(0.0),
             chord_spline_n: 3,
             camber: None,
+            motor_torque: None,
+            motor_RPM: None,
             cst: false,
             bem: true,
             lifting_line: false,
@@ -115,6 +124,26 @@ impl DesignParameters {
     /// Disc area (kept for parity with the Python `area()` method).
     pub fn area(&self) -> f64 {
         std::f64::consts::PI * self.radius * self.radius
+    }
+
+    /// The design's motor operating point: `(torque N m, RPM, power W)`.
+    /// An explicitly specified `motor_torque` + `motor_RPM` pair (an
+    /// engine with a known operating point) overrides the electric motor
+    /// model's maximum-efficiency derivation; the power is then the shaft
+    /// power at the specified point.  One without the other is ignored.
+    pub fn motor_operating_point(&self) -> (f64, f64, f64) {
+        match (self.motor_torque, self.motor_RPM) {
+            (Some(q), Some(rpm)) => (q, rpm, q * crate::optimize::rpm2omega(rpm)),
+            _ => {
+                let m = crate::motor::Motor::new(
+                    self.motor_Kv,
+                    self.motor_no_load_current,
+                    self.motor_winding_resistance,
+                );
+                let (q, rpm) = m.get_qmax(self.motor_volts);
+                (q, rpm, m.get_pmax(self.motor_volts))
+            }
+        }
     }
 }
 
@@ -214,6 +243,51 @@ mod tests {
         assert_eq!(p2.chord_spline_n, 3);
         assert!(p2.camber.is_none());
         assert!(!p2.cst);
+    }
+
+    #[test]
+    fn specified_motor_operating_point_overrides_electric_model() {
+        // Kv=1900, I0=0.5, Rm=0.405, V=11 -> the electric max-efficiency
+        // point (matches the motor model test).
+        let base = r#"{
+            "name": "x", "radius": 0.05, "thrust": 1.0, "blades": 2,
+            "motor_Kv": 1900, "motor_volts": 11.0,
+            "motor_no_load_current": 0.5, "motor_winding_resistance": 0.405
+        }"#;
+        let p = DesignParameters::from_json(base).unwrap();
+        assert!(p.motor_torque.is_none() && p.motor_RPM.is_none());
+        let (q, rpm, _) = p.motor_operating_point();
+        assert!((q - 0.016006).abs() < 1.0e-3, "q = {}", q);
+        assert!((rpm - 18064.6).abs() < 5.0, "rpm = {}", rpm);
+
+        // Both given: the specified point wins, power = shaft power there.
+        let specified = r#"{
+            "name": "x", "radius": 0.05, "thrust": 1.0, "blades": 2,
+            "motor_Kv": 1900, "motor_volts": 11.0,
+            "motor_no_load_current": 0.5, "motor_winding_resistance": 0.405,
+            "motor_torque": 334.8, "motor_RPM": 1950.0
+        }"#;
+        let p = DesignParameters::from_json(specified).unwrap();
+        let (q, rpm, power) = p.motor_operating_point();
+        assert!((q - 334.8).abs() < 1.0e-9);
+        assert!((rpm - 1950.0).abs() < 1.0e-9);
+        assert!(
+            (power - 334.8 * crate::optimize::rpm2omega(1950.0)).abs() < 1.0e-6,
+            "power = {}",
+            power
+        );
+
+        // One without the other: ignored, the electric model is used.
+        let half = r#"{
+            "name": "x", "radius": 0.05, "thrust": 1.0, "blades": 2,
+            "motor_Kv": 1900, "motor_volts": 11.0,
+            "motor_no_load_current": 0.5, "motor_winding_resistance": 0.405,
+            "motor_torque": 334.8
+        }"#;
+        let p = DesignParameters::from_json(half).unwrap();
+        let (q, rpm, _) = p.motor_operating_point();
+        assert!((q - 0.016006).abs() < 1.0e-3, "q = {}", q);
+        assert!((rpm - 18064.6).abs() < 5.0, "rpm = {}", rpm);
     }
 
     #[test]

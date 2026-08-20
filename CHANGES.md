@@ -1,5 +1,21 @@
 # CHANGES
 
+## 2026-08-21 — Specified motor operating point
+
+### proply-rs
+
+- A `motor_torque` + `motor_RPM` pair in the design JSON now sets the
+  design's operating point directly (engine-style: `rotax_912_uls`'
+  334.8 N m at 1950 RPM — 68.4 kW shaft), overriding the electric motor
+  model's maximum-efficiency point derived from `motor_Kv` /
+  `motor_volts` & co.  One field without the other is ignored.  The
+  resolution lives in `DesignParameters::motor_operating_point` (unit
+  tested); the YAML summary's motor section, the `--auto` goal torque
+  and the startup banner follow automatically.
+- `props/rotax_912_uls.json` is the only shipped design using the pair;
+  its committed summary and gallery numbers predate this change and
+  refresh on the next `make summaries`.
+
 ## 2026-08-20 — Progress bars for the serial lifting-line phases
 
 ### proply-rs

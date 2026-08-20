@@ -45,6 +45,10 @@ per-station section list).
 
 - `--auto` re-runs the design loop, reducing the thrust target until the
   torque drops below `1.5 × Qmax`.
+- A `motor_torque` + `motor_RPM` pair in the design JSON pins the
+  operating point directly (e.g. an engine's rated torque and speed),
+  overriding the electric motor model derived from `motor_Kv` and
+  `motor_volts`.
 - `--step-file <path>` overrides the output STEP file name.
 - `--lifting-line [--ar N]` selects the coupled lifting-line / vortex design
   (spanwise-induced losses from the trailed wake instead of the empirical

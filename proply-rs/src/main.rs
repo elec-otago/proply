@@ -10,7 +10,6 @@ use std::sync::{Arc, Mutex};
 
 use proply_rs::cache::PolarStore;
 use proply_rs::design_parameters::DesignParameters;
-use proply_rs::motor::Motor;
 use proply_rs::optimize;
 use proply_rs::prop::Prop;
 use proply_rs::step_out;
@@ -83,6 +82,9 @@ ALL OPTIONS IN JSON:
     file (keys: bem, lifting_line, auto, resolution, n, ar, plate, cst,
     dir, step_file, chord_spline_n, camber).  An explicit CLI flag
     overrides the JSON value, which overrides the built-in default.
+    A motor_torque + motor_RPM pair in the JSON sets the design's
+    operating point directly (e.g. an engine), overriding the electric
+    motor model derived from motor_Kv/motor_volts & co.
 
 OTHER:
     --help, -h             Print this help and exit.
@@ -238,13 +240,13 @@ fn main() {
     p.n_blades = param.blades;
     p.set_plate_mode(param.plate);
 
-    let m = Motor::new(
-        param.motor_Kv,
-        param.motor_no_load_current,
-        param.motor_winding_resistance,
-    );
-    let (optimum_torque, optimum_rpm) = m.get_qmax(param.motor_volts);
-    let power = m.get_pmax(param.motor_volts);
+    // An explicitly specified operating point (motor_torque + motor_RPM in
+    // the design file, e.g. an engine) overrides the electric motor model's
+    // maximum-efficiency point.
+    let (optimum_torque, optimum_rpm, power) = param.motor_operating_point();
+    if param.motor_torque.is_some() {
+        println!("Using specified motor operating point (motor_torque/motor_RPM)");
+    }
 
     println!("\nPROPLY: Automatic propeller Design\n\n");
     println!(
