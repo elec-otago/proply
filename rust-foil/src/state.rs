@@ -57,19 +57,19 @@ pub struct Xfoil {
     pub show_output: bool,
 
     // ----- freestream / operating conditions -----
-    pub adeg: f64, // angle of attack in degrees
-    pub alfa: f64, // angle of attack in radians
-    pub minf: f64, // freestream Mach number at current CL
-    pub minf1: f64, // freestream Mach number at CL = 1
-    pub minf_cl: f64, // dMINF/dCL
-    pub qinf: f64, // freestream speed (defined as 1)
-    pub reinf: f64, // Reynolds number for current CL
-    pub reinf1: f64, // Reynolds number at CL = 1
-    pub reinf_cl: f64, // dREINF/dCL
-    pub clspec: f64, // specified CL
-    pub retyp: i32, // Re variation with CL type
-    pub matyp: i32, // Ma variation with CL type
-    pub acrit: [f64; ISX], // log(critical amplification ratio)
+    pub adeg: f64,          // angle of attack in degrees
+    pub alfa: f64,          // angle of attack in radians
+    pub minf: f64,          // freestream Mach number at current CL
+    pub minf1: f64,         // freestream Mach number at CL = 1
+    pub minf_cl: f64,       // dMINF/dCL
+    pub qinf: f64,          // freestream speed (defined as 1)
+    pub reinf: f64,         // Reynolds number for current CL
+    pub reinf1: f64,        // Reynolds number at CL = 1
+    pub reinf_cl: f64,      // dREINF/dCL
+    pub clspec: f64,        // specified CL
+    pub retyp: i32,         // Re variation with CL type
+    pub matyp: i32,         // Ma variation with CL type
+    pub acrit: [f64; ISX],  // log(critical amplification ratio)
     pub xstrip: [f64; ISX], // transition trip x/c locations
     pub tindex: [f64; ISX],
     pub waklen: f64, // wake length to chord ratio
@@ -82,45 +82,45 @@ pub struct Xfoil {
     pub cl: f64,
     pub cm: f64,
     pub cd: f64,
-    pub cdf: f64, // friction CD
-    pub cdp: f64, // pressure CD
+    pub cdf: f64,    // friction CD
+    pub cdp: f64,    // pressure CD
     pub cl_alf: f64, // dCL/dALFA
     pub cl_msq: f64, // dCL/d(MINF^2)
-    pub cpmin: f64, // min Cp
-    pub cpmn: f64, // min Cp (from fcpmin)
-    pub cpmni: f64, // min Cp inviscid
-    pub cpmnv: f64, // min Cp viscous
+    pub cpmin: f64,  // min Cp
+    pub cpmn: f64,   // min Cp (from fcpmin)
+    pub cpmni: f64,  // min Cp inviscid
+    pub cpmnv: f64,  // min Cp viscous
     pub xcpmni: f64,
     pub xcpmnv: f64,
-    pub cpstar: f64, // sonic pressure coefficient
-    pub qstar: f64, // sonic speed
-    pub tklam: f64, // Karman-Tsien parameter
+    pub cpstar: f64,  // sonic pressure coefficient
+    pub qstar: f64,   // sonic speed
+    pub tklam: f64,   // Karman-Tsien parameter
     pub tkl_msq: f64, // d(TKLAM)/d(MINF^2)
 
     // ----- alpha/CL setting state -----
-    pub lalfa: bool, // true if alpha is specified, false if CL is specified
-    pub lvisc: bool, // true if viscous option is invoked
-    pub lwake: bool, // true if wake geometry has been calculated
-    pub lvconv: bool, // true if converged BL solution exists
-    pub lbli_ni: bool, // true if BL has been initialized (LBLini)
+    pub lalfa: bool,        // true if alpha is specified, false if CL is specified
+    pub lvisc: bool,        // true if viscous option is invoked
+    pub lwake: bool,        // true if wake geometry has been calculated
+    pub lvconv: bool,       // true if converged BL solution exists
+    pub lbli_ni: bool,      // true if BL has been initialized (LBLini)
     pub abort_on_nan: bool, // stop iterations if NaN appears
 
     // ----- current airfoil geometry (panel nodes) -----
-    pub n: usize, // number of points on airfoil
-    pub nw: usize, // number of points in wake
-    pub x: Vec<f64>, // IZX
-    pub y: Vec<f64>, // IZX
+    pub n: usize,     // number of points on airfoil
+    pub nw: usize,    // number of points in wake
+    pub x: Vec<f64>,  // IZX
+    pub y: Vec<f64>,  // IZX
     pub xp: Vec<f64>, // dX/dS
     pub yp: Vec<f64>, // dY/dS
-    pub s: Vec<f64>, // arc length along airfoil
-    pub sle: f64, // value of S at leading edge
-    pub xle: f64, // leading edge coordinates
+    pub s: Vec<f64>,  // arc length along airfoil
+    pub sle: f64,     // value of S at leading edge
+    pub xle: f64,     // leading edge coordinates
     pub yle: f64,
     pub xte: f64, // trailing edge coordinates
     pub yte: f64,
-    pub chord: f64, // chord length
-    pub cosa: f64, // cos(ALFA)
-    pub sina: f64, // sin(ALFA)
+    pub chord: f64,   // chord length
+    pub cosa: f64,    // cos(ALFA)
+    pub sina: f64,    // sin(ALFA)
     pub nx: Vec<f64>, // normal unit vector components
     pub ny: Vec<f64>,
     pub apanel: Vec<f64>, // panel angle array
@@ -132,49 +132,49 @@ pub struct Xfoil {
     pub wgap: Vec<f64>, // thickness of "dead air" region in wake (length IWX, 0-based)
 
     // ----- panel strengths / solution -----
-    pub gam: Vec<f64>, // surface vortex panel strength array (IQX)
-    pub gam_a: Vec<f64>, // dGAM/dALFA
+    pub gam: Vec<f64>,       // surface vortex panel strength array (IQX)
+    pub gam_a: Vec<f64>,     // dGAM/dALFA
     pub gamu: [Vec<f64>; 2], // GAM for alpha = 0, 90 deg
-    pub sig: Vec<f64>, // surface/wake mass defect array (IZX)
-    pub sigte: f64, // source panel strength across finite-thickness TE
+    pub sig: Vec<f64>,       // surface/wake mass defect array (IZX)
+    pub sigte: f64,          // source panel strength across finite-thickness TE
     pub sigte_a: f64,
     pub gamte: f64, // vortex panel strength across finite-thickness TE
     pub gamte_a: f64,
-    pub dste: f64, // TE panel length
-    pub ante: f64, // projected TE thickness perp. to TE bisector
-    pub aste: f64, // projected TE thickness para. to TE bisector
+    pub dste: f64,   // TE panel length
+    pub ante: f64,   // projected TE thickness perp. to TE bisector
+    pub aste: f64,   // projected TE thickness para. to TE bisector
     pub sharp: bool, // true if DSTE == 0
-    pub circ: f64, // circulation
-    pub psio: f64, // streamfunction inside airfoil
-    pub sst: f64, // S value at stagnation point
+    pub circ: f64,   // circulation
+    pub psio: f64,   // streamfunction inside airfoil
+    pub sst: f64,    // S value at stagnation point
     pub sst_go: f64, // dSST/dGAM(IST)
     pub sst_gp: f64, // dSST/dGAM(IST+1)
-    pub ist: usize, // stagnation point lies between S(IST), S(IST+1)
+    pub ist: usize,  // stagnation point lies between S(IST), S(IST+1)
 
     // ----- inviscid influence coefficient arrays -----
-    pub qinv: Vec<f64>, // tangential velocity due to surface vorticity (IZX)
-    pub qinv_a: Vec<f64>, // dQINV/dalpha
-    pub qvis: Vec<f64>, // tangential velocity due to vorticity & sources (IZX)
+    pub qinv: Vec<f64>,       // tangential velocity due to surface vorticity (IZX)
+    pub qinv_a: Vec<f64>,     // dQINV/dalpha
+    pub qvis: Vec<f64>,       // tangential velocity due to vorticity & sources (IZX)
     pub qinvu: [Vec<f64>; 2], // QINV for alpha = 0, 90 deg (IZX)
-    pub cpi: Vec<f64>, // inviscid Cp (IZX)
-    pub cpv: Vec<f64>, // viscous Cp (IZX)
-    pub qtan1: f64, // Qtan at alpha = 0 deg
-    pub qtan2: f64, // Qtan at alpha = 90 deg
-    pub aij: Vec<f64>, // dPsi/dGam influence matrix (IQX x IQX)
-    pub aijpiv: Vec<i32>, // pivot index array
-    pub bij: Vec<f64>, // dGam/dSig influence matrix (IQX x IZX)
-    pub cij: Vec<f64>, // dQtan/dGam influence matrix (IWX x IQX)
-    pub dij: Vec<f64>, // dQtan/dSig influence matrix (IZX x IZX)
-    pub dij_t: Vec<f64>, // transposed copy of dij (row-major over j), for contiguous BL reads
-    pub q: Vec<f64>, // generic coefficient matrix (IQX x IQX)
-    pub dq: Vec<f64>, // generic matrix righthand side (IQX)
-    pub dqdg: Vec<f64>, // dQtan/dGam (IQX)
-    pub dqdm: Vec<f64>, // dQtan/dSig (IZX)
-    pub dzdg: Vec<f64>, // dPsi/dGam (IQX)
-    pub dzdn: Vec<f64>, // dPsi/dn (IZX)
-    pub dzdm: Vec<f64>, // dPsi/dSig (IZX)
-    pub z_qinf: f64, // dPsi/dQinf
-    pub z_alfa: f64, // dPsi/dalfa
+    pub cpi: Vec<f64>,        // inviscid Cp (IZX)
+    pub cpv: Vec<f64>,        // viscous Cp (IZX)
+    pub qtan1: f64,           // Qtan at alpha = 0 deg
+    pub qtan2: f64,           // Qtan at alpha = 90 deg
+    pub aij: Vec<f64>,        // dPsi/dGam influence matrix (IQX x IQX)
+    pub aijpiv: Vec<i32>,     // pivot index array
+    pub bij: Vec<f64>,        // dGam/dSig influence matrix (IQX x IZX)
+    pub cij: Vec<f64>,        // dQtan/dGam influence matrix (IWX x IQX)
+    pub dij: Vec<f64>,        // dQtan/dSig influence matrix (IZX x IZX)
+    pub dij_t: Vec<f64>,      // transposed copy of dij (row-major over j), for contiguous BL reads
+    pub q: Vec<f64>,          // generic coefficient matrix (IQX x IQX)
+    pub dq: Vec<f64>,         // generic matrix righthand side (IQX)
+    pub dqdg: Vec<f64>,       // dQtan/dGam (IQX)
+    pub dqdm: Vec<f64>,       // dQtan/dSig (IZX)
+    pub dzdg: Vec<f64>,       // dPsi/dGam (IQX)
+    pub dzdn: Vec<f64>,       // dPsi/dn (IZX)
+    pub dzdm: Vec<f64>,       // dPsi/dSig (IZX)
+    pub z_qinf: f64,          // dPsi/dQinf
+    pub z_alfa: f64,          // dPsi/dalfa
     pub z_qdof0: f64,
     pub z_qdof1: f64,
     pub z_qdof2: f64,
@@ -195,11 +195,11 @@ pub struct Xfoil {
 
     // ----- matrix solve flags / params -----
     pub lipan: bool, // BL->panel pointers IPAN have been calculated
-    pub itmax: i32, // max number of Newton iterations
+    pub itmax: i32,  // max number of Newton iterations
     pub nseqex: i32, // max number of unconverged sequence points for early exit
-    pub rlx: f64, // underrelaxation factor for Newton update
+    pub rlx: f64,    // underrelaxation factor for Newton update
     pub vaccel: f64, // BL Newton acceleration parameter
-    pub idamp: i32, // e^n envelope model flag
+    pub idamp: i32,  // e^n envelope model flag
 
     // ----- wake -----
     pub awake: f64, // angle of attack corresponding to wake geometry (rad)
@@ -211,32 +211,32 @@ pub struct Xfoil {
     pub qgamm: Vec<f64>, // surface velocity for current airfoil geometry (IBX)
 
     // ----- BL arrays (IVX x ISX), indexed [side][iv] -----
-    pub xssi: [Vec<f64>; ISX], // BL arc length coordinate array
-    pub uedg: [Vec<f64>; ISX], // BL edge velocity array
-    pub uinv: [Vec<f64>; ISX], // BL edge velocity without mass defect influence
+    pub xssi: [Vec<f64>; ISX],   // BL arc length coordinate array
+    pub uedg: [Vec<f64>; ISX],   // BL edge velocity array
+    pub uinv: [Vec<f64>; ISX],   // BL edge velocity without mass defect influence
     pub uinv_a: [Vec<f64>; ISX], // dUINV/dalfa
-    pub mass: [Vec<f64>; ISX], // mass defect array (= UEDG*DSTR)
-    pub thet: [Vec<f64>; ISX], // momentum thickness array
-    pub dstr: [Vec<f64>; ISX], // displacement thickness array
-    pub tstr: [Vec<f64>; ISX], // kin. energy thickness array
-    pub ctau: [Vec<f64>; ISX], // sqrt(max shear coeff) / log(amplification)
-    pub tau: [Vec<f64>; ISX], // wall shear stress (plotting)
-    pub dis: [Vec<f64>; ISX], // dissipation (plotting)
-    pub delt: [Vec<f64>; ISX], // BL thickness (plotting)
-    pub ctq: [Vec<f64>; ISX], // sqrt(equilibrium max shear coeff)
-    pub vti: [Vec<f64>; ISX], // +/-1 conversion factor between panel and BL vars
+    pub mass: [Vec<f64>; ISX],   // mass defect array (= UEDG*DSTR)
+    pub thet: [Vec<f64>; ISX],   // momentum thickness array
+    pub dstr: [Vec<f64>; ISX],   // displacement thickness array
+    pub tstr: [Vec<f64>; ISX],   // kin. energy thickness array
+    pub ctau: [Vec<f64>; ISX],   // sqrt(max shear coeff) / log(amplification)
+    pub tau: [Vec<f64>; ISX],    // wall shear stress (plotting)
+    pub dis: [Vec<f64>; ISX],    // dissipation (plotting)
+    pub delt: [Vec<f64>; ISX],   // BL thickness (plotting)
+    pub ctq: [Vec<f64>; ISX],    // sqrt(equilibrium max shear coeff)
+    pub vti: [Vec<f64>; ISX],    // +/-1 conversion factor between panel and BL vars
     pub uslp: [Vec<f64>; ISX],
     pub guxd: [Vec<f64>; ISX], // dUe/dxBL
     pub guxq: [Vec<f64>; ISX],
-    pub iblte: [i32; ISX], // BL array index at trailing edge
-    pub nbl: [i32; ISX], // max BL array index
+    pub iblte: [i32; ISX],     // BL array index at trailing edge
+    pub nbl: [i32; ISX],       // max BL array index
     pub ipan: [Vec<i32>; ISX], // panel index corresponding to BL location
     pub isys: [Vec<i32>; ISX], // BL Newton system line number corresponding to BL location
-    pub itran: [i32; ISX], // BL array index at transition
-    pub tforce: [bool; ISX], // true if transition is forced due to trip
-    pub xoctr: [f64; ISX], // actual transition x/c locations
-    pub yoctr: [f64; ISX], // actual transition y/c locations
-    pub xssitr: [f64; ISX], // actual transition xi locations
+    pub itran: [i32; ISX],     // BL array index at transition
+    pub tforce: [bool; ISX],   // true if transition is forced due to trip
+    pub xoctr: [f64; ISX],     // actual transition x/c locations
+    pub yoctr: [f64; ISX],     // actual transition y/c locations
+    pub xssitr: [f64; ISX],    // actual transition xi locations
 
     // ----- BL secondary variables at the "1" and "2" stations (i_xbl) -----
     pub com1: BlVars,
@@ -297,17 +297,17 @@ pub struct Xfoil {
     pub vsx: [f64; 4],
 
     // ----- BL Newton system arrays -----
-    pub nsys: usize, // total number of lines in BL Newton system
-    pub va: Vec<f64>, // diagonal blocks (3 x 2 x IZX)
-    pub vb: Vec<f64>, // off-diagonal blocks (3 x 2 x IZX)
-    pub vz: Vec<f64>, // way-off-diagonal block at TE station (3 x 2)
-    pub vm: Vec<f64>, // mass-influence coefficient vectors (3 x IZX x IZX)
+    pub nsys: usize,    // total number of lines in BL Newton system
+    pub va: Vec<f64>,   // diagonal blocks (3 x 2 x IZX)
+    pub vb: Vec<f64>,   // off-diagonal blocks (3 x 2 x IZX)
+    pub vz: Vec<f64>,   // way-off-diagonal block at TE station (3 x 2)
+    pub vm: Vec<f64>,   // mass-influence coefficient vectors (3 x IZX x IZX)
     pub vdel: Vec<f64>, // residual and solution vectors (3 x 2 x IZX)
-    pub rmsbl: f64, // rms change from BL Newton system solution
-    pub rmxbl: f64, // max change from BL Newton system solution
-    pub imxbl: i32, // location of max change
-    pub ismxbl: i32, // index of BL side containing max change
-    pub vmxbl: char, // character identifying variable with max change
+    pub rmsbl: f64,     // rms change from BL Newton system solution
+    pub rmxbl: f64,     // max change from BL Newton system solution
+    pub imxbl: i32,     // location of max change
+    pub ismxbl: i32,    // index of BL side containing max change
+    pub vmxbl: char,    // character identifying variable with max change
 
     // ----- work arrays -----
     pub w1: Vec<f64>, // 6*IQX
@@ -320,33 +320,33 @@ pub struct Xfoil {
     pub w8: Vec<f64>,
 
     // ----- BL Newton scratch arrays (reused across iterations; see setbl/update) -----
-    pub bl_usav: [Vec<f64>; 2],   // [2][IVX]
-    pub bl_ule1_m: Vec<f64>,      // 2*IVX
-    pub bl_ule2_m: Vec<f64>,      // 2*IVX
-    pub bl_ute1_m: Vec<f64>,      // 2*IVX
-    pub bl_ute2_m: Vec<f64>,      // 2*IVX
-    pub bl_u1_m: Vec<f64>,        // 2*IVX
-    pub bl_d1_m: Vec<f64>,        // 2*IVX
-    pub bl_u2_m: Vec<f64>,        // 2*IVX
-    pub bl_d2_m: Vec<f64>,        // 2*IVX
-    pub bl_unew: [Vec<f64>; 2],   // [2][IVX]
-    pub bl_u_ac: [Vec<f64>; 2],   // [2][IVX]
-    pub bl_qnew: Vec<f64>,        // IQX
-    pub bl_q_ac: Vec<f64>,        // IQX
+    pub bl_usav: [Vec<f64>; 2], // [2][IVX]
+    pub bl_ule1_m: Vec<f64>,    // 2*IVX
+    pub bl_ule2_m: Vec<f64>,    // 2*IVX
+    pub bl_ute1_m: Vec<f64>,    // 2*IVX
+    pub bl_ute2_m: Vec<f64>,    // 2*IVX
+    pub bl_u1_m: Vec<f64>,      // 2*IVX
+    pub bl_d1_m: Vec<f64>,      // 2*IVX
+    pub bl_u2_m: Vec<f64>,      // 2*IVX
+    pub bl_d2_m: Vec<f64>,      // 2*IVX
+    pub bl_unew: [Vec<f64>; 2], // [2][IVX]
+    pub bl_u_ac: [Vec<f64>; 2], // [2][IVX]
+    pub bl_qnew: Vec<f64>,      // IQX
+    pub bl_q_ac: Vec<f64>,      // IQX
 
     // ----- buffer airfoil -----
-    pub nb: usize, // number of points in buffer airfoil array
+    pub nb: usize,    // number of points in buffer airfoil array
     pub xb: Vec<f64>, // buffer airfoil coordinate arrays (IBX)
     pub yb: Vec<f64>,
-    pub xbp: Vec<f64>, // dXB/dSB
-    pub ybp: Vec<f64>, // dYB/dSB
-    pub sb: Vec<f64>, // spline parameter for buffer airfoil
+    pub xbp: Vec<f64>,  // dXB/dSB
+    pub ybp: Vec<f64>,  // dYB/dSB
+    pub sb: Vec<f64>,   // spline parameter for buffer airfoil
     pub snew: Vec<f64>, // new panel endpoint arc length array (5*IBX)
-    pub sble: f64, // LE tangency-point SB location
-    pub chordb: f64, // chord
-    pub areab: f64, // area
-    pub radble: f64, // LE radius
-    pub angbte: f64, // TE angle (rad)
+    pub sble: f64,      // LE tangency-point SB location
+    pub chordb: f64,    // chord
+    pub areab: f64,     // area
+    pub radble: f64,    // LE radius
+    pub angbte: f64,    // TE angle (rad)
     pub ei11ba: f64,
     pub ei22ba: f64,
     pub apx1ba: f64,
@@ -357,10 +357,10 @@ pub struct Xfoil {
     pub apx2bt: f64,
     pub thickb: f64, // max thickness
     pub cambrb: f64, // max camber
-    pub xbf: f64, // buffer airfoil flap hinge coordinates
+    pub xbf: f64,    // buffer airfoil flap hinge coordinates
     pub ybf: f64,
     pub lbflap: bool,
-    pub lnorm: bool, // normalize input buffer airfoil
+    pub lnorm: bool,  // normalize input buffer airfoil
     pub lclock: bool, // source airfoil coordinates are clockwise
     pub lgsame: bool, // current and buffer airfoils are identical
 
@@ -374,7 +374,7 @@ pub struct Xfoil {
 
     // ----- paneling parameters -----
     pub npan: usize, // default/specified number of points on airfoil
-    pub cvpar: f64, // curvature attraction parameter
+    pub cvpar: f64,  // curvature attraction parameter
     pub cterat: f64, // TE panel density / LE panel density ratio
     pub ctrrat: f64, // local refinement panel density / LE panel density ratio
     pub xsref1: f64, // suction side local refinement x/c limits
@@ -399,18 +399,18 @@ pub struct Xfoil {
     pub zleold: num_complex::Complex64,
     pub chordz: num_complex::Complex64,
     pub dzte: num_complex::Complex64,
-    pub cn: Vec<num_complex::Complex64>, // IMX+1
-    pub piq: Vec<num_complex::Complex64>, // ICX
-    pub zc: Vec<num_complex::Complex64>, // ICX
+    pub cn: Vec<num_complex::Complex64>,     // IMX+1
+    pub piq: Vec<num_complex::Complex64>,    // ICX
+    pub zc: Vec<num_complex::Complex64>,     // ICX
     pub zcoldw: Vec<num_complex::Complex64>, // ICX
-    pub zc_cn: Vec<num_complex::Complex64>, // ICX * IMX/4
-    pub eiw: Vec<num_complex::Complex64>, // ICX * (IMX+1)
-    pub sc: Vec<f64>, // ICX
+    pub zc_cn: Vec<num_complex::Complex64>,  // ICX * IMX/4
+    pub eiw: Vec<num_complex::Complex64>,    // ICX * (IMX+1)
+    pub sc: Vec<f64>,                        // ICX
     pub scold: Vec<f64>,
     pub wc: Vec<f64>,
     pub xcold: Vec<f64>,
     pub ycold: Vec<f64>,
-    pub leiw: bool, // unit circle complex array initialized
+    pub leiw: bool,   // unit circle complex array initialized
     pub lscini: bool, // old-airfoil circle-plane arc length s(w) exists
 
     // ----- BL parameter calibration constants (i_blpar.f90) -----
@@ -885,78 +885,78 @@ impl Xfoil {
 /// `do icom = 1, NCOM; COM1(icom) = COM2(icom); enddo`.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct BlVars {
-    pub x: f64, // 1   station arc length
-    pub u: f64, // 2   edge velocity
-    pub t: f64, // 3   momentum thickness
-    pub d: f64, // 4   displacement thickness (minus wake gap)
-    pub s: f64, // 5   sqrt(shear coeff) (laminar) / shear coeff (turb)
-    pub ampl: f64, // 6   log amplification ratio
+    pub x: f64,     // 1   station arc length
+    pub u: f64,     // 2   edge velocity
+    pub t: f64,     // 3   momentum thickness
+    pub d: f64,     // 4   displacement thickness (minus wake gap)
+    pub s: f64,     // 5   sqrt(shear coeff) (laminar) / shear coeff (turb)
+    pub ampl: f64,  // 6   log amplification ratio
     pub u_uei: f64, // 7   dU/dUei
-    pub u_ms: f64, // 8   dU/dMsq
-    pub dw: f64, // 9   wake gap
-    pub h: f64, // 10  shape parameter D/T
-    pub h_t: f64, // 11
-    pub h_d: f64, // 12
-    pub m: f64, // 13  edge Mach number squared
-    pub m_u: f64, // 14
-    pub m_ms: f64, // 15
-    pub r: f64, // 16  edge density
-    pub r_u: f64, // 17
-    pub r_ms: f64, // 18
-    pub v: f64, // 19  molecular viscosity
-    pub v_u: f64, // 20
-    pub v_ms: f64, // 21
-    pub v_re: f64, // 22
-    pub hk: f64, // 23  kinematic shape parameter
-    pub hk_u: f64, // 24
-    pub hk_t: f64, // 25
-    pub hk_d: f64, // 26
+    pub u_ms: f64,  // 8   dU/dMsq
+    pub dw: f64,    // 9   wake gap
+    pub h: f64,     // 10  shape parameter D/T
+    pub h_t: f64,   // 11
+    pub h_d: f64,   // 12
+    pub m: f64,     // 13  edge Mach number squared
+    pub m_u: f64,   // 14
+    pub m_ms: f64,  // 15
+    pub r: f64,     // 16  edge density
+    pub r_u: f64,   // 17
+    pub r_ms: f64,  // 18
+    pub v: f64,     // 19  molecular viscosity
+    pub v_u: f64,   // 20
+    pub v_ms: f64,  // 21
+    pub v_re: f64,  // 22
+    pub hk: f64,    // 23  kinematic shape parameter
+    pub hk_u: f64,  // 24
+    pub hk_t: f64,  // 25
+    pub hk_d: f64,  // 26
     pub hk_ms: f64, // 27
-    pub hs: f64, // 28  kinetic energy shape parameter
-    pub hs_u: f64, // 29
-    pub hs_t: f64, // 30
-    pub hs_d: f64, // 31
+    pub hs: f64,    // 28  kinetic energy shape parameter
+    pub hs_u: f64,  // 29
+    pub hs_t: f64,  // 30
+    pub hs_d: f64,  // 31
     pub hs_ms: f64, // 32
     pub hs_re: f64, // 33
-    pub hc: f64, // 34  density shape parameter
-    pub hc_u: f64, // 35
-    pub hc_t: f64, // 36
-    pub hc_d: f64, // 37
+    pub hc: f64,    // 34  density shape parameter
+    pub hc_u: f64,  // 35
+    pub hc_t: f64,  // 36
+    pub hc_d: f64,  // 37
     pub hc_ms: f64, // 38
-    pub rt: f64, // 39  momentum thickness Reynolds number
-    pub rt_u: f64, // 40
-    pub rt_t: f64, // 41
+    pub rt: f64,    // 39  momentum thickness Reynolds number
+    pub rt_u: f64,  // 40
+    pub rt_t: f64,  // 41
     pub rt_ms: f64, // 42
     pub rt_re: f64, // 43
-    pub cf: f64, // 44  skin friction coefficient
-    pub cf_u: f64, // 45
-    pub cf_t: f64, // 46
-    pub cf_d: f64, // 47
+    pub cf: f64,    // 44  skin friction coefficient
+    pub cf_u: f64,  // 45
+    pub cf_t: f64,  // 46
+    pub cf_d: f64,  // 47
     pub cf_ms: f64, // 48
     pub cf_re: f64, // 49
-    pub di: f64, // 50  dissipation function 2CD/H*
-    pub di_u: f64, // 51
-    pub di_t: f64, // 52
-    pub di_d: f64, // 53
-    pub di_s: f64, // 54
+    pub di: f64,    // 50  dissipation function 2CD/H*
+    pub di_u: f64,  // 51
+    pub di_t: f64,  // 52
+    pub di_d: f64,  // 53
+    pub di_s: f64,  // 54
     pub di_ms: f64, // 55
     pub di_re: f64, // 56
-    pub us: f64, // 57  normalized slip velocity
-    pub us_u: f64, // 58
-    pub us_t: f64, // 59
-    pub us_d: f64, // 60
+    pub us: f64,    // 57  normalized slip velocity
+    pub us_u: f64,  // 58
+    pub us_t: f64,  // 59
+    pub us_d: f64,  // 60
     pub us_ms: f64, // 61
     pub us_re: f64, // 62
-    pub cq: f64, // 63  equilibrium wall shear coeff ** 1/2
-    pub cq_u: f64, // 64
-    pub cq_t: f64, // 65
-    pub cq_d: f64, // 66
+    pub cq: f64,    // 63  equilibrium wall shear coeff ** 1/2
+    pub cq_u: f64,  // 64
+    pub cq_t: f64,  // 65
+    pub cq_d: f64,  // 66
     pub cq_ms: f64, // 67
     pub cq_re: f64, // 68
-    pub de: f64, // 69  BL thickness
-    pub de_u: f64, // 70
-    pub de_t: f64, // 71
-    pub de_d: f64, // 72
+    pub de: f64,    // 69  BL thickness
+    pub de_u: f64,  // 70
+    pub de_t: f64,  // 71
+    pub de_d: f64,  // 72
     pub de_ms: f64, // 73
 }
 

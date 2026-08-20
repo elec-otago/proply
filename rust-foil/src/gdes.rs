@@ -5,9 +5,9 @@
 
 use crate::geom::lefind;
 use crate::panel::{apcalc, ncalc};
-use crate::spline::{scalc, segspl, seval};
 use crate::s_xfoil::tecalc;
-use crate::state::{IQX, Xfoil};
+use crate::spline::{scalc, segspl, seval};
+use crate::state::{Xfoil, IQX};
 
 /// Copies the buffer airfoil to the current airfoil.
 pub fn abcopy(xf: &mut Xfoil, lconf: bool) {
@@ -58,7 +58,13 @@ pub fn abcopy(xf: &mut Xfoil, lconf: bool) {
             segspl(&xf.x[..xf.n], &mut xf.xp[..xf.n], &xf.s[..xf.n]);
             segspl(&xf.y[..xf.n], &mut xf.yp[..xf.n], &xf.s[..xf.n]);
 
-            ncalc(&xf.x[..xf.n], &xf.y[..xf.n], &xf.s[..xf.n], &mut xf.nx[..xf.n], &mut xf.ny[..xf.n]);
+            ncalc(
+                &xf.x[..xf.n],
+                &xf.y[..xf.n],
+                &xf.s[..xf.n],
+                &mut xf.nx[..xf.n],
+                &mut xf.ny[..xf.n],
+            );
 
             lefind(
                 &mut xf.sle,
@@ -89,7 +95,10 @@ pub fn abcopy(xf: &mut Xfoil, lconf: bool) {
             xf.lscini = false;
 
             if lconf && xf.show_output {
-                eprintln!(" Current airfoil nodes set from buffer airfoil nodes ( {:4} )", xf.n);
+                eprintln!(
+                    " Current airfoil nodes set from buffer airfoil nodes ( {:4} )",
+                    xf.n
+                );
             }
             break;
         }

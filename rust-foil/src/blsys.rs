@@ -99,7 +99,9 @@ pub fn axset(
     let ax_rt2 = axa_ax2 * ax2_rt2;
     let ax_a2 = dax_a2;
 
-    (ax, ax_hk1, ax_t1, ax_rt1, ax_a1, ax_hk2, ax_t2, ax_rt2, ax_a2)
+    (
+        ax, ax_hk1, ax_t1, ax_rt1, ax_a1, ax_hk2, ax_t2, ax_rt2, ax_a2,
+    )
 }
 
 /// Second-order transition check.
@@ -114,18 +116,19 @@ pub fn trchek2(xf: &mut Xfoil) -> bool {
 
     // calculate average amplification rate AX over X1..X2 interval
     let c1 = xf.com1;
-    let (mut ax, mut ax_hk1, mut ax_t1, mut ax_rt1, mut ax_a1, _ax_hk2, _ax_t2, _ax_rt2, _ax_a2) = axset(
-        c1.hk,
-        c1.t,
-        c1.rt,
-        c1.ampl,
-        xf.com2.hk,
-        xf.com2.t,
-        xf.com2.rt,
-        xf.com2.ampl,
-        xf.amcrit,
-        xf.idampv,
-    );
+    let (mut ax, mut ax_hk1, mut ax_t1, mut ax_rt1, mut ax_a1, _ax_hk2, _ax_t2, _ax_rt2, _ax_a2) =
+        axset(
+            c1.hk,
+            c1.t,
+            c1.rt,
+            c1.ampl,
+            xf.com2.hk,
+            xf.com2.t,
+            xf.com2.rt,
+            xf.com2.ampl,
+            xf.amcrit,
+            xf.idampv,
+        );
 
     // set initial guess for iterate N2 (AMPL2) at X2
     xf.com2.ampl = c1.ampl + ax * (xf.com2.x - c1.x);
@@ -292,18 +295,10 @@ pub fn trchek2(xf: &mut Xfoil) -> bool {
         xf.com2.ampl = amsave;
 
         // calculate amplification rate AX over current X1-XT interval
-        let (ax2, ax_hk1_2, ax_t1_2, ax_rt1_2, ax_a1_2, ax_hkt_2, ax_tt_2, ax_rtt_2, ax_at_2) = axset(
-            c1.hk,
-            t1,
-            c1.rt,
-            ampl1,
-            hkt,
-            tt,
-            rtt,
-            amplt,
-            xf.amcrit,
-            xf.idampv,
-        );
+        let (ax2, ax_hk1_2, ax_t1_2, ax_rt1_2, ax_a1_2, ax_hkt_2, ax_tt_2, ax_rtt_2, ax_at_2) =
+            axset(
+                c1.hk, t1, c1.rt, ampl1, hkt, tt, rtt, amplt, xf.amcrit, xf.idampv,
+            );
         ax = ax2;
         ax_hk1 = ax_hk1_2;
         ax_t1 = ax_t1_2;
@@ -361,10 +356,20 @@ pub fn trchek2(xf: &mut Xfoil) -> bool {
     xf.xt = xt;
 
     if xf.show_output
-        && (x1.is_nan() || xt.is_nan() || x2.is_nan() || ampl1.is_nan() || amplt.is_nan() || xf.com2.ampl.is_nan() || ax.is_nan() || da2.is_nan())
+        && (x1.is_nan()
+            || xt.is_nan()
+            || x2.is_nan()
+            || ampl1.is_nan()
+            || amplt.is_nan()
+            || xf.com2.ampl.is_nan()
+            || ax.is_nan()
+            || da2.is_nan())
     {
         eprintln!("TRCHEK2: N2 convergence failed.");
-        eprintln!("x: {:9.5} {:9.5} {:9.5}  N: {:7.3} {:7.3} {:7.3}  Nx: {:8.3}   dN: {:e}", x1, xt, x2, ampl1, amplt, xf.com2.ampl, ax, da2);
+        eprintln!(
+            "x: {:9.5} {:9.5} {:9.5}  N: {:7.3} {:7.3} {:7.3}  Nx: {:8.3}   dN: {:e}",
+            x1, xt, x2, ampl1, amplt, xf.com2.ampl, ax, da2
+        );
     }
 
     // Check if ANY of the printed variables contain NaN's. If they do,
@@ -477,23 +482,33 @@ pub fn trchek2(xf: &mut Xfoil) -> bool {
     let rt2_ms = xf.com2.rt_ms;
     let rt2_re = xf.com2.rt_re;
 
-    let ax_t1 = ax_hk1 * hk1_t1 + ax_t1 + ax_rt1 * rt1_t1 + (ax_hkt * hkt_tt + ax_tt + ax_rtt * rtt_tt) * tt_t1;
+    let ax_t1 = ax_hk1 * hk1_t1
+        + ax_t1
+        + ax_rt1 * rt1_t1
+        + (ax_hkt * hkt_tt + ax_tt + ax_rtt * rtt_tt) * tt_t1;
     let ax_d1 = ax_hk1 * hk1_d1 + (ax_hkt * hkt_dt) * dt_d1;
     let ax_u1 = ax_hk1 * hk1_u1 + ax_rt1 * rt1_u1 + (ax_hkt * hkt_ut + ax_rtt * rtt_ut) * ut_u1;
-    let ax_a1 = ax_a1 + (ax_hkt * hkt_tt + ax_tt + ax_rtt * rtt_tt) * tt_a1 + (ax_hkt * hkt_dt) * dt_a1
+    let ax_a1 = ax_a1
+        + (ax_hkt * hkt_tt + ax_tt + ax_rtt * rtt_tt) * tt_a1
+        + (ax_hkt * hkt_dt) * dt_a1
         + (ax_hkt * hkt_ut + ax_rtt * rtt_ut) * ut_a1;
-    let ax_x1 = (ax_hkt * hkt_tt + ax_tt + ax_rtt * rtt_tt) * tt_x1 + (ax_hkt * hkt_dt) * dt_x1
+    let ax_x1 = (ax_hkt * hkt_tt + ax_tt + ax_rtt * rtt_tt) * tt_x1
+        + (ax_hkt * hkt_dt) * dt_x1
         + (ax_hkt * hkt_ut + ax_rtt * rtt_ut) * ut_x1;
 
     let ax_t2 = (ax_hkt * hkt_tt + ax_tt + ax_rtt * rtt_tt) * tt_t2;
     let ax_d2 = (ax_hkt * hkt_dt) * dt_d2;
     let ax_u2 = (ax_hkt * hkt_ut + ax_rtt * rtt_ut) * ut_u2;
-    let ax_a2 = ax_at * amplt_a2 + (ax_hkt * hkt_tt + ax_tt + ax_rtt * rtt_tt) * tt_a2 + (ax_hkt * hkt_dt) * dt_a2
+    let ax_a2 = ax_at * amplt_a2
+        + (ax_hkt * hkt_tt + ax_tt + ax_rtt * rtt_tt) * tt_a2
+        + (ax_hkt * hkt_dt) * dt_a2
         + (ax_hkt * hkt_ut + ax_rtt * rtt_ut) * ut_a2;
-    let ax_x2 = (ax_hkt * hkt_tt + ax_tt + ax_rtt * rtt_tt) * tt_x2 + (ax_hkt * hkt_dt) * dt_x2
+    let ax_x2 = (ax_hkt * hkt_tt + ax_tt + ax_rtt * rtt_tt) * tt_x2
+        + (ax_hkt * hkt_dt) * dt_x2
         + (ax_hkt * hkt_ut + ax_rtt * rtt_ut) * ut_x2;
 
-    let ax_xf = (ax_hkt * hkt_tt + ax_tt + ax_rtt * rtt_tt) * tt_xf + (ax_hkt * hkt_dt) * dt_xf
+    let ax_xf = (ax_hkt * hkt_tt + ax_tt + ax_rtt * rtt_tt) * tt_xf
+        + (ax_hkt * hkt_dt) * dt_xf
         + (ax_hkt * hkt_ut + ax_rtt * rtt_ut) * ut_xf;
 
     let ax_ms = ax_hkt * hkt_ms + ax_rtt * rtt_ms + ax_hk1 * hk1_ms + ax_rt1 * rt1_ms;
@@ -533,7 +548,9 @@ pub fn trchek2(xf: &mut Xfoil) -> bool {
     xf.xt_re = -(xt_a2 / z_a2) * z_re;
     xf.xt_xf = 0.0;
 
-    let _ = (wf1, hk2, hk2_t2, hk2_d2, hk2_u2, hk2_ms, rt2, rt2_t2, rt2_u2, rt2_ms, rt2_re);
+    let _ = (
+        wf1, hk2, hk2_t2, hk2_d2, hk2_u2, hk2_ms, rt2, rt2_t2, rt2_u2, rt2_ms, rt2_re,
+    );
 
     true
 }
@@ -768,8 +785,7 @@ pub fn hsl(hk: f64, _rt: f64, _msq: f64) -> (f64, f64, f64, f64) {
     let (hs, hs_hk);
     if hk < 4.35 {
         let tmp = hk - 4.35;
-        hs = 0.0111 * tmp * tmp / (hk + 1.0) - 0.0278 * tmp * tmp * tmp / (hk + 1.0)
-            + 1.528
+        hs = 0.0111 * tmp * tmp / (hk + 1.0) - 0.0278 * tmp * tmp * tmp / (hk + 1.0) + 1.528
             - 0.0002 * (tmp * hk).powi(2);
         hs_hk = 0.0111 * (2.0 * tmp - tmp * tmp / (hk + 1.0)) / (hk + 1.0)
             - 0.0278 * (3.0 * tmp * tmp - tmp * tmp * tmp / (hk + 1.0)) / (hk + 1.0)
@@ -852,8 +868,9 @@ pub fn hst(hk: f64, rt: f64, msq: f64) -> (f64, f64, f64, f64) {
         let rtmp = hk - ho + 4.0 / grt;
         let htmp = 0.007 * grt / (rtmp * rtmp) + DHSINF / hk;
         let htmp_hk = -0.014 * grt / (rtmp * rtmp * rtmp) - DHSINF / (hk * hk);
-        let htmp_rt =
-            -0.014 * grt / (rtmp * rtmp * rtmp) * (-ho_rt - 4.0 / (grt * grt) / rtz * rtz_rt) + 0.007 / (rtmp * rtmp) / rtz * rtz_rt;
+        let htmp_rt = -0.014 * grt / (rtmp * rtmp * rtmp)
+            * (-ho_rt - 4.0 / (grt * grt) / rtz * rtz_rt)
+            + 0.007 / (rtmp * rtmp) / rtz * rtz_rt;
         hs = hdif * hdif * htmp + HSMIN + 4.0 / rtz;
         hs_hk = hdif * 2.0 * htmp + hdif * hdif * htmp_hk;
         hs_rt = hdif * hdif * htmp_rt - 4.0 / (rtz * rtz) * rtz_rt + hdif * 2.0 * htmp * (-ho_rt);
@@ -886,7 +903,10 @@ pub fn cft(hk: f64, rt: f64, msq: f64, cffac: f64) -> (f64, f64, f64, f64) {
 
     let cfo = cffac * 0.3 * arg.exp() * (grt / std::f64::consts::LN_10).powf(gex);
     let cf = (cfo + 1.1E-4 * (thk - 1.0)) / fc;
-    let cf_hk = (-1.33 * cfo - 0.31 * (grt / std::f64::consts::LN_10).ln() * cfo - 1.1E-4 * (1.0 - thk * thk) / 0.875) / fc;
+    let cf_hk = (-1.33 * cfo
+        - 0.31 * (grt / std::f64::consts::LN_10).ln() * cfo
+        - 1.1E-4 * (1.0 - thk * thk) / 0.875)
+        / fc;
     let cf_rt = gex * cfo / (fc * grt) / rt;
     let cf_msq = gex * cfo / (fc * grt) * (-0.25 * gm1 / (fc * fc)) - 0.25 * gm1 * cf / (fc * fc);
 
@@ -903,7 +923,16 @@ pub fn hct(hk: f64, msq: f64) -> (f64, f64, f64) {
 
 /// Sets the primary "2" BL variables from the parameter list (BLPRV).
 #[allow(clippy::too_many_arguments)]
-pub fn blprv(xf: &mut Xfoil, xsi: f64, ami: f64, cti: f64, thi: f64, dsi: f64, dswaki: f64, uei: f64) {
+pub fn blprv(
+    xf: &mut Xfoil,
+    xsi: f64,
+    ami: f64,
+    cti: f64,
+    thi: f64,
+    dsi: f64,
+    dswaki: f64,
+    uei: f64,
+) {
     xf.com2.x = xsi;
     xf.com2.ampl = ami;
     xf.com2.s = cti;
@@ -1057,14 +1086,32 @@ pub fn blvar(xf: &mut Xfoil, ityp: i32) {
 
     let hkb = xf.com2.hk - 1.0;
     let usb = 1.0 - xf.com2.us;
-    xf.com2.cq = (xf.ctcon * xf.com2.hs * hkb * hkc * hkc / (usb * xf.com2.h * xf.com2.hk.powi(2))).sqrt();
-    let cq2_hs2 = xf.ctcon * hkb * hkc * hkc / (usb * xf.com2.h * xf.com2.hk.powi(2)) * 0.5 / xf.com2.cq;
-    let cq2_us2 = xf.ctcon * xf.com2.hs * hkb * hkc * hkc / (usb * xf.com2.h * xf.com2.hk.powi(2)) / usb * 0.5 / xf.com2.cq;
-    let cq2_hk2 = xf.ctcon * xf.com2.hs * hkc * hkc / (usb * xf.com2.h * xf.com2.hk.powi(2)) * 0.5 / xf.com2.cq
-        - xf.ctcon * xf.com2.hs * hkb * hkc * hkc / (usb * xf.com2.h * xf.com2.hk.powi(3)) * 2.0 * 0.5 / xf.com2.cq
-        + xf.ctcon * xf.com2.hs * hkb * hkc / (usb * xf.com2.h * xf.com2.hk.powi(2)) * 2.0 * 0.5 / xf.com2.cq * hkc_hk2;
-    let cq2_rt2 = xf.ctcon * xf.com2.hs * hkb * hkc / (usb * xf.com2.h * xf.com2.hk.powi(2)) * 2.0 * 0.5 / xf.com2.cq * hkc_rt2;
-    let cq2_h2 = -xf.ctcon * xf.com2.hs * hkb * hkc * hkc / (usb * xf.com2.h * xf.com2.hk.powi(2)) / xf.com2.h * 0.5 / xf.com2.cq;
+    xf.com2.cq =
+        (xf.ctcon * xf.com2.hs * hkb * hkc * hkc / (usb * xf.com2.h * xf.com2.hk.powi(2))).sqrt();
+    let cq2_hs2 =
+        xf.ctcon * hkb * hkc * hkc / (usb * xf.com2.h * xf.com2.hk.powi(2)) * 0.5 / xf.com2.cq;
+    let cq2_us2 =
+        xf.ctcon * xf.com2.hs * hkb * hkc * hkc / (usb * xf.com2.h * xf.com2.hk.powi(2)) / usb
+            * 0.5
+            / xf.com2.cq;
+    let cq2_hk2 = xf.ctcon * xf.com2.hs * hkc * hkc / (usb * xf.com2.h * xf.com2.hk.powi(2)) * 0.5
+        / xf.com2.cq
+        - xf.ctcon * xf.com2.hs * hkb * hkc * hkc / (usb * xf.com2.h * xf.com2.hk.powi(3))
+            * 2.0
+            * 0.5
+            / xf.com2.cq
+        + xf.ctcon * xf.com2.hs * hkb * hkc / (usb * xf.com2.h * xf.com2.hk.powi(2)) * 2.0 * 0.5
+            / xf.com2.cq
+            * hkc_hk2;
+    let cq2_rt2 =
+        xf.ctcon * xf.com2.hs * hkb * hkc / (usb * xf.com2.h * xf.com2.hk.powi(2)) * 2.0 * 0.5
+            / xf.com2.cq
+            * hkc_rt2;
+    let cq2_h2 = -xf.ctcon * xf.com2.hs * hkb * hkc * hkc
+        / (usb * xf.com2.h * xf.com2.hk.powi(2))
+        / xf.com2.h
+        * 0.5
+        / xf.com2.cq;
 
     xf.com2.cq_u = cq2_hs2 * xf.com2.hs_u + cq2_us2 * xf.com2.us_u + cq2_hk2 * xf.com2.hk_u;
     xf.com2.cq_t = cq2_hs2 * xf.com2.hs_t + cq2_us2 * xf.com2.us_t + cq2_hk2 * xf.com2.hk_t;
@@ -1168,10 +1215,13 @@ pub fn blvar(xf: &mut Xfoil, ityp: i32) {
         let df_rt2 = df_fl * fl_rt2;
 
         xf.com2.di_s *= dfac;
-        xf.com2.di_u = xf.com2.di_u * dfac + xf.com2.di * (df_hk2 * xf.com2.hk_u + df_rt2 * xf.com2.rt_u);
-        xf.com2.di_t = xf.com2.di_t * dfac + xf.com2.di * (df_hk2 * xf.com2.hk_t + df_rt2 * xf.com2.rt_t);
+        xf.com2.di_u =
+            xf.com2.di_u * dfac + xf.com2.di * (df_hk2 * xf.com2.hk_u + df_rt2 * xf.com2.rt_u);
+        xf.com2.di_t =
+            xf.com2.di_t * dfac + xf.com2.di * (df_hk2 * xf.com2.hk_t + df_rt2 * xf.com2.rt_t);
         xf.com2.di_d = xf.com2.di_d * dfac + xf.com2.di * (df_hk2 * xf.com2.hk_d);
-        xf.com2.di_ms = xf.com2.di_ms * dfac + xf.com2.di * (df_hk2 * xf.com2.hk_ms + df_rt2 * xf.com2.rt_ms);
+        xf.com2.di_ms =
+            xf.com2.di_ms * dfac + xf.com2.di * (df_hk2 * xf.com2.hk_ms + df_rt2 * xf.com2.rt_ms);
         xf.com2.di_re = xf.com2.di_re * dfac + xf.com2.di * (df_rt2 * xf.com2.rt_re);
         xf.com2.di *= dfac;
     } else {
@@ -1333,8 +1383,13 @@ pub fn blmid(xf: &mut Xfoil, ityp: i32) {
     xf.cfm_u2 = 0.5 * (cfm_hka * xf.com2.hk_u + cfm_ma * xf.com2.m_u + cfm_rta * xf.com2.rt_u);
     xf.cfm_t2 = 0.5 * (cfm_hka * xf.com2.hk_t + cfm_rta * xf.com2.rt_t);
     xf.cfm_d2 = 0.5 * (cfm_hka * xf.com2.hk_d);
-    xf.cfm_ms = 0.5 * (cfm_hka * xf.com1.hk_ms + cfm_ma * xf.com1.m_ms + cfm_rta * xf.com1.rt_ms
-        + cfm_hka * xf.com2.hk_ms + cfm_ma * xf.com2.m_ms + cfm_rta * xf.com2.rt_ms);
+    xf.cfm_ms = 0.5
+        * (cfm_hka * xf.com1.hk_ms
+            + cfm_ma * xf.com1.m_ms
+            + cfm_rta * xf.com1.rt_ms
+            + cfm_hka * xf.com2.hk_ms
+            + cfm_ma * xf.com2.m_ms
+            + cfm_rta * xf.com2.rt_ms);
     xf.cfm_re = 0.5 * (cfm_rta * xf.com1.rt_re + cfm_rta * xf.com2.rt_re);
 }
 
@@ -1493,9 +1548,38 @@ pub fn bldif(xf: &mut Xfoil, ityp: i32) {
     let upw_d2 = upw_hk2 * xf.com2.hk_d;
     let upw_ms = upw_hk1 * xf.com1.hk_ms + upw_hk2 * xf.com2.hk_ms;
 
-    let (mut rezc, mut z_cfa, mut z_hka, mut z_da, mut z_sl, mut z_ul, mut z_dxi, mut z_usa, mut z_cqa, mut z_sa, mut z_dea, mut z_upw,
-        mut z_de1, mut z_de2, mut z_us1, mut z_us2, mut z_d1, mut z_d2, mut z_u1, mut z_u2, mut z_x1, mut z_x2, mut z_s1, mut z_s2,
-        mut z_cq1, mut z_cq2, mut z_cf1, mut z_cf2, mut z_hk1, mut z_hk2);
+    let (
+        mut rezc,
+        mut z_cfa,
+        mut z_hka,
+        mut z_da,
+        mut z_sl,
+        mut z_ul,
+        mut z_dxi,
+        mut z_usa,
+        mut z_cqa,
+        mut z_sa,
+        mut z_dea,
+        mut z_upw,
+        mut z_de1,
+        mut z_de2,
+        mut z_us1,
+        mut z_us2,
+        mut z_d1,
+        mut z_d2,
+        mut z_u1,
+        mut z_u2,
+        mut z_x1,
+        mut z_x2,
+        mut z_s1,
+        mut z_s2,
+        mut z_cq1,
+        mut z_cq2,
+        mut z_cf1,
+        mut z_cf2,
+        mut z_hk1,
+        mut z_hk2,
+    );
     z_cfa = 0.0;
     z_hka = 0.0;
     z_da = 0.0;
@@ -1560,7 +1644,11 @@ pub fn bldif(xf: &mut Xfoil, ityp: i32) {
         xf.vs2[0][2] = z_ax * (ax_hk2 * xf.com2.hk_d);
         xf.vs2[0][3] = z_ax * (ax_hk2 * xf.com2.hk_u + ax_rt2 * xf.com2.rt_u);
         xf.vs2[0][4] = -ax;
-        xf.vsm[0] = z_ax * (ax_hk1 * xf.com1.hk_ms + ax_rt1 * xf.com1.rt_ms + ax_hk2 * xf.com2.hk_ms + ax_rt2 * xf.com2.rt_ms);
+        xf.vsm[0] = z_ax
+            * (ax_hk1 * xf.com1.hk_ms
+                + ax_rt1 * xf.com1.rt_ms
+                + ax_hk2 * xf.com2.hk_ms
+                + ax_rt2 * xf.com2.rt_ms);
         xf.vsr[0] = z_ax * (ax_rt1 * xf.com1.rt_re + ax_rt2 * xf.com2.rt_re);
         xf.vsx[0] = 0.0;
         xf.vsrez[0] = -rezc;
@@ -1613,9 +1701,12 @@ pub fn bldif(xf: &mut Xfoil, ityp: i32) {
         let uq_da = -uq / da;
         let uq_upw = uq_cfa * (xf.com2.cf - xf.com1.cf) + uq_hka * (xf.com2.hk - xf.com1.hk);
 
-        let mut uq_t1 = (1.0 - upw) * (uq_cfa * xf.com1.cf_t + uq_hka * xf.com1.hk_t) + uq_upw * upw_t1;
-        let mut uq_d1 = (1.0 - upw) * (uq_cfa * xf.com1.cf_d + uq_hka * xf.com1.hk_d) + uq_upw * upw_d1;
-        let mut uq_u1 = (1.0 - upw) * (uq_cfa * xf.com1.cf_u + uq_hka * xf.com1.hk_u) + uq_upw * upw_u1;
+        let mut uq_t1 =
+            (1.0 - upw) * (uq_cfa * xf.com1.cf_t + uq_hka * xf.com1.hk_t) + uq_upw * upw_t1;
+        let mut uq_d1 =
+            (1.0 - upw) * (uq_cfa * xf.com1.cf_d + uq_hka * xf.com1.hk_d) + uq_upw * upw_d1;
+        let mut uq_u1 =
+            (1.0 - upw) * (uq_cfa * xf.com1.cf_u + uq_hka * xf.com1.hk_u) + uq_upw * upw_u1;
         let mut uq_t2 = upw * (uq_cfa * xf.com2.cf_t + uq_hka * xf.com2.hk_t) + uq_upw * upw_t2;
         let mut uq_d2 = upw * (uq_cfa * xf.com2.cf_d + uq_hka * xf.com2.hk_d) + uq_upw * upw_d2;
         let mut uq_u2 = upw * (uq_cfa * xf.com2.cf_u + uq_hka * xf.com2.hk_u) + uq_upw * upw_u2;
@@ -1642,7 +1733,8 @@ pub fn bldif(xf: &mut Xfoil, ityp: i32) {
         let slog = (xf.com2.s / xf.com1.s).ln();
         let dxi = xf.com2.x - xf.com1.x;
 
-        rezc = scc * (cqa - sa * ald) * dxi - dea * 2.0 * slog + dea * 2.0 * (uq * dxi - ulog) * xf.duxcon;
+        rezc = scc * (cqa - sa * ald) * dxi - dea * 2.0 * slog
+            + dea * 2.0 * (uq * dxi - ulog) * xf.duxcon;
 
         z_cfa = dea * 2.0 * uq_cfa * dxi * xf.duxcon;
         z_hka = dea * 2.0 * uq_hka * dxi * xf.duxcon;
@@ -1655,7 +1747,9 @@ pub fn bldif(xf: &mut Xfoil, ityp: i32) {
         z_sa = -scc * dxi * ald;
         z_dea = 2.0 * ((uq * dxi - ulog) * xf.duxcon - slog);
 
-        z_upw = z_cqa * (xf.com2.cq - xf.com1.cq) + z_sa * (xf.com2.s - xf.com1.s) + z_cfa * (xf.com2.cf - xf.com1.cf)
+        z_upw = z_cqa * (xf.com2.cq - xf.com1.cq)
+            + z_sa * (xf.com2.s - xf.com1.s)
+            + z_cfa * (xf.com2.cf - xf.com1.cf)
             + z_hka * (xf.com2.hk - xf.com1.hk);
         z_de1 = 0.5 * z_dea;
         z_de2 = 0.5 * z_dea;
@@ -1686,7 +1780,11 @@ pub fn bldif(xf: &mut Xfoil, ityp: i32) {
         xf.vs2[0][2] = z_d2 + z_upw * upw_d2 + z_de2 * xf.com2.de_d + z_us2 * xf.com2.us_d;
         xf.vs2[0][3] = z_u2 + z_upw * upw_u2 + z_de2 * xf.com2.de_u + z_us2 * xf.com2.us_u;
         xf.vs2[0][4] = z_x2;
-        xf.vsm[0] = z_upw * upw_ms + z_de1 * xf.com1.de_ms + z_us1 * xf.com1.us_ms + z_de2 * xf.com2.de_ms + z_us2 * xf.com2.us_ms;
+        xf.vsm[0] = z_upw * upw_ms
+            + z_de1 * xf.com1.de_ms
+            + z_us1 * xf.com1.us_ms
+            + z_de2 * xf.com2.de_ms
+            + z_us2 * xf.com2.us_ms;
 
         xf.vs1[0][1] += z_cq1 * xf.com1.cq_t + z_cf1 * xf.com1.cf_t + z_hk1 * xf.com1.hk_t;
         xf.vs1[0][2] += z_cq1 * xf.com1.cq_d + z_cf1 * xf.com1.cf_d + z_hk1 * xf.com1.hk_d;
@@ -1696,9 +1794,16 @@ pub fn bldif(xf: &mut Xfoil, ityp: i32) {
         xf.vs2[0][2] += z_cq2 * xf.com2.cq_d + z_cf2 * xf.com2.cf_d + z_hk2 * xf.com2.hk_d;
         xf.vs2[0][3] += z_cq2 * xf.com2.cq_u + z_cf2 * xf.com2.cf_u + z_hk2 * xf.com2.hk_u;
 
-        xf.vsm[0] += z_cq1 * xf.com1.cq_ms + z_cf1 * xf.com1.cf_ms + z_hk1 * xf.com1.hk_ms + z_cq2 * xf.com2.cq_ms + z_cf2 * xf.com2.cf_ms
+        xf.vsm[0] += z_cq1 * xf.com1.cq_ms
+            + z_cf1 * xf.com1.cf_ms
+            + z_hk1 * xf.com1.hk_ms
+            + z_cq2 * xf.com2.cq_ms
+            + z_cf2 * xf.com2.cf_ms
             + z_hk2 * xf.com2.hk_ms;
-        xf.vsr[0] = z_cq1 * xf.com1.cq_re + z_cf1 * xf.com1.cf_re + z_cq2 * xf.com2.cq_re + z_cf2 * xf.com2.cf_re;
+        xf.vsr[0] = z_cq1 * xf.com1.cq_re
+            + z_cf1 * xf.com1.cf_re
+            + z_cq2 * xf.com2.cq_re
+            + z_cf2 * xf.com2.cf_re;
         xf.vsx[0] = 0.0;
         xf.vsrez[0] = -rezc;
     }
@@ -1711,7 +1816,8 @@ pub fn bldif(xf: &mut Xfoil, ityp: i32) {
     let hwa = 0.5 * (xf.com1.dw / xf.com1.t + xf.com2.dw / xf.com2.t);
 
     // set Cf term, using central value CFM for better accuracy in drag
-    let cfx = 0.50 * xf.cfm * xa / ta + 0.25 * (xf.com1.cf * xf.com1.x / xf.com1.t + xf.com2.cf * xf.com2.x / xf.com2.t);
+    let cfx = 0.50 * xf.cfm * xa / ta
+        + 0.25 * (xf.com1.cf * xf.com1.x / xf.com1.t + xf.com2.cf * xf.com2.x / xf.com2.t);
     let cfx_xa = 0.50 * xf.cfm / ta;
     let cfx_ta = -0.50 * xf.cfm * xa / (ta * ta);
 
@@ -1754,7 +1860,10 @@ pub fn bldif(xf: &mut Xfoil, ityp: i32) {
     xf.vs2[1][3] = 0.5 * z_ma * xf.com2.m_u + z_cfm * xf.cfm_u2 + z_cf2 * xf.com2.cf_u + z_u2;
     xf.vs2[1][4] = z_x2;
 
-    xf.vsm[1] = 0.5 * z_ma * xf.com1.m_ms + z_cfm * xf.cfm_ms + z_cf1 * xf.com1.cf_ms + 0.5 * z_ma * xf.com2.m_ms
+    xf.vsm[1] = 0.5 * z_ma * xf.com1.m_ms
+        + z_cfm * xf.cfm_ms
+        + z_cf1 * xf.com1.cf_ms
+        + 0.5 * z_ma * xf.com2.m_ms
         + z_cf2 * xf.com2.cf_ms;
     xf.vsr[1] = z_cfm * xf.cfm_re + z_cf1 * xf.com1.cf_re + z_cf2 * xf.com2.cf_re;
     xf.vsx[1] = 0.0;
@@ -1798,7 +1907,8 @@ pub fn bldif(xf: &mut Xfoil, ityp: i32) {
 
     let mut z_t1 = (1.0 - upw) * (z_cfx * xf.com1.cf + z_dix * xf.com1.di) * (-xot1 / xf.com1.t);
     let mut z_t2 = upw * (z_cfx * xf.com2.cf + z_dix * xf.com2.di) * (-xot2 / xf.com2.t);
-    let z_x1 = (1.0 - upw) * (z_cfx * xf.com1.cf + z_dix * xf.com1.di) / xf.com1.t - z_xl / xf.com1.x;
+    let z_x1 =
+        (1.0 - upw) * (z_cfx * xf.com1.cf + z_dix * xf.com1.di) / xf.com1.t - z_xl / xf.com1.x;
     let z_x2 = upw * (z_cfx * xf.com2.cf + z_dix * xf.com2.di) / xf.com2.t + z_xl / xf.com2.x;
     let z_u1 = -z_ul / xf.com1.u;
     let z_u2 = z_ul / xf.com2.u;
@@ -1816,10 +1926,18 @@ pub fn bldif(xf: &mut Xfoil, ityp: i32) {
     xf.vs2[2][2] = z_hs2 * xf.com2.hs_d + z_cf2 * xf.com2.cf_d + z_di2 * xf.com2.di_d;
     xf.vs2[2][3] = z_hs2 * xf.com2.hs_u + z_cf2 * xf.com2.cf_u + z_di2 * xf.com2.di_u + z_u2;
     xf.vs2[2][4] = z_x2;
-    xf.vsm[2] = z_hs1 * xf.com1.hs_ms + z_cf1 * xf.com1.cf_ms + z_di1 * xf.com1.di_ms + z_hs2 * xf.com2.hs_ms
-        + z_cf2 * xf.com2.cf_ms + z_di2 * xf.com2.di_ms;
-    xf.vsr[2] = z_hs1 * xf.com1.hs_re + z_cf1 * xf.com1.cf_re + z_di1 * xf.com1.di_re + z_hs2 * xf.com2.hs_re
-        + z_cf2 * xf.com2.cf_re + z_di2 * xf.com2.di_re;
+    xf.vsm[2] = z_hs1 * xf.com1.hs_ms
+        + z_cf1 * xf.com1.cf_ms
+        + z_di1 * xf.com1.di_ms
+        + z_hs2 * xf.com2.hs_ms
+        + z_cf2 * xf.com2.cf_ms
+        + z_di2 * xf.com2.di_ms;
+    xf.vsr[2] = z_hs1 * xf.com1.hs_re
+        + z_cf1 * xf.com1.cf_re
+        + z_di1 * xf.com1.di_re
+        + z_hs2 * xf.com2.hs_re
+        + z_cf2 * xf.com2.cf_re
+        + z_di2 * xf.com2.di_re;
 
     xf.vs1[2][1] += 0.5 * (z_hca * xf.com1.hc_t + z_ha * xf.com1.h_t) + z_upw * upw_t1;
     xf.vs1[2][2] += 0.5 * (z_hca * xf.com1.hc_d + z_ha * xf.com1.h_d) + z_upw * upw_d1;
@@ -1955,21 +2073,65 @@ pub fn trdif(xf: &mut Xfoil) {
     // calculate its equivalent in terms of "1" and "2" variables.
     for k in 1..3 {
         blrez[k] = xf.vsrez[k];
-        blm[k] = xf.vsm[k] + xf.vs2[k][1] * tt_ms + xf.vs2[k][2] * dt_ms + xf.vs2[k][3] * ut_ms + xf.vs2[k][4] * xf.xt_ms;
-        blr[k] = xf.vsr[k] + xf.vs2[k][1] * tt_re + xf.vs2[k][2] * dt_re + xf.vs2[k][3] * ut_re + xf.vs2[k][4] * xf.xt_re;
-        blx[k] = xf.vsx[k] + xf.vs2[k][1] * tt_xf + xf.vs2[k][2] * dt_xf + xf.vs2[k][3] * ut_xf + xf.vs2[k][4] * xf.xt_xf;
+        blm[k] = xf.vsm[k]
+            + xf.vs2[k][1] * tt_ms
+            + xf.vs2[k][2] * dt_ms
+            + xf.vs2[k][3] * ut_ms
+            + xf.vs2[k][4] * xf.xt_ms;
+        blr[k] = xf.vsr[k]
+            + xf.vs2[k][1] * tt_re
+            + xf.vs2[k][2] * dt_re
+            + xf.vs2[k][3] * ut_re
+            + xf.vs2[k][4] * xf.xt_re;
+        blx[k] = xf.vsx[k]
+            + xf.vs2[k][1] * tt_xf
+            + xf.vs2[k][2] * dt_xf
+            + xf.vs2[k][3] * ut_xf
+            + xf.vs2[k][4] * xf.xt_xf;
 
-        bl1[k][0] = xf.vs1[k][0] + xf.vs2[k][1] * tt_a1 + xf.vs2[k][2] * dt_a1 + xf.vs2[k][3] * ut_a1 + xf.vs2[k][4] * xf.xt_a1;
-        bl1[k][1] = xf.vs1[k][1] + xf.vs2[k][1] * tt_t1 + xf.vs2[k][2] * dt_t1 + xf.vs2[k][3] * ut_t1 + xf.vs2[k][4] * xf.xt_t1;
-        bl1[k][2] = xf.vs1[k][2] + xf.vs2[k][1] * tt_d1 + xf.vs2[k][2] * dt_d1 + xf.vs2[k][3] * ut_d1 + xf.vs2[k][4] * xf.xt_d1;
-        bl1[k][3] = xf.vs1[k][3] + xf.vs2[k][1] * tt_u1 + xf.vs2[k][2] * dt_u1 + xf.vs2[k][3] * ut_u1 + xf.vs2[k][4] * xf.xt_u1;
-        bl1[k][4] = xf.vs1[k][4] + xf.vs2[k][1] * tt_x1 + xf.vs2[k][2] * dt_x1 + xf.vs2[k][3] * ut_x1 + xf.vs2[k][4] * xf.xt_x1;
+        bl1[k][0] = xf.vs1[k][0]
+            + xf.vs2[k][1] * tt_a1
+            + xf.vs2[k][2] * dt_a1
+            + xf.vs2[k][3] * ut_a1
+            + xf.vs2[k][4] * xf.xt_a1;
+        bl1[k][1] = xf.vs1[k][1]
+            + xf.vs2[k][1] * tt_t1
+            + xf.vs2[k][2] * dt_t1
+            + xf.vs2[k][3] * ut_t1
+            + xf.vs2[k][4] * xf.xt_t1;
+        bl1[k][2] = xf.vs1[k][2]
+            + xf.vs2[k][1] * tt_d1
+            + xf.vs2[k][2] * dt_d1
+            + xf.vs2[k][3] * ut_d1
+            + xf.vs2[k][4] * xf.xt_d1;
+        bl1[k][3] = xf.vs1[k][3]
+            + xf.vs2[k][1] * tt_u1
+            + xf.vs2[k][2] * dt_u1
+            + xf.vs2[k][3] * ut_u1
+            + xf.vs2[k][4] * xf.xt_u1;
+        bl1[k][4] = xf.vs1[k][4]
+            + xf.vs2[k][1] * tt_x1
+            + xf.vs2[k][2] * dt_x1
+            + xf.vs2[k][3] * ut_x1
+            + xf.vs2[k][4] * xf.xt_x1;
 
         bl2[k][0] = 0.0;
-        bl2[k][1] = xf.vs2[k][1] * tt_t2 + xf.vs2[k][2] * dt_t2 + xf.vs2[k][3] * ut_t2 + xf.vs2[k][4] * xf.xt_t2;
-        bl2[k][2] = xf.vs2[k][1] * tt_d2 + xf.vs2[k][2] * dt_d2 + xf.vs2[k][3] * ut_d2 + xf.vs2[k][4] * xf.xt_d2;
-        bl2[k][3] = xf.vs2[k][1] * tt_u2 + xf.vs2[k][2] * dt_u2 + xf.vs2[k][3] * ut_u2 + xf.vs2[k][4] * xf.xt_u2;
-        bl2[k][4] = xf.vs2[k][1] * tt_x2 + xf.vs2[k][2] * dt_x2 + xf.vs2[k][3] * ut_x2 + xf.vs2[k][4] * xf.xt_x2;
+        bl2[k][1] = xf.vs2[k][1] * tt_t2
+            + xf.vs2[k][2] * dt_t2
+            + xf.vs2[k][3] * ut_t2
+            + xf.vs2[k][4] * xf.xt_t2;
+        bl2[k][2] = xf.vs2[k][1] * tt_d2
+            + xf.vs2[k][2] * dt_d2
+            + xf.vs2[k][3] * ut_d2
+            + xf.vs2[k][4] * xf.xt_d2;
+        bl2[k][3] = xf.vs2[k][1] * tt_u2
+            + xf.vs2[k][2] * dt_u2
+            + xf.vs2[k][3] * ut_u2
+            + xf.vs2[k][4] * xf.xt_u2;
+        bl2[k][4] = xf.vs2[k][1] * tt_x2
+            + xf.vs2[k][2] * dt_x2
+            + xf.vs2[k][3] * ut_x2
+            + xf.vs2[k][4] * xf.xt_x2;
     }
 
     // **** SECOND, set up turbulent part between XT and X2 ****
@@ -2039,11 +2201,31 @@ pub fn trdif(xf: &mut Xfoil) {
             + xf.vs1[k][3] * ut_xf
             + xf.vs1[k][4] * xf.xt_xf;
 
-        bt1[k][0] = xf.vs1[k][0] * st_a1 + xf.vs1[k][1] * tt_a1 + xf.vs1[k][2] * dt_a1 + xf.vs1[k][3] * ut_a1 + xf.vs1[k][4] * xf.xt_a1;
-        bt1[k][1] = xf.vs1[k][0] * st_t1 + xf.vs1[k][1] * tt_t1 + xf.vs1[k][2] * dt_t1 + xf.vs1[k][3] * ut_t1 + xf.vs1[k][4] * xf.xt_t1;
-        bt1[k][2] = xf.vs1[k][0] * st_d1 + xf.vs1[k][1] * tt_d1 + xf.vs1[k][2] * dt_d1 + xf.vs1[k][3] * ut_d1 + xf.vs1[k][4] * xf.xt_d1;
-        bt1[k][3] = xf.vs1[k][0] * st_u1 + xf.vs1[k][1] * tt_u1 + xf.vs1[k][2] * dt_u1 + xf.vs1[k][3] * ut_u1 + xf.vs1[k][4] * xf.xt_u1;
-        bt1[k][4] = xf.vs1[k][0] * st_x1 + xf.vs1[k][1] * tt_x1 + xf.vs1[k][2] * dt_x1 + xf.vs1[k][3] * ut_x1 + xf.vs1[k][4] * xf.xt_x1;
+        bt1[k][0] = xf.vs1[k][0] * st_a1
+            + xf.vs1[k][1] * tt_a1
+            + xf.vs1[k][2] * dt_a1
+            + xf.vs1[k][3] * ut_a1
+            + xf.vs1[k][4] * xf.xt_a1;
+        bt1[k][1] = xf.vs1[k][0] * st_t1
+            + xf.vs1[k][1] * tt_t1
+            + xf.vs1[k][2] * dt_t1
+            + xf.vs1[k][3] * ut_t1
+            + xf.vs1[k][4] * xf.xt_t1;
+        bt1[k][2] = xf.vs1[k][0] * st_d1
+            + xf.vs1[k][1] * tt_d1
+            + xf.vs1[k][2] * dt_d1
+            + xf.vs1[k][3] * ut_d1
+            + xf.vs1[k][4] * xf.xt_d1;
+        bt1[k][3] = xf.vs1[k][0] * st_u1
+            + xf.vs1[k][1] * tt_u1
+            + xf.vs1[k][2] * dt_u1
+            + xf.vs1[k][3] * ut_u1
+            + xf.vs1[k][4] * xf.xt_u1;
+        bt1[k][4] = xf.vs1[k][0] * st_x1
+            + xf.vs1[k][1] * tt_x1
+            + xf.vs1[k][2] * dt_x1
+            + xf.vs1[k][3] * ut_x1
+            + xf.vs1[k][4] * xf.xt_x1;
 
         bt2[k][0] = xf.vs2[k][0];
         bt2[k][1] = xf.vs2[k][1]

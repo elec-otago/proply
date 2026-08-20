@@ -77,7 +77,9 @@ impl Foil {
     /// length `n`.  Lower and upper surfaces both run LE -> TE.
     pub fn get_shape_points(&self, n: usize) -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
         // Flat plate: y = +/- thickness * chord.
-        let x: Vec<f64> = (0..n).map(|i| self.chord * i as f64 / (n - 1) as f64).collect();
+        let x: Vec<f64> = (0..n)
+            .map(|i| self.chord * i as f64 / (n - 1) as f64)
+            .collect();
         let y = self.thickness * self.chord;
         let xl = x.clone();
         let yl = vec![-y; n];
@@ -88,11 +90,7 @@ impl Foil {
 
     /// The two profiles (lower, upper) as 2-D point lists, rotated by
     /// `rotation_angle` around the point x0 = 0.67 * chord-span.
-    pub fn get_points(
-        &self,
-        n: usize,
-        rotation_angle: f64,
-    ) -> (Vec<[f64; 2]>, Vec<[f64; 2]>) {
+    pub fn get_points(&self, n: usize, rotation_angle: f64) -> (Vec<[f64; 2]>, Vec<[f64; 2]>) {
         let (xl, yl, xu, yu) = self.get_shape_points(n);
         let x0 = 0.67 * (max(&xu) - min(&xu));
         let y0 = 0.0;
@@ -287,7 +285,9 @@ impl Naca4 {
         let p = self.p;
         let m = self.m;
 
-        let beta: Vec<f64> = (0..n5).map(|i| std::f64::consts::PI * i as f64 / (n5 - 1) as f64).collect();
+        let beta: Vec<f64> = (0..n5)
+            .map(|i| std::f64::consts::PI * i as f64 / (n5 - 1) as f64)
+            .collect();
         let x: Vec<f64> = beta.iter().map(|b| (1.0 - b.cos()) / 2.0).collect();
         let y_offset: Vec<f64> = (0..n5)
             .map(|i| self.base.trailing_edge / 2.0 * i as f64 / (n5 - 1) as f64)
@@ -298,10 +298,7 @@ impl Naca4 {
             .zip(y_offset.iter())
             .map(|(xi, yo)| {
                 5.0 * t
-                    * (0.2969 * xi.sqrt()
-                        - 0.1260 * xi
-                        - 0.3516 * xi * xi
-                        + 0.2843 * xi.powi(3)
+                    * (0.2969 * xi.sqrt() - 0.1260 * xi - 0.3516 * xi * xi + 0.2843 * xi.powi(3)
                         - 0.1036 * xi.powi(4))
                     + yo
             })
@@ -501,9 +498,7 @@ impl std::fmt::Display for Cst {
         write!(
             f,
             "ch={}, te={:4.3}, CST t={:4.2}",
-            self.base.chord,
-            self.base.trailing_edge,
-            self.base.thickness
+            self.base.chord, self.base.trailing_edge, self.base.thickness
         )
     }
 }
@@ -689,7 +684,11 @@ mod tests {
         // LE at x=0.  The decimated profile (n*5 points, every 5th kept) ends
         // at the sample before the TE: beta = pi*205/209 -> x = 0.9990965.
         assert!(xu[0].abs() < 1e-12);
-        assert!((xu[41] - 0.9990965).abs() < 1e-6, "TE sample x = {}", xu[41]);
+        assert!(
+            (xu[41] - 0.9990965).abs() < 1e-6,
+            "TE sample x = {}",
+            xu[41]
+        );
     }
 
     #[test]
@@ -769,7 +768,11 @@ mod tests {
         // Default params: upper = −lower = 0.2·ones(8) → y = ±0.2·√x(1−x),
         // max thickness 0.4·√(1/3)·(2/3) ≈ 0.154 at x = 1/3.
         let f = Cst::default(1.0);
-        assert!((f.thickness() - 0.154).abs() < 2.0e-3, "thickness {}", f.thickness());
+        assert!(
+            (f.thickness() - 0.154).abs() < 2.0e-3,
+            "thickness {}",
+            f.thickness()
+        );
         let (xl, yl, xu, yu) = f.get_shape_points(42);
         assert_eq!(xl.len(), 42);
         // Symmetric: upper = −lower at shared stations.
@@ -820,7 +823,11 @@ mod tests {
         // NACA 0012 as CST parameters: symmetric, ~12% thick.
         let (f, name) = Cst::from_naca(1.0, 12).expect("NACA 0012 valid");
         assert_eq!(name, "NACA0012");
-        assert!((f.thickness() - 0.12).abs() < 2.0e-3, "thickness {}", f.thickness());
+        assert!(
+            (f.thickness() - 0.12).abs() < 2.0e-3,
+            "thickness {}",
+            f.thickness()
+        );
         let (xl, yl, xu, yu) = f.get_shape_points(100);
         for i in 0..100 {
             assert!((yu[i] + yl[i]).abs() < 1e-4, "not symmetric at {}", i);

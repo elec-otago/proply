@@ -3,11 +3,13 @@
 //! viscal, fcpmin.  The interactive `.OPER` menu is not ported.
 
 use crate::bl::{setbl, update};
-use crate::panel::{gamqv, iblpan, qdcalc, qiset, qvfue, qwcalc, stfind, stmove, uicalc, xicalc, xywake};
-use crate::solve::blsolv;
+use crate::panel::{
+    gamqv, iblpan, qdcalc, qiset, qvfue, qwcalc, stfind, stmove, uicalc, xicalc, xywake,
+};
 use crate::s_xbl::iblsys;
 use crate::s_xfoil::{cdcalc, clcalc, comset, cpcalc, mrcl, tecalc};
-use crate::state::{DTOR, Xfoil};
+use crate::solve::blsolv;
+use crate::state::{Xfoil, DTOR};
 
 /// Finds the minimum Cp on the distribution (for cavitation work).
 pub fn fcpmin(xf: &mut Xfoil) {
@@ -156,10 +158,28 @@ pub fn specal(xf: &mut Xfoil) {
     );
 
     if xf.lvisc {
-        cpcalc(&xf.qvis[..xf.n + xf.nw], xf.qinf, xf.minf, &mut xf.cpv[..xf.n + xf.nw], xf.show_output);
-        cpcalc(&xf.qinv[..xf.n + xf.nw], xf.qinf, xf.minf, &mut xf.cpi[..xf.n + xf.nw], xf.show_output);
+        cpcalc(
+            &xf.qvis[..xf.n + xf.nw],
+            xf.qinf,
+            xf.minf,
+            &mut xf.cpv[..xf.n + xf.nw],
+            xf.show_output,
+        );
+        cpcalc(
+            &xf.qinv[..xf.n + xf.nw],
+            xf.qinf,
+            xf.minf,
+            &mut xf.cpi[..xf.n + xf.nw],
+            xf.show_output,
+        );
     } else {
-        cpcalc(&xf.qinv[..xf.n], xf.qinf, xf.minf, &mut xf.cpi[..xf.n], xf.show_output);
+        cpcalc(
+            &xf.qinv[..xf.n],
+            xf.qinf,
+            xf.minf,
+            &mut xf.cpi[..xf.n],
+            xf.show_output,
+        );
     }
 }
 
@@ -254,10 +274,28 @@ pub fn speccl(xf: &mut Xfoil) {
     qiset(xf);
 
     if xf.lvisc {
-        cpcalc(&xf.qvis[..xf.n + xf.nw], xf.qinf, xf.minf, &mut xf.cpv[..xf.n + xf.nw], xf.show_output);
-        cpcalc(&xf.qinv[..xf.n + xf.nw], xf.qinf, xf.minf, &mut xf.cpi[..xf.n + xf.nw], xf.show_output);
+        cpcalc(
+            &xf.qvis[..xf.n + xf.nw],
+            xf.qinf,
+            xf.minf,
+            &mut xf.cpv[..xf.n + xf.nw],
+            xf.show_output,
+        );
+        cpcalc(
+            &xf.qinv[..xf.n + xf.nw],
+            xf.qinf,
+            xf.minf,
+            &mut xf.cpi[..xf.n + xf.nw],
+            xf.show_output,
+        );
     } else {
-        cpcalc(&xf.qinv[..xf.n], xf.qinf, xf.minf, &mut xf.cpi[..xf.n], xf.show_output);
+        cpcalc(
+            &xf.qinv[..xf.n],
+            xf.qinf,
+            xf.minf,
+            &mut xf.cpi[..xf.n],
+            xf.show_output,
+        );
     }
 }
 
@@ -314,10 +352,28 @@ pub fn viscal(xf: &mut Xfoil, niter1: i32) -> bool {
         // set correct CL if converged point exists
         qvfue(xf);
         if xf.lvisc {
-            cpcalc(&xf.qvis[..xf.n + xf.nw], xf.qinf, xf.minf, &mut xf.cpv[..xf.n + xf.nw], xf.show_output);
-            cpcalc(&xf.qinv[..xf.n + xf.nw], xf.qinf, xf.minf, &mut xf.cpi[..xf.n + xf.nw], xf.show_output);
+            cpcalc(
+                &xf.qvis[..xf.n + xf.nw],
+                xf.qinf,
+                xf.minf,
+                &mut xf.cpv[..xf.n + xf.nw],
+                xf.show_output,
+            );
+            cpcalc(
+                &xf.qinv[..xf.n + xf.nw],
+                xf.qinf,
+                xf.minf,
+                &mut xf.cpi[..xf.n + xf.nw],
+                xf.show_output,
+            );
         } else {
-            cpcalc(&xf.qinv[..xf.n], xf.qinf, xf.minf, &mut xf.cpi[..xf.n], xf.show_output);
+            cpcalc(
+                &xf.qinv[..xf.n],
+                xf.qinf,
+                xf.minf,
+                &mut xf.cpi[..xf.n],
+                xf.show_output,
+            );
         }
         gamqv(xf);
         clcalc(
@@ -407,13 +463,26 @@ pub fn viscal(xf: &mut Xfoil, niter1: i32) -> bool {
             let cdpdif = xf.cd - xf.cdf;
             if xf.rlx < 1.0 {
                 eprintln!();
-                eprintln!("{:3}   rms: {:e}   max: {:e}  {:} at {:4}{:3}   RLX:{:6.3}", iter, xf.rmsbl, xf.rmxbl, xf.vmxbl, xf.imxbl, xf.ismxbl, xf.rlx);
+                eprintln!(
+                    "{:3}   rms: {:e}   max: {:e}  {:} at {:4}{:3}   RLX:{:6.3}",
+                    iter, xf.rmsbl, xf.rmxbl, xf.vmxbl, xf.imxbl, xf.ismxbl, xf.rlx
+                );
             } else {
                 eprintln!();
-                eprintln!("{:3}   rms: {:e}   max: {:e}  {:} at {:4}{:3}", iter, xf.rmsbl, xf.rmxbl, xf.vmxbl, xf.imxbl, xf.ismxbl);
+                eprintln!(
+                    "{:3}   rms: {:e}   max: {:e}  {:} at {:4}{:3}",
+                    iter, xf.rmsbl, xf.rmxbl, xf.vmxbl, xf.imxbl, xf.ismxbl
+                );
             }
-            eprintln!("         a = {:7.3}      CL = {:8.4}", xf.alfa / DTOR, xf.cl);
-            eprintln!("  Cm = {:8.4}     CD = {:9.5}   =>   CDf = {:9.5}    CDp = {:9.5}", xf.cm, xf.cd, xf.cdf, cdpdif);
+            eprintln!(
+                "         a = {:7.3}      CL = {:8.4}",
+                xf.alfa / DTOR,
+                xf.cl
+            );
+            eprintln!(
+                "  Cm = {:8.4}     CD = {:9.5}   =>   CDf = {:9.5}    CDp = {:9.5}",
+                xf.cm, xf.cd, xf.cdf, cdpdif
+            );
         }
 
         if xf.rmsbl < eps1 {
@@ -429,8 +498,20 @@ pub fn viscal(xf: &mut Xfoil, niter1: i32) -> bool {
     }
 
     let _ = &mut xf.cpmn;
-    cpcalc(&xf.qinv[..xf.n + xf.nw], xf.qinf, xf.minf, &mut xf.cpi[..xf.n + xf.nw], xf.show_output);
-    cpcalc(&xf.qvis[..xf.n + xf.nw], xf.qinf, xf.minf, &mut xf.cpv[..xf.n + xf.nw], xf.show_output);
+    cpcalc(
+        &xf.qinv[..xf.n + xf.nw],
+        xf.qinf,
+        xf.minf,
+        &mut xf.cpi[..xf.n + xf.nw],
+        xf.show_output,
+    );
+    cpcalc(
+        &xf.qvis[..xf.n + xf.nw],
+        xf.qinf,
+        xf.minf,
+        &mut xf.cpv[..xf.n + xf.nw],
+        xf.show_output,
+    );
 
     // BL summary output (upper surface only)
     let is = 0usize;
@@ -459,7 +540,16 @@ pub fn viscal(xf: &mut Xfoil, niter1: i32) -> bool {
 
     if xf.show_output {
         eprintln!();
-        eprintln!("{:10.3}{:10.4}{:11.6}{:11.6}{:11.6}{:11.6}{:10.4}     #", xf.acrit[is], hkmax, xf.cd, 2.0 * psep, 2.0 * patt, 2.0 * delp, xf.xoctr[is]);
+        eprintln!(
+            "{:10.3}{:10.4}{:11.6}{:11.6}{:11.6}{:11.6}{:10.4}     #",
+            xf.acrit[is],
+            hkmax,
+            xf.cd,
+            2.0 * psep,
+            2.0 * patt,
+            2.0 * delp,
+            xf.xoctr[is]
+        );
     }
 
     converged

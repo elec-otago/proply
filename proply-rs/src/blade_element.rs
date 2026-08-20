@@ -115,7 +115,11 @@ impl<F: FoilLike> BladeElement<F> {
     /// (see `get_points`), which swings a twisted section to one side of
     /// z = 0 — without the re-centring the root sections ride high and
     /// protrude above the hub (the hub is centred on z = 0).
-    pub fn get_foil_points(&self, n: usize, scimitar_offset: f64) -> (Vec<[f64; 3]>, Vec<[f64; 3]>) {
+    pub fn get_foil_points(
+        &self,
+        n: usize,
+        scimitar_offset: f64,
+    ) -> (Vec<[f64; 3]>, Vec<[f64; 3]>) {
         let (pl, pu) = {
             let f = self.foil.borrow();
             f.get_points(n, self.twist)

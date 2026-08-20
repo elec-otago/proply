@@ -70,8 +70,7 @@ fn foil_thickness(param: &DesignParameters, r: f64) -> f64 {
     let thickness_root = param.hub_depth * 1.0;
     let thickness_end = param.hub_depth * 0.1;
     let p = 0.3;
-    let k = (thickness_root - thickness_end)
-        / (param.hub_radius.powf(p) - param.radius.powf(p));
+    let k = (thickness_root - thickness_end) / (param.hub_radius.powf(p) - param.radius.powf(p));
     let s = thickness_end - k * param.radius.powf(p);
     s + k * r.powf(p)
 }
@@ -260,11 +259,9 @@ impl Prop {
 
     /// Prandtl-style tip and hub loss factor.
     pub fn tip_loss(&self, r: f64, phi: f64) -> f64 {
-        let f = (self.n_blades as f64 * (self.param.radius - r * 0.96))
-            / (2.0 * r * phi.sin());
+        let f = (self.n_blades as f64 * (self.param.radius - r * 0.96)) / (2.0 * r * phi.sin());
         let tip_loss = 2.0 * (-f).exp().acos() / std::f64::consts::PI;
-        let f = (self.n_blades as f64 * (r - self.param.hub_radius * 0.95))
-            / (2.0 * r * phi.sin());
+        let f = (self.n_blades as f64 * (r - self.param.hub_radius * 0.95)) / (2.0 * r * phi.sin());
         let hub_loss = 2.0 * (-f).exp().acos() / std::f64::consts::PI;
         tip_loss * hub_loss
     }
@@ -406,8 +403,11 @@ impl Prop {
         let radial_hub_to_tip: Vec<f64> = radial_points.iter().rev().copied().collect();
         let twist_poly = polyfit(&radial_hub_to_tip, &twist_angles, 4);
 
-        let mut c_points: Vec<f64> =
-            vec![0.0, self.param.hub_radius / 2.0, 0.9 * self.param.hub_radius];
+        let mut c_points: Vec<f64> = vec![
+            0.0,
+            self.param.hub_radius / 2.0,
+            0.9 * self.param.hub_radius,
+        ];
         c_points.extend(radial_hub_to_tip.iter());
         let mut extra_chords: Vec<f64> = vec![
             0.9 * self.param.hub_depth,
@@ -564,7 +564,8 @@ impl Prop {
             let phi0 = u_0.atan2(omega * r).max(1.0e-3);
             let c = chord_law(param, n_blades, r, 0.0, s_cap);
             let foil = Rc::new(RefCell::new(station_foil(param, r, c, camber_dist[i])));
-            let mut be = BladeElement::new(r, radial_res, foil, phi0 + 0.12, rpm, u_0, store.clone());
+            let mut be =
+                BladeElement::new(r, radial_res, foil, phi0 + 0.12, rpm, u_0, store.clone());
             if plate_mode {
                 be.set_plate_mode(true);
             }
@@ -611,12 +612,21 @@ impl Prop {
                 })
                 .collect();
             let fs_refs: Vec<&FoilSimulator<FoilFamily>> = elems.iter().map(|be| &be.fs).collect();
-            let res = lift_line::solve_with_influence(&stations, n_blades, omega, u_0, &fs_refs, seed, infl);
+            let res = lift_line::solve_with_influence(
+                &stations, n_blades, omega, u_0, &fs_refs, seed, infl,
+            );
             for i in 0..m {
                 elems[i].set_twist(res.phi[i] + alphas[i]);
             }
             let chords: Vec<f64> = elems.iter().map(|be| be.foil.borrow().chord()).collect();
-            (res.thrust, res.torque, alphas, chords, res.gamma.clone(), res.phi.clone())
+            (
+                res.thrust,
+                res.torque,
+                alphas,
+                chords,
+                res.gamma.clone(),
+                res.phi.clone(),
+            )
         };
 
         // Outer optimizer over the N control values: for each candidate shape,
@@ -637,15 +647,11 @@ impl Prop {
             let mut bst: Option<MeetOutcome> = None; // da, err, t, q, alpha, chord, phi
             let mut prev: Option<(f64, f64)> = None; // (da, thrust)
             let mut bracket: Option<(f64, f64)> = None;
-            let better = |err: f64,
-                          q: f64,
-                          b: &Option<MeetOutcome>|
-             -> bool {
+            let better = |err: f64, q: f64, b: &Option<MeetOutcome>| -> bool {
                 match b {
                     None => q > 0.0,
                     Some((_, be, _, bq, _, _, _)) => {
-                        (q > 0.0)
-                            && (err < *be - 1.0e-9 || ((err - *be).abs() < 1.0e-9 && q < *bq))
+                        (q > 0.0) && (err < *be - 1.0e-9 || ((err - *be).abs() < 1.0e-9 && q < *bq))
                     }
                 }
             };
@@ -662,8 +668,14 @@ impl Prop {
                         println!(
                             "lift-line [{}] ctrl=[{}] da={:.3} (warm): T={:.4} Q={:.4}",
                             label,
-                            controls.iter().map(|c| format!("{:.4}", c)).collect::<Vec<_>>().join(" "),
-                            hd, t, q
+                            controls
+                                .iter()
+                                .map(|c| format!("{:.4}", c))
+                                .collect::<Vec<_>>()
+                                .join(" "),
+                            hd,
+                            t,
+                            q
                         );
                         return ((hd, err, t, q, alphas, chords, phis), true);
                     }
@@ -737,8 +749,14 @@ impl Prop {
                 println!(
                     "lift-line [{}] ctrl=[{}] da={:.3}: T={:.4} Q={:.4}",
                     label,
-                    controls.iter().map(|c| format!("{:.4}", c)).collect::<Vec<_>>().join(" "),
-                    da, t, q
+                    controls
+                        .iter()
+                        .map(|c| format!("{:.4}", c))
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                    da,
+                    t,
+                    q
                 );
             }
             // Meet the target (50*err dominates) and then minimise torque.
@@ -761,7 +779,10 @@ impl Prop {
                 vec![1.0; n_ctrl]
             } else {
                 let scale = if i == 1 { 0.85 } else { 0.7 };
-                best_x.iter().map(|&v| (scale * v).clamp(0.0, 1.0)).collect()
+                best_x
+                    .iter()
+                    .map(|&v| (scale * v).clamp(0.0, 1.0))
+                    .collect()
             };
             let (x, f) = nm.minimize(obj, &x0, &bounds);
             if f < best_f {
@@ -848,7 +869,9 @@ impl Prop {
             / m as f64;
         let ar_shape = (r_tip - r_hub) / shape;
         const S_FLOOR: f64 = 0.2;
-        let s_cap = ar.map(|a| (ar_shape / a).clamp(S_FLOOR, 1.0)).unwrap_or(1.0);
+        let s_cap = ar
+            .map(|a| (ar_shape / a).clamp(S_FLOOR, 1.0))
+            .unwrap_or(1.0);
         let n_ctrl = self.param.chord_spline_n.max(2);
         let ref_r: Vec<f64> = (0..n_ctrl)
             .map(|k| r_hub + (r_tip - r_hub) * k as f64 / (n_ctrl.max(2) - 1) as f64)
@@ -910,7 +933,8 @@ impl Prop {
             let mut alpha_raw: Vec<f64> = Vec::with_capacity(m);
             let mut ld_row: Vec<f64> = Vec::with_capacity(m);
             for (f, vv) in row {
-                let mut fs = FoilSimulator::new(Rc::new(RefCell::new(f.clone())), self.store.clone());
+                let mut fs =
+                    FoilSimulator::new(Rc::new(RefCell::new(f.clone())), self.store.clone());
                 if self.plate_mode {
                     fs.set_plate_mode(true);
                 }
@@ -976,12 +1000,26 @@ impl Prop {
             let handles: Vec<_> = seeds
                 .into_iter()
                 .map(|(label, camber_dist, alpha_base)| {
-                    let (store, rr, ref_r, cap_ctl, infl) =
-                        (&store, &rr, &ref_r, &cap_ctl, &infl);
+                    let (store, rr, ref_r, cap_ctl, infl) = (&store, &rr, &ref_r, &cap_ctl, &infl);
                     s.spawn(move || {
                         Self::run_design_pass(
-                            param, n_blades, plate_mode, store, radial_res, rr, ref_r, cap_ctl,
-                            infl, rpm, omega, u_0, thrust, n_ctrl, s_cap, &label, &camber_dist,
+                            param,
+                            n_blades,
+                            plate_mode,
+                            store,
+                            radial_res,
+                            rr,
+                            ref_r,
+                            cap_ctl,
+                            infl,
+                            rpm,
+                            omega,
+                            u_0,
+                            thrust,
+                            n_ctrl,
+                            s_cap,
+                            &label,
+                            &camber_dist,
                             &alpha_base,
                         )
                     })
@@ -1017,8 +1055,12 @@ impl Prop {
                 (win.alpha_base[i] + win.da).clamp(-lift_line::ALPHA_MAX, lift_line::ALPHA_MAX);
             let phi0 = u_0.atan2(omega * ri).max(1.0e-3);
             let c = chord_law(&self.param, n_blades, ri, 0.0, s_cap);
-            let foil =
-                Rc::new(RefCell::new(station_foil(&self.param, ri, c, win.camber_dist[i])));
+            let foil = Rc::new(RefCell::new(station_foil(
+                &self.param,
+                ri,
+                c,
+                win.camber_dist[i],
+            )));
             let mut be = BladeElement::new(
                 ri,
                 self.radial_resolution,
@@ -1048,7 +1090,6 @@ impl Prop {
         self.blade_elements = elements;
         (win.q, win.t)
     }
-
 }
 
 /// Piecewise-linear interpolation (scipy `interp1d(x, y, "linear")`).
@@ -1153,7 +1194,11 @@ mod tests {
         let t_tip = p.get_foil_thickness(p.param.radius);
         // thickness_root = hub_depth, thickness_end = 0.1*hub_depth
         assert!((t_root - p.param.hub_depth).abs() < 1e-6, "root {}", t_root);
-        assert!((t_tip - 0.1 * p.param.hub_depth).abs() < 1e-6, "tip {}", t_tip);
+        assert!(
+            (t_tip - 0.1 * p.param.hub_depth).abs() < 1e-6,
+            "tip {}",
+            t_tip
+        );
     }
 
     #[test]
@@ -1205,7 +1250,11 @@ mod tests {
             .map(|(a, b)| (a - b).abs())
             .sum::<f64>()
             / s.len() as f64;
-        assert!(dev < 1.0_f64.to_radians(), "fit drifted from data: {} rad", dev);
+        assert!(
+            dev < 1.0_f64.to_radians(),
+            "fit drifted from data: {} rad",
+            dev
+        );
     }
 
     #[test]
@@ -1215,7 +1264,9 @@ mod tests {
         // smoothly from ~0 at the root to ~0.04 outboard, quantised to the
         // 0.01 polar-hash grid and clamped to the candidate range.
         let n = 30;
-        let rr: Vec<f64> = (0..n).map(|i| 0.006 + 0.062 * i as f64 / (n - 1) as f64).collect();
+        let rr: Vec<f64> = (0..n)
+            .map(|i| 0.006 + 0.062 * i as f64 / (n - 1) as f64)
+            .collect();
         let candidates = [0.0_f64, 0.02, 0.04];
         // lds[c][i]: the flat candidate wins the inner ~20% of the span,
         // the cambered one the rest (the middle candidate never wins).
@@ -1245,7 +1296,12 @@ mod tests {
             assert!(on_grid && (0.0..=0.04).contains(&m), "m = {}", m);
         }
         // Monotone rise (small tolerance for fit wiggle at the ends).
-        assert!(m_dist[n - 1] > m_dist[0] + 0.02, "no rise: {} -> {}", m_dist[0], m_dist[n - 1]);
+        assert!(
+            m_dist[n - 1] > m_dist[0] + 0.02,
+            "no rise: {} -> {}",
+            m_dist[0],
+            m_dist[n - 1]
+        );
     }
 
     #[test]

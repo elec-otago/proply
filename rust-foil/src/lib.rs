@@ -187,7 +187,10 @@ impl XFoil {
 
         if xf.show_output {
             eprintln!();
-            eprintln!("  LE  x,y  = {:10.5}{:10.5}  |   Chord = {:10.5}", xble, yble, xf.chordb);
+            eprintln!(
+                "  LE  x,y  = {:10.5}{:10.5}  |   Chord = {:10.5}",
+                xble, yble, xf.chordb
+            );
             eprintln!("  TE  x,y  = {:10.5}{:10.5}  |", xbte, ybte);
         }
 
@@ -201,11 +204,22 @@ impl XFoil {
         // check for excessive panel corner angles
         let mut amax = 0.0;
         let mut imax = 0;
-        geom::cang(&xf.x[..xf.n], &xf.y[..xf.n], 0, &mut amax, &mut imax, xf.show_output);
+        geom::cang(
+            &xf.x[..xf.n],
+            &xf.y[..xf.n],
+            0,
+            &mut amax,
+            &mut imax,
+            xf.show_output,
+        );
         if amax.abs() > 40.0 && xf.show_output {
             eprintln!();
             eprintln!(" WARNING: Poor input coordinate distribution");
-            eprintln!("          Excessive panel angle {:7.1}  at i = {:4}", amax, imax + 1);
+            eprintln!(
+                "          Excessive panel angle {:7.1}  at i = {:4}",
+                amax,
+                imax + 1
+            );
         }
 
         ([xble, yble], xf.chordb, [xbte, ybte])
@@ -260,10 +274,20 @@ impl XFoil {
             s_xfoil::comset(xf);
             if xf.minf > 0.0 && xf.show_output {
                 eprintln!();
-                eprintln!(" Sonic Cp = {:10.2}      Sonic Q/Qinf = {:10.3}", xf.cpstar, xf.qstar / xf.qinf);
+                eprintln!(
+                    " Sonic Cp = {:10.2}      Sonic Q/Qinf = {:10.3}",
+                    xf.cpstar,
+                    xf.qstar / xf.qinf
+                );
             }
 
-            s_xfoil::cpcalc(&xf.qinv[..xf.n], xf.qinf, xf.minf, &mut xf.cpi[..xf.n], xf.show_output);
+            s_xfoil::cpcalc(
+                &xf.qinv[..xf.n],
+                xf.qinf,
+                xf.minf,
+                &mut xf.cpi[..xf.n],
+                xf.show_output,
+            );
             if xf.lvisc {
                 s_xfoil::cpcalc(
                     &xf.qvis[..xf.n + xf.nw],
@@ -371,7 +395,14 @@ impl XFoil {
         if xf.n > 0 {
             let mut amax = 0.0;
             let mut imax = 0;
-            geom::cang(&xf.x[..xf.n], &xf.y[..xf.n], 1, &mut amax, &mut imax, xf.show_output);
+            geom::cang(
+                &xf.x[..xf.n],
+                &xf.y[..xf.n],
+                1,
+                &mut amax,
+                &mut imax,
+                xf.show_output,
+            );
         }
     }
 
@@ -450,7 +481,12 @@ impl XFoil {
     /// Each point warm-starts from the previous point's converged state (the
     /// canonical XFOIL sweep behaviour).  For sweeps large enough to be
     /// worth splitting, see [`aseq_par`](Self::aseq_par).
-    pub fn aseq(&mut self, a_start: f64, a_end: f64, n: usize) -> Vec<(f64, f64, f64, f64, f64, bool)> {
+    pub fn aseq(
+        &mut self,
+        a_start: f64,
+        a_end: f64,
+        n: usize,
+    ) -> Vec<(f64, f64, f64, f64, f64, bool)> {
         let xf = &mut self.state;
         let a0 = a_start * state::DTOR;
         let da = (a_end - a_start) / n as f64 * state::DTOR;
@@ -469,7 +505,12 @@ impl XFoil {
     /// 0012, Re = 1e6).  Below 1e6 the BL convergence is history-sensitive
     /// and the cold-started chunk boundaries can land on different
     /// (non-)converged states, so the sweep falls back to the serial path.
-    pub fn aseq_par(&self, a_start: f64, a_end: f64, n: usize) -> Vec<(f64, f64, f64, f64, f64, bool)> {
+    pub fn aseq_par(
+        &self,
+        a_start: f64,
+        a_end: f64,
+        n: usize,
+    ) -> Vec<(f64, f64, f64, f64, f64, bool)> {
         let threads = rayon::current_num_threads();
         let a0 = a_start * state::DTOR;
         let da = (a_end - a_start) / n as f64 * state::DTOR;
@@ -497,7 +538,12 @@ impl XFoil {
 
     /// Runs a CL sweep from `cl_start` to `cl_end` in `n` equal steps.
     /// Returns (alpha, CL, CD, CM, Cpmin, converged) per point.
-    pub fn cseq(&mut self, cl_start: f64, cl_end: f64, n: usize) -> Vec<(f64, f64, f64, f64, f64, bool)> {
+    pub fn cseq(
+        &mut self,
+        cl_start: f64,
+        cl_end: f64,
+        n: usize,
+    ) -> Vec<(f64, f64, f64, f64, f64, bool)> {
         let xf = &mut self.state;
         let cl0 = cl_start;
         let dcl = (cl_end - cl_start) / n as f64;
@@ -566,7 +612,13 @@ impl XFoil {
         let n = xf.n;
         // Reuse cpcalc for the Karman-Tsien compressibility correction (it
         // hoists beta/bfac out of the loop and warns on supersonic points).
-        s_xfoil::cpcalc(&xf.gam[..n], xf.qinf, xf.minf, &mut xf.cpi[..n], xf.show_output);
+        s_xfoil::cpcalc(
+            &xf.gam[..n],
+            xf.qinf,
+            xf.minf,
+            &mut xf.cpi[..n],
+            xf.show_output,
+        );
 
         let mut x_out = vec![0.0; n];
         let mut cp_out = vec![0.0; n];

@@ -175,10 +175,7 @@ pub fn biot_savart_core(
     // Rankine-core rolloff: attenuate the inviscid field inside the core.
     let d = dist_line(p0, p1, p2);
     let rolloff = d * d / (d * d + core * core);
-    let k = gamma
-        / (4.0 * std::f64::consts::PI)
-        * (dot(r1, l) / n1 - dot(r2, l) / n2)
-        / denom
+    let k = gamma / (4.0 * std::f64::consts::PI) * (dot(r1, l) / n1 - dot(r2, l) / n2) / denom
         * rolloff;
     [cr[0] * k, cr[1] * k, cr[2] * k]
 }
@@ -450,8 +447,7 @@ fn newton_solve<F: FoilLike>(
         if _iter > 20 && rinf > 1.0e-2 {
             let mut g0 = vec![0.0; m];
             for i in 0..m {
-                let v0 =
-                    (u_0 * u_0 + (omega * stations[i].r).powi(2)).sqrt();
+                let v0 = (u_0 * u_0 + (omega * stations[i].r).powi(2)).sqrt();
                 let a0 = stations[i].alpha.clamp(-ALPHA_MAX, ALPHA_MAX);
                 let f = hub_loss(stations[i].r, stations[0].r, stations[m - 1].r);
                 g0[i] = f * 0.5 * stations[i].c * v0 * fs[i].get_cl(v0, a0);
@@ -473,8 +469,7 @@ fn newton_solve<F: FoilLike>(
                 let du = u_mat[i * m + j];
                 let dv = if i == j { -vdiag[i] } else { 0.0 };
                 let dv_p = (u * du + v * dv) / vv.max(1.0e-30);
-                let jv = if i == j { 1.0 } else { 0.0 }
-                    - f * 0.5 * stations[i].c * cl * dv_p;
+                let jv = if i == j { 1.0 } else { 0.0 } - f * 0.5 * stations[i].c * cl * dv_p;
                 jac[i * m + j] = jv;
             }
         }
@@ -654,7 +649,14 @@ mod tests {
 
     /// A plate-polar blade: `alpha` is uniform and below the clamp, chord
     /// uniform, so the converged solution is easy to reason about.
-    fn plate_setup(radii: &[f64], chord: f64, alpha: f64) -> (Vec<Station>, Vec<crate::simulator::FoilSimulator<crate::foil::Naca4>>) {
+    fn plate_setup(
+        radii: &[f64],
+        chord: f64,
+        alpha: f64,
+    ) -> (
+        Vec<Station>,
+        Vec<crate::simulator::FoilSimulator<crate::foil::Naca4>>,
+    ) {
         use crate::cache::PolarStore;
         use crate::foil::Naca4;
         use std::cell::RefCell;
@@ -693,7 +695,12 @@ mod tests {
             vz += biot_savart(p0, p1, p2, gamma)[2];
         }
         let expect = vortex_ring_axial(a, gamma, 0.0);
-        assert!((vz - expect).abs() / expect < 1.0e-3, "{} vs {}", vz, expect);
+        assert!(
+            (vz - expect).abs() / expect < 1.0e-3,
+            "{} vs {}",
+            vz,
+            expect
+        );
     }
 
     #[test]
@@ -795,7 +802,13 @@ mod tests {
         let (ui, vi) = induced_velocity(&r, &phi, &gamma, &edge, 2, 1.0e-4);
         for i in 0..r.len() {
             let expect = 2.0 * gamma[i] / (4.0 * std::f64::consts::PI * r[i]);
-            assert!((vi[i] - expect).abs() < 1.0e-12, "vi[{}]={} vs {}", i, vi[i], expect);
+            assert!(
+                (vi[i] - expect).abs() < 1.0e-12,
+                "vi[{}]={} vs {}",
+                i,
+                vi[i],
+                expect
+            );
         }
         // Axial induced is finite and bounded for a bounded circulation.
         for u in &ui {
@@ -828,7 +841,11 @@ mod tests {
                 Arc::new(Mutex::new(PolarStore::load("/nonexistent/cache.json"))),
             );
             fs.set_plate_mode(true);
-            stations.push(Station { r, c, alpha: 0.10 + 0.05 * i as f64 });
+            stations.push(Station {
+                r,
+                c,
+                alpha: 0.10 + 0.05 * i as f64,
+            });
             sims.push(fs);
         }
         let fs_refs: Vec<&FoilSimulator<Naca4>> = sims.iter().collect();
@@ -903,8 +920,18 @@ mod tests {
             t_ref += dt;
             q_ref += dq;
         }
-        assert!((res.thrust - t_ref).abs() < 1.0e-9, "{} vs {}", res.thrust, t_ref);
-        assert!((res.torque - q_ref).abs() < 1.0e-9, "{} vs {}", res.torque, q_ref);
+        assert!(
+            (res.thrust - t_ref).abs() < 1.0e-9,
+            "{} vs {}",
+            res.thrust,
+            t_ref
+        );
+        assert!(
+            (res.torque - q_ref).abs() < 1.0e-9,
+            "{} vs {}",
+            res.torque,
+            q_ref
+        );
     }
 
     #[test]

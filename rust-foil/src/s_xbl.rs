@@ -1,7 +1,7 @@
 // Copyright (c) Tim Molteno tim@elec.ac.nz 2026
 //! Shared BL routines (port of `s_xbl.f90`).
 
-use crate::state::{IVX, Xfoil};
+use crate::state::{Xfoil, IVX};
 
 /// Sets the BL Newton system line number corresponding to each BL station.
 pub fn iblsys(xf: &mut Xfoil) {

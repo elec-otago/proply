@@ -84,10 +84,7 @@ pub fn write_prop(prop: &mut Prop, n_points: usize) -> Result<String, String> {
 
     // --- Blade solid -------------------------------------------------------
     let radii: Vec<f64> = prop.blade_elements.iter().map(|be| be.r).collect();
-    let scim: Vec<f64> = radii
-        .iter()
-        .map(|r| prop.get_scimitar_offset(*r))
-        .collect();
+    let scim: Vec<f64> = radii.iter().map(|r| prop.get_scimitar_offset(*r)).collect();
     let stations: Vec<(Vec<Pt>, Vec<Pt>)> = prop
         .blade_elements
         .iter()
@@ -126,7 +123,8 @@ pub fn write_prop(prop: &mut Prop, n_points: usize) -> Result<String, String> {
     let upper_curves: Vec<NurbsCurve> = stations.iter().map(|(_, u)| interp(u)).collect();
 
     // Shared boundary curves.
-    let le_points: Vec<Pt> = stations.iter().map(|(l, _)| l[0]).collect(); // LE_j = lower[0] == upper[0]
+    // LE_j = lower[0] == upper[0]
+    let le_points: Vec<Pt> = stations.iter().map(|(l, _)| l[0]).collect();
     let te_upper_points: Vec<Pt> = stations.iter().map(|(_, u)| u[n_points - 1]).collect();
     let te_lower_points: Vec<Pt> = stations.iter().map(|(l, _)| l[n_points - 1]).collect();
 
@@ -158,30 +156,68 @@ pub fn write_prop(prop: &mut Prop, n_points: usize) -> Result<String, String> {
         .collect::<Result<_, String>>()?;
 
     // Edges (authored directions).
-    let e_le = b.edge(v_le[0], v_le[n_st - 1], CurveInput::Nurbs(to_step_curve(&le_curve))).map_err(err)?;
+    let e_le = b
+        .edge(
+            v_le[0],
+            v_le[n_st - 1],
+            CurveInput::Nurbs(to_step_curve(&le_curve)),
+        )
+        .map_err(err)?;
     let e_te_u = b
-        .edge(v_te_u[0], v_te_u[n_st - 1], CurveInput::Nurbs(to_step_curve(&te_upper_curve)))
+        .edge(
+            v_te_u[0],
+            v_te_u[n_st - 1],
+            CurveInput::Nurbs(to_step_curve(&te_upper_curve)),
+        )
         .map_err(err)?;
     let e_te_l = b
-        .edge(v_te_l[0], v_te_l[n_st - 1], CurveInput::Nurbs(to_step_curve(&te_lower_curve)))
+        .edge(
+            v_te_l[0],
+            v_te_l[n_st - 1],
+            CurveInput::Nurbs(to_step_curve(&te_lower_curve)),
+        )
         .map_err(err)?;
     let e_tip_te = b
-        .edge(v_te_u[n_st - 1], v_te_l[n_st - 1], CurveInput::Nurbs(to_step_curve(&tip_te_seg)))
+        .edge(
+            v_te_u[n_st - 1],
+            v_te_l[n_st - 1],
+            CurveInput::Nurbs(to_step_curve(&tip_te_seg)),
+        )
         .map_err(err)?;
     let e_hub_te = b
-        .edge(v_te_l[0], v_te_u[0], CurveInput::Nurbs(to_step_curve(&hub_te_seg)))
+        .edge(
+            v_te_l[0],
+            v_te_u[0],
+            CurveInput::Nurbs(to_step_curve(&hub_te_seg)),
+        )
         .map_err(err)?;
     let e_hub_u = b
-        .edge(v_le[0], v_te_u[0], CurveInput::Nurbs(to_step_curve(&upper_curves[0].clone())))
+        .edge(
+            v_le[0],
+            v_te_u[0],
+            CurveInput::Nurbs(to_step_curve(&upper_curves[0].clone())),
+        )
         .map_err(err)?;
     let e_hub_l = b
-        .edge(v_le[0], v_te_l[0], CurveInput::Nurbs(to_step_curve(&lower_curves[0].clone())))
+        .edge(
+            v_le[0],
+            v_te_l[0],
+            CurveInput::Nurbs(to_step_curve(&lower_curves[0].clone())),
+        )
         .map_err(err)?;
     let e_tip_u = b
-        .edge(v_le[n_st - 1], v_te_u[n_st - 1], CurveInput::Nurbs(to_step_curve(&upper_curves[n_st - 1].clone())))
+        .edge(
+            v_le[n_st - 1],
+            v_te_u[n_st - 1],
+            CurveInput::Nurbs(to_step_curve(&upper_curves[n_st - 1].clone())),
+        )
         .map_err(err)?;
     let e_tip_l = b
-        .edge(v_le[n_st - 1], v_te_l[n_st - 1], CurveInput::Nurbs(to_step_curve(&lower_curves[n_st - 1].clone())))
+        .edge(
+            v_le[n_st - 1],
+            v_te_l[n_st - 1],
+            CurveInput::Nurbs(to_step_curve(&lower_curves[n_st - 1].clone())),
+        )
         .map_err(err)?;
 
     // Faces.  Loop directions are CCW when viewed from the exterior.
@@ -190,10 +226,10 @@ pub fn write_prop(prop: &mut Prop, n_points: usize) -> Result<String, String> {
             SurfaceInput::Nurbs(to_step_surface(&upper_loft)),
             false, // natural surface normal points into the solid
             vec![FaceBoundInput::outer(vec![
-                (e_le, true),      // hub -> tip
-                (e_tip_u, true),   // LE -> TE at the tip
-                (e_te_u, false),   // tip -> hub
-                (e_hub_u, false),  // TE -> LE at the hub
+                (e_le, true),     // hub -> tip
+                (e_tip_u, true),  // LE -> TE at the tip
+                (e_te_u, false),  // tip -> hub
+                (e_hub_u, false), // TE -> LE at the hub
             ])],
         )
         .map_err(err)?;
@@ -202,10 +238,10 @@ pub fn write_prop(prop: &mut Prop, n_points: usize) -> Result<String, String> {
             SurfaceInput::Nurbs(to_step_surface(&lower_loft)),
             true,
             vec![FaceBoundInput::outer(vec![
-                (e_le, false),     // tip -> hub
-                (e_hub_l, true),   // LE -> TE at the hub
-                (e_te_l, true),    // hub -> tip
-                (e_tip_l, false),  // TE -> LE at the tip
+                (e_le, false),    // tip -> hub
+                (e_hub_l, true),  // LE -> TE at the hub
+                (e_te_l, true),   // hub -> tip
+                (e_tip_l, false), // TE -> LE at the tip
             ])],
         )
         .map_err(err)?;
@@ -214,10 +250,10 @@ pub fn write_prop(prop: &mut Prop, n_points: usize) -> Result<String, String> {
             SurfaceInput::Nurbs(to_step_surface(&te_cap)),
             true,
             vec![FaceBoundInput::outer(vec![
-                (e_te_u, true),    // hub -> tip along the upper TE
-                (e_tip_te, true),  // upper -> lower at the tip
-                (e_te_l, false),   // tip -> hub along the lower TE
-                (e_hub_te, true),  // lower -> upper at the hub
+                (e_te_u, true),   // hub -> tip along the upper TE
+                (e_tip_te, true), // upper -> lower at the tip
+                (e_te_l, false),  // tip -> hub along the lower TE
+                (e_hub_te, true), // lower -> upper at the hub
             ])],
         )
         .map_err(err)?;
@@ -226,9 +262,9 @@ pub fn write_prop(prop: &mut Prop, n_points: usize) -> Result<String, String> {
             SurfaceInput::Nurbs(to_step_surface(&hub_cap)),
             false, // natural normal is +r; outward is -r
             vec![FaceBoundInput::outer(vec![
-                (e_hub_u, true),    // LE -> TE along the upper profile
-                (e_hub_te, false),  // upper -> lower
-                (e_hub_l, false),   // TE -> LE along the lower profile
+                (e_hub_u, true),   // LE -> TE along the upper profile
+                (e_hub_te, false), // upper -> lower
+                (e_hub_l, false),  // TE -> LE along the lower profile
             ])],
         )
         .map_err(err)?;
@@ -237,15 +273,19 @@ pub fn write_prop(prop: &mut Prop, n_points: usize) -> Result<String, String> {
             SurfaceInput::Nurbs(to_step_surface(&tip_cap)),
             true,
             vec![FaceBoundInput::outer(vec![
-                (e_tip_l, true),    // LE -> TE along the lower profile
-                (e_tip_te, true),   // lower -> upper
-                (e_tip_u, false),   // TE -> LE along the upper profile
+                (e_tip_l, true),  // LE -> TE along the lower profile
+                (e_tip_te, true), // lower -> upper
+                (e_tip_u, false), // TE -> LE along the upper profile
             ])],
         )
         .map_err(err)?;
 
     let _blade_solid = b
-        .solid(blade_part, "blade", vec![face_upper, face_lower, face_te, face_hub_cap, face_tip_cap])
+        .solid(
+            blade_part,
+            "blade",
+            vec![face_upper, face_lower, face_te, face_hub_cap, face_tip_cap],
+        )
         .map_err(err)?;
 
     // --- Hub solid (with the mounting-hole through-bore) --------------------
@@ -254,14 +294,26 @@ pub fn write_prop(prop: &mut Prop, n_points: usize) -> Result<String, String> {
     // --- Assembly -----------------------------------------------------------
     let z = [0.0, 0.0, 1.0];
     let x = [1.0, 0.0, 0.0];
-    b.place(assembly, hub_part, Frame { origin: [0.0, 0.0, 0.0], axis: z, ref_dir: x })
-        .map_err(err)?;
+    b.place(
+        assembly,
+        hub_part,
+        Frame {
+            origin: [0.0, 0.0, 0.0],
+            axis: z,
+            ref_dir: x,
+        },
+    )
+    .map_err(err)?;
     for k in 0..prop.n_blades {
         let angle = 2.0 * std::f64::consts::PI * k as f64 / prop.n_blades as f64;
         b.place(
             assembly,
             blade_part,
-            Frame { origin: [0.0, 0.0, 0.0], axis: z, ref_dir: [angle.cos(), angle.sin(), 0.0] },
+            Frame {
+                origin: [0.0, 0.0, 0.0],
+                axis: z,
+                ref_dir: [angle.cos(), angle.sin(), 0.0],
+            },
         )
         .map_err(err)?;
     }
@@ -314,15 +366,31 @@ fn build_hub(
         ref_dir: [1.0, 0.0, 0.0],
     };
     // Outer circle arcs (hub radius).
-    let bo0 = b.edge(b0, b1, CurveInput::Circle(circle_frame(z0), hub_r)).map_err(err)?;
-    let bo1 = b.edge(b1, b0, CurveInput::Circle(circle_frame(z0), hub_r)).map_err(err)?;
-    let to0 = b.edge(t0, t1, CurveInput::Circle(circle_frame(z1), hub_r)).map_err(err)?;
-    let to1 = b.edge(t1, t0, CurveInput::Circle(circle_frame(z1), hub_r)).map_err(err)?;
+    let bo0 = b
+        .edge(b0, b1, CurveInput::Circle(circle_frame(z0), hub_r))
+        .map_err(err)?;
+    let bo1 = b
+        .edge(b1, b0, CurveInput::Circle(circle_frame(z0), hub_r))
+        .map_err(err)?;
+    let to0 = b
+        .edge(t0, t1, CurveInput::Circle(circle_frame(z1), hub_r))
+        .map_err(err)?;
+    let to1 = b
+        .edge(t1, t0, CurveInput::Circle(circle_frame(z1), hub_r))
+        .map_err(err)?;
     // Bore circle arcs (center_hole radius).
-    let bi0 = b.edge(c0, c1, CurveInput::Circle(circle_frame(z0), bore_r)).map_err(err)?;
-    let bi1 = b.edge(c1, c0, CurveInput::Circle(circle_frame(z0), bore_r)).map_err(err)?;
-    let ti0 = b.edge(d0, d1, CurveInput::Circle(circle_frame(z1), bore_r)).map_err(err)?;
-    let ti1 = b.edge(d1, d0, CurveInput::Circle(circle_frame(z1), bore_r)).map_err(err)?;
+    let bi0 = b
+        .edge(c0, c1, CurveInput::Circle(circle_frame(z0), bore_r))
+        .map_err(err)?;
+    let bi1 = b
+        .edge(c1, c0, CurveInput::Circle(circle_frame(z0), bore_r))
+        .map_err(err)?;
+    let ti0 = b
+        .edge(d0, d1, CurveInput::Circle(circle_frame(z1), bore_r))
+        .map_err(err)?;
+    let ti1 = b
+        .edge(d1, d0, CurveInput::Circle(circle_frame(z1), bore_r))
+        .map_err(err)?;
     // Seams at angle 0, traversed once each way by their side face.
     let seam_o = b.edge(b0, t0, CurveInput::Line).map_err(err)?;
     let seam_i = b.edge(c0, d0, CurveInput::Line).map_err(err)?;
@@ -332,7 +400,11 @@ fn build_hub(
     let outer_side = b
         .face(
             SurfaceInput::Cylinder(
-                Frame { origin: [0.0, 0.0, z0], axis: [0.0, 0.0, 1.0], ref_dir: [1.0, 0.0, 0.0] },
+                Frame {
+                    origin: [0.0, 0.0, z0],
+                    axis: [0.0, 0.0, 1.0],
+                    ref_dir: [1.0, 0.0, 0.0],
+                },
                 hub_r,
             ),
             true,
@@ -354,7 +426,11 @@ fn build_hub(
     let bore_side = b
         .face(
             SurfaceInput::Cylinder(
-                Frame { origin: [0.0, 0.0, z0], axis: [0.0, 0.0, 1.0], ref_dir: [1.0, 0.0, 0.0] },
+                Frame {
+                    origin: [0.0, 0.0, z0],
+                    axis: [0.0, 0.0, 1.0],
+                    ref_dir: [1.0, 0.0, 0.0],
+                },
                 bore_r,
             ),
             false,
@@ -373,7 +449,11 @@ fn build_hub(
     // viewed from −Z); the bore's inner bound runs the opposite way.
     let cap_bot = b
         .face(
-            SurfaceInput::Plane(Frame { origin: [0.0, 0.0, z0], axis: [0.0, 0.0, -1.0], ref_dir: [1.0, 0.0, 0.0] }),
+            SurfaceInput::Plane(Frame {
+                origin: [0.0, 0.0, z0],
+                axis: [0.0, 0.0, -1.0],
+                ref_dir: [1.0, 0.0, 0.0],
+            }),
             true,
             vec![
                 FaceBoundInput::outer(vec![(bo0, false), (bo1, false)]),
@@ -386,7 +466,11 @@ fn build_hub(
     // bore's inner bound runs the opposite way.
     let cap_top = b
         .face(
-            SurfaceInput::Plane(Frame { origin: [0.0, 0.0, z1], axis: [0.0, 0.0, 1.0], ref_dir: [1.0, 0.0, 0.0] }),
+            SurfaceInput::Plane(Frame {
+                origin: [0.0, 0.0, z1],
+                axis: [0.0, 0.0, 1.0],
+                ref_dir: [1.0, 0.0, 0.0],
+            }),
             true,
             vec![
                 FaceBoundInput::outer(vec![(to0, true), (to1, true)]),
@@ -395,8 +479,12 @@ fn build_hub(
         )
         .map_err(err)?;
 
-    b.solid(hub_part, "hub", vec![outer_side, bore_side, cap_bot, cap_top])
-        .map_err(err)?;
+    b.solid(
+        hub_part,
+        "hub",
+        vec![outer_side, bore_side, cap_bot, cap_top],
+    )
+    .map_err(err)?;
     Ok(())
 }
 

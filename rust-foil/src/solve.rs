@@ -261,17 +261,14 @@ pub fn blsolv(xf: &mut Xfoil) {
                 let vtmp2 = xf.vb[Xfoil::v_index(ivp, 2, k)];
                 let vtmp3 = xf.vm[Xfoil::vm_index(ivp, iv, k)];
                 for l in ivp..=xf.nsys {
-                    xf.vm[Xfoil::vm_index(ivp, l, k)] -=
-                        vtmp1 * xf.vm[Xfoil::vm_index(iv, l, 1)]
+                    xf.vm[Xfoil::vm_index(ivp, l, k)] -= vtmp1 * xf.vm[Xfoil::vm_index(iv, l, 1)]
                         + vtmp2 * xf.vm[Xfoil::vm_index(iv, l, 2)]
                         + vtmp3 * xf.vm[Xfoil::vm_index(iv, l, 3)];
                 }
-                xf.vdel[Xfoil::v_index(ivp, 1, k)] -=
-                    vtmp1 * xf.vdel[Xfoil::v_index(iv, 1, 1)]
+                xf.vdel[Xfoil::v_index(ivp, 1, k)] -= vtmp1 * xf.vdel[Xfoil::v_index(iv, 1, 1)]
                     + vtmp2 * xf.vdel[Xfoil::v_index(iv, 1, 2)]
                     + vtmp3 * xf.vdel[Xfoil::v_index(iv, 1, 3)];
-                xf.vdel[Xfoil::v_index(ivp, 2, k)] -=
-                    vtmp1 * xf.vdel[Xfoil::v_index(iv, 2, 1)]
+                xf.vdel[Xfoil::v_index(ivp, 2, k)] -= vtmp1 * xf.vdel[Xfoil::v_index(iv, 2, 1)]
                     + vtmp2 * xf.vdel[Xfoil::v_index(iv, 2, 2)]
                     + vtmp3 * xf.vdel[Xfoil::v_index(iv, 2, 3)];
             }
@@ -284,15 +281,13 @@ pub fn blsolv(xf: &mut Xfoil) {
                     let vtmp1 = xf.vz[Xfoil::v_index(1, 1, k)];
                     let vtmp2 = xf.vz[Xfoil::v_index(1, 2, k)];
                     for l in ivp..=xf.nsys {
-                        xf.vm[Xfoil::vm_index(ivz, l, k)] -=
-                            vtmp1 * xf.vm[Xfoil::vm_index(iv, l, 1)]
+                        xf.vm[Xfoil::vm_index(ivz, l, k)] -= vtmp1
+                            * xf.vm[Xfoil::vm_index(iv, l, 1)]
                             + vtmp2 * xf.vm[Xfoil::vm_index(iv, l, 2)];
                     }
-                    xf.vdel[Xfoil::v_index(ivz, 1, k)] -=
-                        vtmp1 * xf.vdel[Xfoil::v_index(iv, 1, 1)]
+                    xf.vdel[Xfoil::v_index(ivz, 1, k)] -= vtmp1 * xf.vdel[Xfoil::v_index(iv, 1, 1)]
                         + vtmp2 * xf.vdel[Xfoil::v_index(iv, 1, 2)];
-                    xf.vdel[Xfoil::v_index(ivz, 2, k)] -=
-                        vtmp1 * xf.vdel[Xfoil::v_index(iv, 2, 1)]
+                    xf.vdel[Xfoil::v_index(ivz, 2, k)] -= vtmp1 * xf.vdel[Xfoil::v_index(iv, 2, 1)]
                         + vtmp2 * xf.vdel[Xfoil::v_index(iv, 2, 2)];
                 }
             }
@@ -306,26 +301,35 @@ pub fn blsolv(xf: &mut Xfoil) {
 
                     if vtmp1.abs() > vacc1 {
                         for l in ivp..=xf.nsys {
-                            xf.vm[Xfoil::vm_index(kv, l, 1)] -= vtmp1 * xf.vm[Xfoil::vm_index(iv, l, 3)];
+                            xf.vm[Xfoil::vm_index(kv, l, 1)] -=
+                                vtmp1 * xf.vm[Xfoil::vm_index(iv, l, 3)];
                         }
-                        xf.vdel[Xfoil::v_index(kv, 1, 1)] -= vtmp1 * xf.vdel[Xfoil::v_index(iv, 1, 3)];
-                        xf.vdel[Xfoil::v_index(kv, 2, 1)] -= vtmp1 * xf.vdel[Xfoil::v_index(iv, 2, 3)];
+                        xf.vdel[Xfoil::v_index(kv, 1, 1)] -=
+                            vtmp1 * xf.vdel[Xfoil::v_index(iv, 1, 3)];
+                        xf.vdel[Xfoil::v_index(kv, 2, 1)] -=
+                            vtmp1 * xf.vdel[Xfoil::v_index(iv, 2, 3)];
                     }
 
                     if vtmp2.abs() > vacc2 {
                         for l in ivp..=xf.nsys {
-                            xf.vm[Xfoil::vm_index(kv, l, 2)] -= vtmp2 * xf.vm[Xfoil::vm_index(iv, l, 3)];
+                            xf.vm[Xfoil::vm_index(kv, l, 2)] -=
+                                vtmp2 * xf.vm[Xfoil::vm_index(iv, l, 3)];
                         }
-                        xf.vdel[Xfoil::v_index(kv, 1, 2)] -= vtmp2 * xf.vdel[Xfoil::v_index(iv, 1, 3)];
-                        xf.vdel[Xfoil::v_index(kv, 2, 2)] -= vtmp2 * xf.vdel[Xfoil::v_index(iv, 2, 3)];
+                        xf.vdel[Xfoil::v_index(kv, 1, 2)] -=
+                            vtmp2 * xf.vdel[Xfoil::v_index(iv, 1, 3)];
+                        xf.vdel[Xfoil::v_index(kv, 2, 2)] -=
+                            vtmp2 * xf.vdel[Xfoil::v_index(iv, 2, 3)];
                     }
 
                     if vtmp3.abs() > vacc3 {
                         for l in ivp..=xf.nsys {
-                            xf.vm[Xfoil::vm_index(kv, l, 3)] -= vtmp3 * xf.vm[Xfoil::vm_index(iv, l, 3)];
+                            xf.vm[Xfoil::vm_index(kv, l, 3)] -=
+                                vtmp3 * xf.vm[Xfoil::vm_index(iv, l, 3)];
                         }
-                        xf.vdel[Xfoil::v_index(kv, 1, 3)] -= vtmp3 * xf.vdel[Xfoil::v_index(iv, 1, 3)];
-                        xf.vdel[Xfoil::v_index(kv, 2, 3)] -= vtmp3 * xf.vdel[Xfoil::v_index(iv, 2, 3)];
+                        xf.vdel[Xfoil::v_index(kv, 1, 3)] -=
+                            vtmp3 * xf.vdel[Xfoil::v_index(iv, 1, 3)];
+                        xf.vdel[Xfoil::v_index(kv, 2, 3)] -=
+                            vtmp3 * xf.vdel[Xfoil::v_index(iv, 2, 3)];
                     }
                 }
             }

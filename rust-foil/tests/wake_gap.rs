@@ -71,7 +71,10 @@ fn wake_gap_scales_with_thickness() {
     let (_cl_24, _cd_24, _sharp_24, dwte_24, conv_24) = solve_naca(24, 4.0);
     let (_cl_30, _cd_30, _sharp_30, dwte_30, conv_30) = solve_naca(30, 4.0);
 
-    assert!(conv_12 && conv_24 && conv_30, "one or more solves did not converge");
+    assert!(
+        conv_12 && conv_24 && conv_30,
+        "one or more solves did not converge"
+    );
 
     // All must be positive and finite -- the core "no OOB / no NaN" check.
     for (code, dwte) in [(12u32, dwte_12), (24, dwte_24), (30, dwte_30)] {
@@ -125,7 +128,12 @@ fn wake_gap_persists_across_alpha_sweep() {
         let (_cl, _cd, _cm, _cp, conv) = xf.a(alpha);
         assert!(conv, "solve at alpha = {} did not converge", alpha);
         let dwte = xf.wake_gap_te();
-        assert!(dwte.is_finite() && dwte > 0.0, "alpha {}: dwte = {}", alpha, dwte);
+        assert!(
+            dwte.is_finite() && dwte > 0.0,
+            "alpha {}: dwte = {}",
+            alpha,
+            dwte
+        );
         dwtes.push(dwte);
     }
 

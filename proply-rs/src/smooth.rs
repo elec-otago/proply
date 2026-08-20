@@ -11,14 +11,20 @@
 /// Panics if `x.len() < window_len` or the window name is unknown, matching
 /// the Python `ValueError` behaviour.
 pub fn smooth(x: &[f64], window_len: usize, window: &str) -> Vec<f64> {
-    assert!(x.len() >= window_len, "Input vector needs to be bigger than window size");
+    assert!(
+        x.len() >= window_len,
+        "Input vector needs to be bigger than window size"
+    );
     if window_len < 3 {
         return x.to_vec();
     }
     let w: Vec<f64> = match window {
         "flat" => vec![1.0; window_len],
         "hanning" => (0..window_len)
-            .map(|i| 0.5 * (1.0 - (2.0 * std::f64::consts::PI * i as f64 / (window_len - 1) as f64).cos()))
+            .map(|i| {
+                0.5 * (1.0
+                    - (2.0 * std::f64::consts::PI * i as f64 / (window_len - 1) as f64).cos())
+            })
             .collect(),
         _ => panic!("Window must be one of 'flat', 'hanning', 'hamming', 'bartlett', 'blackman'"),
     };

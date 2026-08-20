@@ -6,9 +6,9 @@ use crate::bl::blpini;
 use crate::cst::KulfanParams;
 use crate::geom::{cang, geopar, lefind};
 use crate::panel::{apcalc, ncalc};
-use crate::spline::{curv, deval, scalc, segspl, seval, trisol};
 use crate::s_xfoil::{comset, mrcl, tecalc};
-use crate::state::{IQX, Xfoil};
+use crate::spline::{curv, deval, scalc, segspl, seval, trisol};
+use crate::state::{Xfoil, IQX};
 
 /// Variable initialization/default routine.
 pub fn init(xf: &mut Xfoil) {
@@ -224,7 +224,16 @@ pub fn pangen(xf: &mut Xfoil, shopar: bool) {
 
     // set up curvature array
     for i in 0..nb {
-        xf.w5[i] = curv(xf.sb[i], &xf.xb[..nb], &xf.xbp[..nb], &xf.yb[..nb], &xf.ybp[..nb], &xf.sb[..nb]).abs() * sbref;
+        xf.w5[i] = curv(
+            xf.sb[i],
+            &xf.xb[..nb],
+            &xf.xbp[..nb],
+            &xf.yb[..nb],
+            &xf.ybp[..nb],
+            &xf.sb[..nb],
+        )
+        .abs()
+            * sbref;
     }
 
     // locate LE point arc length value and the normalized curvature there
@@ -237,7 +246,16 @@ pub fn pangen(xf: &mut Xfoil, shopar: bool) {
         &xf.sb[..nb],
         xf.show_output,
     );
-    let cvle = curv(xf.sble, &xf.xb[..nb], &xf.xbp[..nb], &xf.yb[..nb], &xf.ybp[..nb], &xf.sb[..nb]).abs() * sbref;
+    let cvle = curv(
+        xf.sble,
+        &xf.xb[..nb],
+        &xf.xbp[..nb],
+        &xf.yb[..nb],
+        &xf.ybp[..nb],
+        &xf.sb[..nb],
+    )
+    .abs()
+        * sbref;
 
     // check for doubled point (sharp corner) at LE
     let mut ible = 0usize; // 1-based index into SB
@@ -265,7 +283,16 @@ pub fn pangen(xf: &mut Xfoil, shopar: bool) {
     for k in -nk..=nk {
         let frac = k as f64 / nk as f64;
         let sbk = xf.sble + frac * sbref / cvle.max(20.0);
-        let cvk = curv(sbk, &xf.xb[..nb], &xf.xbp[..nb], &xf.yb[..nb], &xf.ybp[..nb], &xf.sb[..nb]).abs() * sbref;
+        let cvk = curv(
+            sbk,
+            &xf.xb[..nb],
+            &xf.xbp[..nb],
+            &xf.yb[..nb],
+            &xf.ybp[..nb],
+            &xf.sb[..nb],
+        )
+        .abs()
+            * sbref;
         cvsum += cvk;
     }
     let mut cvavg = cvsum / (2 * nk + 1) as f64;
@@ -367,9 +394,19 @@ pub fn pangen(xf: &mut Xfoil, shopar: bool) {
 
     // solve for smoothed curvature array W5
     if ible == 0 {
-        trisol(&mut xf.w2[..nb], &xf.w1[..nb], &mut xf.w3[..nb], &mut xf.w5[..nb]);
+        trisol(
+            &mut xf.w2[..nb],
+            &xf.w1[..nb],
+            &mut xf.w3[..nb],
+            &mut xf.w5[..nb],
+        );
     } else {
-        trisol(&mut xf.w2[..ible], &xf.w1[..ible], &mut xf.w3[..ible], &mut xf.w5[..ible]);
+        trisol(
+            &mut xf.w2[..ible],
+            &xf.w1[..ible],
+            &mut xf.w3[..ible],
+            &mut xf.w5[..ible],
+        );
         trisol(
             &mut xf.w2[ible..nb],
             &xf.w1[ible..nb],
@@ -517,7 +554,12 @@ pub fn pangen(xf: &mut Xfoil, shopar: bool) {
         }
 
         // solve for changes W4 in node position arc length values
-        trisol(&mut xf.w2[..nn], &xf.w1[..nn], &mut xf.w3[..nn], &mut xf.w4[..nn]);
+        trisol(
+            &mut xf.w2[..nn],
+            &xf.w1[..nn],
+            &mut xf.w3[..nn],
+            &mut xf.w4[..nn],
+        );
 
         // find under-relaxation factor to keep nodes from changing order
         let mut rlx = 1.0;
@@ -651,7 +693,13 @@ pub fn pangen(xf: &mut Xfoil, shopar: bool) {
     tecalc(xf);
 
     // calculate normal vectors
-    ncalc(&xf.x[..xf.n], &xf.y[..xf.n], &xf.s[..xf.n], &mut xf.nx[..xf.n], &mut xf.ny[..xf.n]);
+    ncalc(
+        &xf.x[..xf.n],
+        &xf.y[..xf.n],
+        &xf.s[..xf.n],
+        &mut xf.nx[..xf.n],
+        &mut xf.ny[..xf.n],
+    );
 
     // calculate panel angles for panel routines
     apcalc(xf);
@@ -661,7 +709,8 @@ pub fn pangen(xf: &mut Xfoil, shopar: bool) {
             eprintln!();
             eprintln!("Sharp trailing edge");
         } else {
-            let gap = ((xf.x[0] - xf.x[xf.n - 1]).powi(2) + (xf.y[0] - xf.y[xf.n - 1]).powi(2)).sqrt();
+            let gap =
+                ((xf.x[0] - xf.x[xf.n - 1]).powi(2) + (xf.y[0] - xf.y[xf.n - 1]).powi(2)).sqrt();
             eprintln!();
             eprintln!("Blunt trailing edge.  Gap = {:9.5}", gap);
         }
@@ -674,8 +723,14 @@ pub fn pangen(xf: &mut Xfoil, shopar: bool) {
         eprintln!("   Panel bunching parameter   {:6.3}", xf.cvpar);
         eprintln!("   TE/LE panel density ratio  {:6.3}", xf.cterat);
         eprintln!("   Refined-area/LE panel density ratio   {:6.3}", xf.ctrrat);
-        eprintln!("   Top    side refined area x/c limits {:6.3}{:6.3}", xf.xsref1, xf.xsref2);
-        eprintln!("   Bottom side refined area x/c limits {:6.3}{:6.3}", xf.xpref1, xf.xpref2);
+        eprintln!(
+            "   Top    side refined area x/c limits {:6.3}{:6.3}",
+            xf.xsref1, xf.xsref2
+        );
+        eprintln!(
+            "   Bottom side refined area x/c limits {:6.3}{:6.3}",
+            xf.xpref1, xf.xpref2
+        );
     }
 
     let _ = &mut cang_placeholder(xf);
@@ -685,6 +740,13 @@ pub fn pangen(xf: &mut Xfoil, shopar: bool) {
 fn cang_placeholder(xf: &mut Xfoil) -> (f64, usize) {
     let mut amax = 0.0;
     let mut imax = 0;
-    cang(&xf.x[..xf.n], &xf.y[..xf.n], 0, &mut amax, &mut imax, xf.show_output);
+    cang(
+        &xf.x[..xf.n],
+        &xf.y[..xf.n],
+        0,
+        &mut amax,
+        &mut imax,
+        xf.show_output,
+    );
     (amax, imax)
 }

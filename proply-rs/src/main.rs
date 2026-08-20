@@ -125,16 +125,26 @@ fn parse_args() -> Result<Args, String> {
             "--n" => a.n = Some(value()?.parse().map_err(|_| "bad --n".to_string())?),
             "--bem" => a.bem = Some(true),
             "--auto" => a.auto = Some(true),
-            "--naca" => {} // NACA 4-series family (the default)
+            "--naca" => {}                 // NACA 4-series family (the default)
             "--cst" => a.cst = Some(true), // CST (Kulfan) foil family
-            "--resolution" => a.resolution = Some(value()?.parse().map_err(|_| "bad --resolution".to_string())?),
+            "--resolution" => {
+                a.resolution = Some(
+                    value()?
+                        .parse()
+                        .map_err(|_| "bad --resolution".to_string())?,
+                )
+            }
             "--dir" => a.dir = Some(value()?),
             "--step-file" => a.step_file = Some(value()?),
             "--plate" => a.plate = Some(true), // testing: analytic flat-plate polars
             "--lifting-line" => a.lifting_line = Some(true), // coupled vortex-lattice design
             "--ar" => a.ar = Some(value()?.parse().map_err(|_| "bad --ar".to_string())?),
             "--chord-spline-n" => {
-                a.chord_spline_n = Some(value()?.parse().map_err(|_| "bad --chord-spline-n".to_string())?)
+                a.chord_spline_n = Some(
+                    value()?
+                        .parse()
+                        .map_err(|_| "bad --chord-spline-n".to_string())?,
+                )
             }
             "--camber" => {
                 a.camber = Some(value()?.parse().map_err(|_| "bad --camber".to_string())?)
@@ -210,7 +220,10 @@ fn main() {
     }
 
     if !param.bem && !param.lifting_line {
-        eprintln!("proply-rs: select a design loop (set `bem` or `lifting_line`, or pass --bem / --lifting-line)");
+        eprintln!(
+            "proply-rs: select a design loop (set `bem` or `lifting_line`, or pass \
+             --bem / --lifting-line)"
+        );
         exit(1);
     }
 
@@ -224,7 +237,11 @@ fn main() {
     p.n_blades = param.blades;
     p.set_plate_mode(param.plate);
 
-    let m = Motor::new(param.motor_Kv, param.motor_no_load_current, param.motor_winding_resistance);
+    let m = Motor::new(
+        param.motor_Kv,
+        param.motor_no_load_current,
+        param.motor_winding_resistance,
+    );
     let (optimum_torque, optimum_rpm) = m.get_qmax(param.motor_volts);
     let power = m.get_pmax(param.motor_volts);
 

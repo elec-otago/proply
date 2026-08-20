@@ -6,7 +6,7 @@
 
 use crate::solve::{baksub, ludcmp};
 use crate::spline::segspl;
-use crate::state::{IQX, IWX, IZX, Xfoil};
+use crate::state::{Xfoil, IQX, IWX, IZX};
 use crate::utils::atanc;
 
 /// Sets angles of airfoil panels.
@@ -83,7 +83,18 @@ pub fn ncalc(x: &[f64], y: &[f64], s: &[f64], xn: &mut [f64], yn: &mut [f64]) {
 ///
 /// `i` is 0-based: airfoil 0..N-1, wake N..N+NW-1.
 #[allow(clippy::too_many_arguments)]
-pub fn psilin(xf: &mut Xfoil, i: usize, xi: f64, yi: f64, nxi: f64, nyi: f64, psi: &mut f64, psi_ni: &mut f64, geolin: bool, siglin: bool) {
+pub fn psilin(
+    xf: &mut Xfoil,
+    i: usize,
+    xi: f64,
+    yi: f64,
+    nxi: f64,
+    nyi: f64,
+    psi: &mut f64,
+    psi_ni: &mut f64,
+    geolin: bool,
+    siglin: bool,
+) {
     let n = xf.n;
     let nw = xf.nw;
 
@@ -233,11 +244,14 @@ pub fn psilin(xf: &mut Xfoil, i: usize, xi: f64, yi: f64, nxi: f64, nyi: f64, ps
                 let nxp = xf.nx[jp];
                 let nyp = xf.ny[jp];
 
-                x1o = -((rx1 - x1 * sx) * nxo + (ry1 - x1 * sy) * nyo) * dsio - (sx * nxo + sy * nyo);
+                x1o =
+                    -((rx1 - x1 * sx) * nxo + (ry1 - x1 * sy) * nyo) * dsio - (sx * nxo + sy * nyo);
                 x1p = ((rx1 - x1 * sx) * nxp + (ry1 - x1 * sy) * nyp) * dsio;
                 x2o = -((rx2 - x2 * sx) * nxo + (ry2 - x2 * sy) * nyo) * dsio;
-                x2p = ((rx2 - x2 * sx) * nxp + (ry2 - x2 * sy) * nyp) * dsio - (sx * nxp + sy * nyp);
-                yyo = ((rx1 + x1 * sy) * nyo - (ry1 - x1 * sx) * nxo) * dsio - (sx * nyo - sy * nxo);
+                x2p =
+                    ((rx2 - x2 * sx) * nxp + (ry2 - x2 * sy) * nyp) * dsio - (sx * nxp + sy * nyp);
+                yyo =
+                    ((rx1 + x1 * sy) * nyo - (ry1 - x1 * sx) * nxo) * dsio - (sx * nyo - sy * nxo);
                 yyp = -((rx1 - x1 * sy) * nyp - (ry1 + x1 * sx) * nxp) * dsio;
             }
 
@@ -258,7 +272,9 @@ pub fn psilin(xf: &mut Xfoil, i: usize, xi: f64, yi: f64, nxi: f64, nyi: f64, ps
                 // calculate source contribution to Psi for 1-0 half-panel
                 let dxinv = 1.0 / (x1 - x0);
                 let psum = x0 * (t0 - apan) - x1 * (t1 - apan) + 0.5 * yy * (g1 - g0);
-                let pdif = ((x1 + x0) * psum + rs1 * (t1 - apan) - rs0 * (t0 - apan) + (x0 - x1) * yy) * dxinv;
+                let pdif = ((x1 + x0) * psum + rs1 * (t1 - apan) - rs0 * (t0 - apan)
+                    + (x0 - x1) * yy)
+                    * dxinv;
 
                 let psx1 = -(t1 - apan);
                 let psx0 = t0 - apan;
@@ -295,7 +311,9 @@ pub fn psilin(xf: &mut Xfoil, i: usize, xi: f64, yi: f64, nxi: f64, nyi: f64, ps
                 // calculate source contribution to Psi for 0-2 half-panel
                 let dxinv = 1.0 / (x0 - x2);
                 let psum = x2 * (t2 - apan) - x0 * (t0 - apan) + 0.5 * yy * (g0 - g2);
-                let pdif = ((x0 + x2) * psum + rs0 * (t0 - apan) - rs2 * (t2 - apan) + (x2 - x0) * yy) * dxinv;
+                let pdif = ((x0 + x2) * psum + rs0 * (t0 - apan) - rs2 * (t2 - apan)
+                    + (x2 - x0) * yy)
+                    * dxinv;
 
                 let psx0 = -(t0 - apan);
                 let psx2 = t2 - apan;
@@ -375,10 +393,14 @@ pub fn psilin(xf: &mut Xfoil, i: usize, xi: f64, yi: f64, nxi: f64, nyi: f64, ps
                 xf.dzdn[jp] += crate::state::QOPI * gsum * (psx1 * x1p + psx2 * x2p + psyy * yyp)
                     + crate::state::QOPI * gdif * (pdx1 * x1p + pdx2 * x2p + pdyy * yyp);
                 // dPsi/dP
-                xf.z_qdof0 += crate::state::QOPI * ((psis - psid) * xf.qf0[jo] + (psis + psid) * xf.qf0[jp]);
-                xf.z_qdof1 += crate::state::QOPI * ((psis - psid) * xf.qf1[jo] + (psis + psid) * xf.qf1[jp]);
-                xf.z_qdof2 += crate::state::QOPI * ((psis - psid) * xf.qf2[jo] + (psis + psid) * xf.qf2[jp]);
-                xf.z_qdof3 += crate::state::QOPI * ((psis - psid) * xf.qf3[jo] + (psis + psid) * xf.qf3[jp]);
+                xf.z_qdof0 +=
+                    crate::state::QOPI * ((psis - psid) * xf.qf0[jo] + (psis + psid) * xf.qf0[jp]);
+                xf.z_qdof1 +=
+                    crate::state::QOPI * ((psis - psid) * xf.qf1[jo] + (psis + psid) * xf.qf1[jp]);
+                xf.z_qdof2 +=
+                    crate::state::QOPI * ((psis - psid) * xf.qf2[jo] + (psis + psid) * xf.qf2[jp]);
+                xf.z_qdof3 +=
+                    crate::state::QOPI * ((psis - psid) * xf.qf3[jo] + (psis + psid) * xf.qf3[jp]);
             }
         }
     }
@@ -430,10 +452,12 @@ pub fn psilin(xf: &mut Xfoil, i: usize, xi: f64, yi: f64, nxi: f64, nyi: f64, ps
 
         if geolin {
             // dPsi/dn
-            xf.dzdn[jo] += crate::state::HOPI * (psigx1 * x1o + psigx2 * x2o + psigyy * yyo) * xf.sigte
-                + crate::state::HOPI * (pgamx1 * x1o + pgamx2 * x2o + pgamyy * yyo) * xf.gamte;
-            xf.dzdn[jp] += crate::state::HOPI * (psigx1 * x1p + psigx2 * x2p + psigyy * yyp) * xf.sigte
-                + crate::state::HOPI * (pgamx1 * x1p + pgamx2 * x2p + pgamyy * yyp) * xf.gamte;
+            xf.dzdn[jo] +=
+                crate::state::HOPI * (psigx1 * x1o + psigx2 * x2o + psigyy * yyo) * xf.sigte
+                    + crate::state::HOPI * (pgamx1 * x1o + pgamx2 * x2o + pgamyy * yyo) * xf.gamte;
+            xf.dzdn[jp] +=
+                crate::state::HOPI * (psigx1 * x1p + psigx2 * x2p + psigyy * yyp) * xf.sigte
+                    + crate::state::HOPI * (pgamx1 * x1p + pgamx2 * x2p + pgamyy * yyp) * xf.gamte;
 
             // dPsi/dP
             xf.z_qdof0 += crate::state::HOPI * psig * 0.5 * (xf.qf0[jp] - xf.qf0[jo]) * scs
@@ -471,7 +495,16 @@ pub fn psilin(xf: &mut Xfoil, i: usize, xi: f64, yi: f64, nxi: f64, nyi: f64, ps
 /// panel node or wake node I due to freestream and wake sources Sig, plus
 /// sensitivity vectors dPsi/dSig (DZDM) and dQtan/dSig (DQDM).
 #[allow(clippy::too_many_arguments)] // XFOIL port signature
-pub fn pswlin(xf: &mut Xfoil, i: usize, xi: f64, yi: f64, nxi: f64, nyi: f64, psi: &mut f64, psi_ni: &mut f64) {
+pub fn pswlin(
+    xf: &mut Xfoil,
+    i: usize,
+    xi: f64,
+    yi: f64,
+    nxi: f64,
+    nyi: f64,
+    psi: &mut f64,
+    psi_ni: &mut f64,
+) {
     let n = xf.n;
     let nw = xf.nw;
 
@@ -561,7 +594,8 @@ pub fn pswlin(xf: &mut Xfoil, i: usize, xi: f64, yi: f64, nxi: f64, nyi: f64, ps
         // calculate source contribution to Psi for 1-0 half-panel
         let dxinv = 1.0 / (x1 - x0);
         let psum = x0 * (t0 - apan) - x1 * (t1 - apan) + 0.5 * yy * (g1 - g0);
-        let pdif = ((x1 + x0) * psum + rs1 * (t1 - apan) - rs0 * (t0 - apan) + (x0 - x1) * yy) * dxinv;
+        let pdif =
+            ((x1 + x0) * psum + rs1 * (t1 - apan) - rs0 * (t0 - apan) + (x0 - x1) * yy) * dxinv;
 
         let psx1 = -(t1 - apan);
         let psx0 = t0 - apan;
@@ -596,7 +630,8 @@ pub fn pswlin(xf: &mut Xfoil, i: usize, xi: f64, yi: f64, nxi: f64, nyi: f64, ps
         // calculate source contribution to Psi for 0-2 half-panel
         let dxinv = 1.0 / (x0 - x2);
         let psum = x2 * (t2 - apan) - x0 * (t0 - apan) + 0.5 * yy * (g0 - g2);
-        let pdif = ((x0 + x2) * psum + rs0 * (t0 - apan) - rs2 * (t2 - apan) + (x2 - x0) * yy) * dxinv;
+        let pdif =
+            ((x0 + x2) * psum + rs0 * (t0 - apan) - rs2 * (t2 - apan) + (x2 - x0) * yy) * dxinv;
 
         let psx0 = -(t0 - apan);
         let psx2 = t2 - apan;
@@ -656,7 +691,9 @@ pub fn ggcalc(xf: &mut Xfoil) {
         // calculate Psi and dPsi/dGamma array for current node
         let mut psi = 0.0;
         let mut psi_n = 0.0;
-        psilin(xf, i, xf.x[i], xf.y[i], xf.nx[i], xf.ny[i], &mut psi, &mut psi_n, false, true);
+        psilin(
+            xf, i, xf.x[i], xf.y[i], xf.nx[i], xf.ny[i], &mut psi, &mut psi_n, false, true,
+        );
 
         // RES1 = PSI( 0) - PSIO
         // RES2 = PSI(90) - PSIO
@@ -706,7 +743,8 @@ pub fn ggcalc(xf: &mut Xfoil) {
 
         // minimum panel length adjacent to TE
         let ds1 = ((xf.x[0] - xf.x[1]).powi(2) + (xf.y[0] - xf.y[1]).powi(2)).sqrt();
-        let ds2 = ((xf.x[n - 1] - xf.x[n - 2]).powi(2) + (xf.y[n - 1] - xf.y[n - 2]).powi(2)).sqrt();
+        let ds2 =
+            ((xf.x[n - 1] - xf.x[n - 2]).powi(2) + (xf.y[n - 1] - xf.y[n - 2]).powi(2)).sqrt();
         let dsmin = ds1.min(ds2);
 
         // control point on bisector just ahead of TE point
@@ -716,7 +754,9 @@ pub fn ggcalc(xf: &mut Xfoil) {
         // set velocity component along bisector line
         let mut psi = 0.0;
         let mut qbis = 0.0;
-        psilin(xf, 0, xbis, ybis, -sbis, cbis, &mut psi, &mut qbis, false, true);
+        psilin(
+            xf, 0, xbis, ybis, -sbis, cbis, &mut psi, &mut qbis, false, true,
+        );
 
         // RES = QDg*Gam + QDm*Mass + QINF*(COSA*CBIS + SINA*SBIS)
         let res = qbis;
@@ -771,7 +811,18 @@ pub fn qwcalc(xf: &mut Xfoil) {
     for i in n + 1..n + xf.nw {
         let mut psi = 0.0;
         let mut psi_ni = 0.0;
-        psilin(xf, i, xf.x[i], xf.y[i], xf.nx[i], xf.ny[i], &mut psi, &mut psi_ni, false, false);
+        psilin(
+            xf,
+            i,
+            xf.x[i],
+            xf.y[i],
+            xf.nx[i],
+            xf.ny[i],
+            &mut psi,
+            &mut psi_ni,
+            false,
+            false,
+        );
         xf.qinvu[0][i] = xf.qtan1;
         xf.qinvu[1][i] = xf.qtan2;
     }
@@ -805,7 +856,9 @@ pub fn qdcalc(xf: &mut Xfoil) {
     for i in 0..n {
         let mut psi = 0.0;
         let mut psi_n = 0.0;
-        pswlin(xf, i, xf.x[i], xf.y[i], xf.nx[i], xf.ny[i], &mut psi, &mut psi_n);
+        pswlin(
+            xf, i, xf.x[i], xf.y[i], xf.nx[i], xf.ny[i], &mut psi, &mut psi_n,
+        );
         for j in n..n + nw {
             xf.bij[Xfoil::b_index(i, j)] = -xf.dzdm[j];
         }
@@ -846,7 +899,9 @@ pub fn qdcalc(xf: &mut Xfoil) {
         // airfoil contribution at wake panel node
         let mut psi = 0.0;
         let mut psi_n = 0.0;
-        psilin(xf, i, xf.x[i], xf.y[i], xf.nx[i], xf.ny[i], &mut psi, &mut psi_n, false, true);
+        psilin(
+            xf, i, xf.x[i], xf.y[i], xf.nx[i], xf.ny[i], &mut psi, &mut psi_n, false, true,
+        );
 
         for j in 0..n {
             xf.cij[j * IWX + iw] = xf.dqdg[j];
@@ -857,7 +912,9 @@ pub fn qdcalc(xf: &mut Xfoil) {
         }
 
         // wake contribution
-        pswlin(xf, i, xf.x[i], xf.y[i], xf.nx[i], xf.ny[i], &mut psi, &mut psi_n);
+        pswlin(
+            xf, i, xf.x[i], xf.y[i], xf.nx[i], xf.ny[i], &mut psi, &mut psi_n,
+        );
 
         for j in n..n + nw {
             xf.dij[Xfoil::d_index(i, j)] = xf.dqdm[j];
@@ -927,7 +984,12 @@ pub fn xywake(xf: &mut Xfoil) {
     }
 
     let ds1 = 0.5 * (xf.s[1] - xf.s[0] + xf.s[n - 1] - xf.s[n - 2]);
-    crate::utils::setexp(&mut xf.snew[n..n + xf.nw], ds1, xf.waklen * xf.chord, xf.show_output);
+    crate::utils::setexp(
+        &mut xf.snew[n..n + xf.nw],
+        ds1,
+        xf.waklen * xf.chord,
+        xf.show_output,
+    );
 
     xf.xte = 0.5 * (xf.x[0] + xf.x[n - 1]);
     xf.yte = 0.5 * (xf.y[0] + xf.y[n - 1]);
@@ -947,8 +1009,12 @@ pub fn xywake(xf: &mut Xfoil) {
     let mut psi = 0.0;
     let mut psi_x = 0.0;
     let mut psi_y = 0.0;
-    psilin(xf, i, xf.x[i], xf.y[i], 1.0, 0.0, &mut psi, &mut psi_x, false, false);
-    psilin(xf, i, xf.x[i], xf.y[i], 0.0, 1.0, &mut psi, &mut psi_y, false, false);
+    psilin(
+        xf, i, xf.x[i], xf.y[i], 1.0, 0.0, &mut psi, &mut psi_x, false, false,
+    );
+    psilin(
+        xf, i, xf.x[i], xf.y[i], 0.0, 1.0, &mut psi, &mut psi_y, false, false,
+    );
 
     // set unit vector normal to wake at first point
     xf.nx[i + 1] = -psi_x / (psi_x * psi_x + psi_y * psi_y).sqrt();
@@ -971,8 +1037,12 @@ pub fn xywake(xf: &mut Xfoil) {
             let mut psi = 0.0;
             let mut psi_x = 0.0;
             let mut psi_y = 0.0;
-            psilin(xf, i, xf.x[i], xf.y[i], 1.0, 0.0, &mut psi, &mut psi_x, false, false);
-            psilin(xf, i, xf.x[i], xf.y[i], 0.0, 1.0, &mut psi, &mut psi_y, false, false);
+            psilin(
+                xf, i, xf.x[i], xf.y[i], 1.0, 0.0, &mut psi, &mut psi_x, false, false,
+            );
+            psilin(
+                xf, i, xf.x[i], xf.y[i], 0.0, 1.0, &mut psi, &mut psi_y, false, false,
+            );
 
             xf.nx[i + 1] = -psi_x / (psi_x * psi_x + psi_y * psi_y).sqrt();
             xf.ny[i + 1] = -psi_y / (psi_x * psi_x + psi_y * psi_y).sqrt();
@@ -1128,7 +1198,8 @@ pub fn xicalc(xf: &mut Xfoil) {
 
     // set up parameters for TE flap cubics
     let crosp = (xf.xp[0] * xf.yp[n - 1] - xf.yp[0] * xf.xp[n - 1])
-        / ((xf.xp[0].powi(2) + xf.yp[0].powi(2)) * (xf.xp[n - 1].powi(2) + xf.yp[n - 1].powi(2))).sqrt();
+        / ((xf.xp[0].powi(2) + xf.yp[0].powi(2)) * (xf.xp[n - 1].powi(2) + xf.yp[n - 1].powi(2)))
+            .sqrt();
     let mut dwdxte = crosp / (1.0 - crosp * crosp).sqrt();
 
     // limit cubic to avoid absurd TE gap widths
@@ -1147,7 +1218,8 @@ pub fn xicalc(xf: &mut Xfoil) {
         let is = 1usize;
         for iw in 1..=xf.nw {
             let ibl = xf.iblte[is] as usize + iw;
-            let zn = 1.0 - (xf.xssi[is][ibl] - xf.xssi[is][xf.iblte[is] as usize]) / (telrat * xf.ante);
+            let zn =
+                1.0 - (xf.xssi[is][ibl] - xf.xssi[is][xf.iblte[is] as usize]) / (telrat * xf.ante);
             xf.wgap[iw - 1] = 0.0;
             if zn >= 0.0 {
                 xf.wgap[iw - 1] = xf.ante * (aa + bb * zn) * zn * zn;

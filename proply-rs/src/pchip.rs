@@ -45,14 +45,11 @@ impl Pchip {
         d[0] = ((2.0 * h[0] + h[1]) * delta[0] - h[0] * delta[1]) / (h[0] + h[1]);
         if d[0].signum() != delta[0].signum() {
             d[0] = 0.0;
-        } else if delta[0].signum() != delta[1].signum()
-            && d[0].abs() > (3.0 * delta[0]).abs()
-        {
+        } else if delta[0].signum() != delta[1].signum() && d[0].abs() > (3.0 * delta[0]).abs() {
             d[0] = 3.0 * delta[0];
         }
-        d[n - 1] =
-            ((2.0 * h[n - 2] + h[n - 3]) * delta[n - 2] - h[n - 2] * delta[n - 3])
-                / (h[n - 2] + h[n - 3]);
+        d[n - 1] = ((2.0 * h[n - 2] + h[n - 3]) * delta[n - 2] - h[n - 2] * delta[n - 3])
+            / (h[n - 2] + h[n - 3]);
         if d[n - 1].signum() != delta[n - 2].signum() {
             d[n - 1] = 0.0;
         } else if delta[n - 2].signum() != delta[n - 3].signum()
@@ -156,7 +153,12 @@ mod tests {
         let mut t = 0.0;
         while t <= 3.0 {
             let v = p.eval(t);
-            assert!((-1e-12..=1.0 + 1e-12).contains(&v), "overshoot at {}: {}", t, v);
+            assert!(
+                (-1e-12..=1.0 + 1e-12).contains(&v),
+                "overshoot at {}: {}",
+                t,
+                v
+            );
             t += 0.05;
         }
     }

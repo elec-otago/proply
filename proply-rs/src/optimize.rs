@@ -15,8 +15,8 @@
 //! accelerating propeller state has no momentum-theory breakdown.  See
 //! [`ct_buhl`] for the full convention note.
 
-use crate::simulator::FoilSimulator;
 use crate::foil::FoilLike;
+use crate::simulator::FoilSimulator;
 
 pub const RHO: f64 = 1.225;
 
@@ -464,10 +464,7 @@ pub fn bem_iterate<S: FoilSim>(
 ) -> (f64, f64, f64) {
     let omega = rpm2omega(rpm);
     let x0 = vec![dv_goal, 0.01];
-    let bounds = [
-        Some((0.0, 3.0 * dv_goal)),
-        Some((0.0, 0.3)),
-    ];
+    let bounds = [Some((0.0, 3.0 * dv_goal)), Some((0.0, 0.3))];
     let nm = NelderMead::default();
     let (x, fun) = nm.minimize(
         |x| min_func2(x, fs, theta, omega, r, dr, u_0, b),
@@ -522,7 +519,11 @@ pub fn optimize_all<S: FoilSim>(
     ];
     let mut best: Option<(Vec<f64>, f64)> = None;
     for x0 in starts {
-        let (x, fun) = nm.minimize(|x| min_all(x, fs, dv_goal, rpm, r, dr, u_0, b), &x0, &bounds);
+        let (x, fun) = nm.minimize(
+            |x| min_all(x, fs, dv_goal, rpm, r, dr, u_0, b),
+            &x0,
+            &bounds,
+        );
         if best.as_ref().is_none_or(|(_, f)| fun < *f) {
             best = Some((x, fun));
         }
@@ -558,9 +559,18 @@ mod tests {
         let (dv_new, ap_new) = iterate(&fs, fs.chord, dv, a_prime, theta, omega, r, dr, u_0, b);
         assert!((dv_new - 13.08411).abs() < 1e-3, "dv_new {}", dv_new);
         assert!((ap_new - 0.132057).abs() < 1e-4, "ap_new {}", ap_new);
-        assert!((d_t(5.0, 0.03, 0.002, 1.0) - 2.0 * std::f64::consts::PI * 0.002 * 5.0 * 1.225 * 6.0 * (0.002 + 0.06)).abs() < 1e-12);
+        assert!(
+            (d_t(5.0, 0.03, 0.002, 1.0)
+                - 2.0 * std::f64::consts::PI * 0.002 * 5.0 * 1.225 * 6.0 * (0.002 + 0.06))
+                .abs()
+                < 1e-12
+        );
         // golden: dv_from_thrust(0.3, 0.05, 1.0) = 3.4800
-        assert!((dv_from_thrust(0.3, 0.05, 1.0) - 3.480036).abs() < 1e-4, "dv {}", dv_from_thrust(0.3, 0.05, 1.0));
+        assert!(
+            (dv_from_thrust(0.3, 0.05, 1.0) - 3.480036).abs() < 1e-4,
+            "dv {}",
+            dv_from_thrust(0.3, 0.05, 1.0)
+        );
     }
 
     #[test]
@@ -581,11 +591,7 @@ mod tests {
     fn nelder_mead_respects_bounds() {
         let nm = NelderMead::default();
         // Minimum of (x-3)^2 is at 3, but bound it to [-2, 0].
-        let (x, _f) = nm.minimize(
-            |x| (x[0] - 3.0).powi(2),
-            &[0.0],
-            &[Some((-2.0, 0.0))],
-        );
+        let (x, _f) = nm.minimize(|x| (x[0] - 3.0).powi(2), &[0.0], &[Some((-2.0, 0.0))]);
         assert!(x[0].abs() < 1e-9, "x {}", x[0]);
     }
 
@@ -593,7 +599,16 @@ mod tests {
     fn bem_iterate_converges_like_slsqp() {
         // scipy SLSQP on the same objective finds (7.1164, 0.0866).
         let fs = PlateSim { chord: 0.008 };
-        let (dv, ap, err) = bem_iterate(&fs, 5.0, (28.0_f64).to_radians(), 12000.0, 0.03, 0.002, 1.0, 3.0);
+        let (dv, ap, err) = bem_iterate(
+            &fs,
+            5.0,
+            (28.0_f64).to_radians(),
+            12000.0,
+            0.03,
+            0.002,
+            1.0,
+            3.0,
+        );
         assert!(err < 1e-6, "err {}", err);
         assert!((dv - 7.1164).abs() < 0.2, "dv {}", dv);
         assert!((ap - 0.0866).abs() < 0.01, "a_prime {}", ap);
@@ -656,8 +671,7 @@ mod tests {
         // multi-start polish must all return finite design variables.
         let fs = PlateSim { chord: 0.005 };
         let (x, fun) = optimize_all(
-            &fs,
-            3.9707,   // dv goal at the tip after tip-loss
+            &fs, 3.9707,   // dv goal at the tip after tip-loss
             9734.3,   // motor max-efficiency RPM (Kv 980, 11 V, Rm 0.207, I0 0.5)
             0.0625,   // tip radius (m)
             0.0575,   // station span

@@ -120,7 +120,11 @@ impl DesignParameters {
 
 impl std::fmt::Display for DesignParameters {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Design Parameters: r={:5.3}, u_0={}", self.radius, self.forward_airspeed)
+        write!(
+            f,
+            "Design Parameters: r={:5.3}, u_0={}",
+            self.radius, self.forward_airspeed
+        )
     }
 }
 
@@ -194,9 +198,11 @@ mod tests {
         assert!(p.cst);
 
         // Absent keys fall back to the defaults.
-        let p2 = DesignParameters::from_json(r#"{
+        let p2 = DesignParameters::from_json(
+            r#"{
             "name": "y", "radius": 0.05, "thrust": 1.0, "blades": 2
-        }"#)
+        }"#,
+        )
         .unwrap();
         assert!(p2.bem);
         assert!(!p2.lifting_line);

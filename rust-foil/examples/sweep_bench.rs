@@ -30,7 +30,10 @@ fn main() {
     println!("threads:  {}", rayon::current_num_threads());
     println!("serial:   {:8.3?}", t_ser);
     println!("parallel: {:8.3?}", t_par);
-    println!("speedup:  {:.2}x", t_ser.as_secs_f64() / t_par.as_secs_f64());
+    println!(
+        "speedup:  {:.2}x",
+        t_ser.as_secs_f64() / t_par.as_secs_f64()
+    );
 
     // Parity summary between the two sweeps.
     assert_eq!(serial.len(), par.len());
@@ -44,5 +47,8 @@ fn main() {
             conv_diff += 1;
         }
     }
-    println!("max |dCL| = {:.5}, max |dCD| = {:.6}, conv-flag diffs = {}", max_cl, max_cd, conv_diff);
+    println!(
+        "max |dCL| = {:.5}, max |dCD| = {:.6}, conv-flag diffs = {}",
+        max_cl, max_cd, conv_diff
+    );
 }

@@ -5,14 +5,22 @@
 //! norm, geopar, aecalc, tccalc, cang).  Design/flap/plot utilities are
 //! omitted.
 
-use crate::spline::{curv, deval, d2val, scalc, segspl, seval};
+use crate::spline::{curv, d2val, deval, scalc, segspl, seval};
 use crate::utils::atanc;
 
 /// Locates leading edge spline-parameter value `sle`.
 ///
 /// The defining condition is that the surface tangent is normal to the chord
 /// line connecting X(SLE),Y(SLE) and the TE point.
-pub fn lefind(sle: &mut f64, x: &[f64], xp: &[f64], y: &[f64], yp: &[f64], s: &[f64], show_output: bool) {
+pub fn lefind(
+    sle: &mut f64,
+    x: &[f64],
+    xp: &[f64],
+    y: &[f64],
+    yp: &[f64],
+    s: &[f64],
+    show_output: bool,
+) {
     let n = s.len();
 
     // convergence tolerance
@@ -82,7 +90,17 @@ pub fn lefind(sle: &mut f64, x: &[f64], xp: &[f64], y: &[f64], yp: &[f64], s: &[
 /// Calculates arc length `sopp` of the point which is opposite of point `si`,
 /// on the other side of the airfoil baseline.
 #[allow(clippy::too_many_arguments)] // XFOIL port signature
-pub fn sopps(sopp: &mut f64, si: f64, x: &[f64], xp: &[f64], y: &[f64], yp: &[f64], s: &[f64], sle: f64, show_output: bool) {
+pub fn sopps(
+    sopp: &mut f64,
+    si: f64,
+    x: &[f64],
+    xp: &[f64],
+    y: &[f64],
+    yp: &[f64],
+    s: &[f64],
+    sle: f64,
+    show_output: bool,
+) {
     let n = s.len();
 
     // reference length for testing convergence
@@ -229,12 +247,16 @@ pub fn geopar(
 
     let mut xcena = 0.0;
     let mut ycena = 0.0;
-    aecalc(x, y, t, 1, area, &mut xcena, &mut ycena, ei11a, ei22a, apx1a, apx2a);
+    aecalc(
+        x, y, t, 1, area, &mut xcena, &mut ycena, ei11a, ei22a, apx1a, apx2a,
+    );
 
     let mut slen = 0.0;
     let mut xcent = 0.0;
     let mut ycent = 0.0;
-    aecalc(x, y, t, 2, &mut slen, &mut xcent, &mut ycent, ei11t, ei22t, apx1t, apx2t);
+    aecalc(
+        x, y, t, 2, &mut slen, &mut xcent, &mut ycent, ei11t, ei22t, apx1t, apx2t,
+    );
 
     // Old, approximate thickness,camber routine (on discrete points only)
     tccalc(x, xp, y, yp, s, thick, cambr, show_output);
@@ -378,7 +400,16 @@ pub fn aecalc(
 /// Calculates max thickness and camber at airfoil points (discrete-point
 /// approximation).
 #[allow(clippy::too_many_arguments)] // XFOIL port signature
-pub fn tccalc(x: &[f64], xp: &[f64], y: &[f64], yp: &[f64], s: &[f64], thick: &mut f64, cambr: &mut f64, show_output: bool) {
+pub fn tccalc(
+    x: &[f64],
+    xp: &[f64],
+    y: &[f64],
+    yp: &[f64],
+    s: &[f64],
+    thick: &mut f64,
+    cambr: &mut f64,
+    show_output: bool,
+) {
     let n = s.len();
 
     let mut sle = 0.0;
@@ -423,7 +454,14 @@ pub fn tccalc(x: &[f64], xp: &[f64], y: &[f64], yp: &[f64], s: &[f64], thick: &m
 }
 
 /// Computes the maximum panel node corner angle (in degrees).
-pub fn cang(x: &[f64], y: &[f64], iprint: i32, amax: &mut f64, imax: &mut usize, show_output: bool) {
+pub fn cang(
+    x: &[f64],
+    y: &[f64],
+    iprint: i32,
+    amax: &mut f64,
+    imax: &mut usize,
+    show_output: bool,
+) {
     let n = x.len();
 
     *amax = 0.0;
@@ -458,6 +496,12 @@ pub fn cang(x: &[f64], y: &[f64], iprint: i32, amax: &mut f64, imax: &mut usize,
     }
 
     if iprint >= 1 && show_output {
-        eprintln!(" Maximum panel corner angle = {:7.3}   at  i,x,y  = {:3} {:9.4} {:9.4}", *amax, *imax + 1, x[*imax], y[*imax]);
+        eprintln!(
+            " Maximum panel corner angle = {:7.3}   at  i,x,y  = {:3} {:9.4} {:9.4}",
+            *amax,
+            *imax + 1,
+            x[*imax],
+            y[*imax]
+        );
     }
 }

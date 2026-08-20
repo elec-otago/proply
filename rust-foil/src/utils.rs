@@ -38,8 +38,8 @@ pub fn setexp(s: &mut [f64], ds1: f64, smax: f64, show_output: bool) {
         for _ in 1..=100 {
             let sigman = (ratio.powf(nex as f64) - 1.0) / (ratio - 1.0);
             let res = sigman.powf(rni) - sigma.powf(rni);
-            let dresdr =
-                rni * sigman.powf(rni) * (rnex * ratio.powf((nex - 1) as f64) - sigman) / (ratio.powf(nex as f64) - 1.0);
+            let dresdr = rni * sigman.powf(rni) * (rnex * ratio.powf((nex - 1) as f64) - sigman)
+                / (ratio.powf(nex as f64) - 1.0);
 
             let dratio = -res / dresdr;
             ratio += dratio;

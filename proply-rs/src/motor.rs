@@ -70,7 +70,11 @@ mod tests {
         // Kv=1900, I0=0.5, Rm=0.405, V=11.  Hand-computed; confirmed against
         // the Python Motor class by the golden tests.
         let m = Motor::new(1900.0, 0.5, 0.405);
-        assert!((m.get_imax(11.0) - 3.6847).abs() < 1e-3, "Imax = {}", m.get_imax(11.0));
+        assert!(
+            (m.get_imax(11.0) - 3.6847).abs() < 1e-3,
+            "Imax = {}",
+            m.get_imax(11.0)
+        );
         let (q, rpm) = m.get_qmax(11.0);
         assert!((q - 0.016006).abs() < 1e-4, "Qmax = {}", q);
         assert!((rpm - 18064.6).abs() < 5.0, "RPMmax = {}", rpm);

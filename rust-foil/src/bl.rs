@@ -6,7 +6,7 @@
 //! under-relaxation; `mrchue`/`mrchdu` initialize and march the BL in
 //! direct/mixed mode.
 
-use crate::blsys::{blkin, blmid, blprv, blsys, blvar, tesys, trchek, hkin};
+use crate::blsys::{blkin, blmid, blprv, blsys, blvar, hkin, tesys, trchek};
 use crate::panel::ueset;
 use crate::solve::gauss;
 use crate::spline::{seval, sinvrt, splind};
@@ -16,7 +16,8 @@ use crate::state::{Xfoil, IZX, NCOM, QOPI};
 /// the top of `setbl`) back to the state, so the buffers are reused on the
 /// next call instead of being re-allocated.
 macro_rules! restore_bl_scratch {
-    ($xf:expr, $usav:expr, $ule1_m:expr, $ule2_m:expr, $ute1_m:expr, $ute2_m:expr, $u1_m:expr, $d1_m:expr, $u2_m:expr, $d2_m:expr) => {
+    ($xf:expr, $usav:expr, $ule1_m:expr, $ule2_m:expr, $ute1_m:expr, $ute2_m:expr,
+     $u1_m:expr, $d1_m:expr, $u2_m:expr, $d2_m:expr) => {
         $xf.bl_usav = $usav;
         $xf.bl_ule1_m = $ule1_m;
         $xf.bl_ule2_m = $ule2_m;
@@ -139,8 +140,10 @@ pub fn setbl(xf: &mut Xfoil) -> bool {
             let jv = xf.isys[js][jbl] as usize;
             ule1_m[jv] = -xf.vti[0][2] * xf.vti[js][jbl] * xf.dij_t[ile1 * IZX + j];
             ule2_m[jv] = -xf.vti[1][2] * xf.vti[js][jbl] * xf.dij_t[ile2 * IZX + j];
-            ute1_m[jv] = -xf.vti[0][xf.iblte[0] as usize] * xf.vti[js][jbl] * xf.dij_t[ite1 * IZX + j];
-            ute2_m[jv] = -xf.vti[1][xf.iblte[1] as usize] * xf.vti[js][jbl] * xf.dij_t[ite2 * IZX + j];
+            ute1_m[jv] =
+                -xf.vti[0][xf.iblte[0] as usize] * xf.vti[js][jbl] * xf.dij_t[ite1 * IZX + j];
+            ute2_m[jv] =
+                -xf.vti[1][xf.iblte[1] as usize] * xf.vti[js][jbl] * xf.dij_t[ite2 * IZX + j];
         }
     }
 
@@ -254,7 +257,9 @@ pub fn setbl(xf: &mut Xfoil) -> bool {
             if xf.tran {
                 let ok = trchek(xf);
                 if xf.abort_on_nan && !ok {
-                    restore_bl_scratch!(xf, usav, ule1_m, ule2_m, ute1_m, ute2_m, u1_m, d1_m, u2_m, d2_m);
+                    restore_bl_scratch!(
+                        xf, usav, ule1_m, ule2_m, ute1_m, ute2_m, u1_m, d1_m, u2_m, d2_m
+                    );
                     return false;
                 }
                 ami = xf.com2.ampl;
@@ -265,15 +270,26 @@ pub fn setbl(xf: &mut Xfoil) -> bool {
 
             // assemble 10x4 linearized system for dCtau, dTh, dDs, dUe, dXi
             // at the previous "1" station and the current "2" station
-            let (tte_tte1, tte_tte2, dte_mte1, dte_ute1, dte_mte2, dte_ute2, cte_cte1, cte_cte2, cte_tte1, cte_tte2);
+            let (
+                tte_tte1,
+                tte_tte2,
+                dte_mte1,
+                dte_ute1,
+                dte_mte2,
+                dte_ute2,
+                cte_cte1,
+                cte_cte2,
+                cte_tte1,
+                cte_tte2,
+            );
             if ibl == xf.iblte[is] as usize + 1 {
                 // define quantities at start of wake, adding TE base thickness to Dstar
                 let tte = xf.thet[0][xf.iblte[0] as usize] + xf.thet[1][xf.iblte[1] as usize];
-                let dte = xf.dstr[0][xf.iblte[0] as usize] + xf.dstr[1][xf.iblte[1] as usize] + xf.ante;
-                let cte =
-                    (xf.ctau[0][xf.iblte[0] as usize] * xf.thet[0][xf.iblte[0] as usize]
-                        + xf.ctau[1][xf.iblte[1] as usize] * xf.thet[1][xf.iblte[1] as usize])
-                        / tte;
+                let dte =
+                    xf.dstr[0][xf.iblte[0] as usize] + xf.dstr[1][xf.iblte[1] as usize] + xf.ante;
+                let cte = (xf.ctau[0][xf.iblte[0] as usize] * xf.thet[0][xf.iblte[0] as usize]
+                    + xf.ctau[1][xf.iblte[1] as usize] * xf.thet[1][xf.iblte[1] as usize])
+                    / tte;
                 tesys(xf, cte, tte, dte);
 
                 tte_tte1 = 1.0;
@@ -300,7 +316,8 @@ pub fn setbl(xf: &mut Xfoil) -> bool {
 
                 // "forced" changes from UEDG --- USAV=UINV+dij*MASS mismatch
                 due1 = 0.0;
-                dds1 = dte_ute1 * (xf.uedg[0][xf.iblte[0] as usize] - usav[0][xf.iblte[0] as usize])
+                dds1 = dte_ute1
+                    * (xf.uedg[0][xf.iblte[0] as usize] - usav[0][xf.iblte[0] as usize])
                     + dte_ute2 * (xf.uedg[1][xf.iblte[1] as usize] - usav[1][xf.iblte[1] as usize]);
             } else {
                 blsys(xf);
@@ -318,7 +335,8 @@ pub fn setbl(xf: &mut Xfoil) -> bool {
 
             // save wall shear and equil. max shear coefficient for plotting output
             xf.tau[is][ibl] = 0.5 * xf.com2.r * xf.com2.u * xf.com2.u * xf.com2.cf;
-            xf.dis[is][ibl] = xf.com2.r * xf.com2.u * xf.com2.u * xf.com2.u * xf.com2.di * xf.com2.hs * 0.5;
+            xf.dis[is][ibl] =
+                xf.com2.r * xf.com2.u * xf.com2.u * xf.com2.u * xf.com2.di * xf.com2.hs * 0.5;
             xf.ctq[is][ibl] = xf.com2.cq;
             xf.delt[is][ibl] = xf.com2.de;
             xf.uslp[is][ibl] = 1.60 / (1.0 + xf.com2.us);
@@ -345,18 +363,24 @@ pub fn setbl(xf: &mut Xfoil) -> bool {
                 let base3 = (iv - 1) * IZX * 3;
                 for jv in 1..=xf.nsys {
                     let o = base3 + (jv - 1) * 3;
-                    xf.vm[o] = xf.vs1[0][2] * d1_m[jv] + xf.vs1[0][3] * u1_m[jv]
+                    xf.vm[o] = xf.vs1[0][2] * d1_m[jv]
+                        + xf.vs1[0][3] * u1_m[jv]
                         + xf.vs2[0][2] * d2_m[jv]
                         + xf.vs2[0][3] * u2_m[jv]
-                        + (xf.vs1[0][4] + xf.vs2[0][4] + xf.vsx[0]) * (xi_ule1 * ule1_m[jv] + xi_ule2 * ule2_m[jv]);
-                    xf.vm[o + 1] = xf.vs1[1][2] * d1_m[jv] + xf.vs1[1][3] * u1_m[jv]
+                        + (xf.vs1[0][4] + xf.vs2[0][4] + xf.vsx[0])
+                            * (xi_ule1 * ule1_m[jv] + xi_ule2 * ule2_m[jv]);
+                    xf.vm[o + 1] = xf.vs1[1][2] * d1_m[jv]
+                        + xf.vs1[1][3] * u1_m[jv]
                         + xf.vs2[1][2] * d2_m[jv]
                         + xf.vs2[1][3] * u2_m[jv]
-                        + (xf.vs1[1][4] + xf.vs2[1][4] + xf.vsx[1]) * (xi_ule1 * ule1_m[jv] + xi_ule2 * ule2_m[jv]);
-                    xf.vm[o + 2] = xf.vs1[2][2] * d1_m[jv] + xf.vs1[2][3] * u1_m[jv]
+                        + (xf.vs1[1][4] + xf.vs2[1][4] + xf.vsx[1])
+                            * (xi_ule1 * ule1_m[jv] + xi_ule2 * ule2_m[jv]);
+                    xf.vm[o + 2] = xf.vs1[2][2] * d1_m[jv]
+                        + xf.vs1[2][3] * u1_m[jv]
                         + xf.vs2[2][2] * d2_m[jv]
                         + xf.vs2[2][3] * u2_m[jv]
-                        + (xf.vs1[2][4] + xf.vs2[2][4] + xf.vsx[2]) * (xi_ule1 * ule1_m[jv] + xi_ule2 * ule2_m[jv]);
+                        + (xf.vs1[2][4] + xf.vs2[2][4] + xf.vsx[2])
+                            * (xi_ule1 * ule1_m[jv] + xi_ule2 * ule2_m[jv]);
                 }
             }
 
@@ -371,10 +395,12 @@ pub fn setbl(xf: &mut Xfoil) -> bool {
             } else {
                 xf.vdel[Xfoil::v_index(iv, 2, 1)] = (xf.vs1[0][3] * u1_a + xf.vs1[0][2] * d1_a)
                     + (xf.vs2[0][3] * u2_a + xf.vs2[0][2] * d2_a)
-                    + (xf.vs1[0][4] + xf.vs2[0][4] + xf.vsx[0]) * (xi_ule1 * ule1_a + xi_ule2 * ule2_a);
+                    + (xf.vs1[0][4] + xf.vs2[0][4] + xf.vsx[0])
+                        * (xi_ule1 * ule1_a + xi_ule2 * ule2_a);
             }
 
-            xf.vdel[Xfoil::v_index(iv, 1, 1)] = xf.vsrez[0] + (xf.vs1[0][3] * due1 + xf.vs1[0][2] * dds1)
+            xf.vdel[Xfoil::v_index(iv, 1, 1)] = xf.vsrez[0]
+                + (xf.vs1[0][3] * due1 + xf.vs1[0][2] * dds1)
                 + (xf.vs2[0][3] * due2 + xf.vs2[0][2] * dds2)
                 + (xf.vs1[0][4] + xf.vs2[0][4] + xf.vsx[0]) * (xi_ule1 * dule1 + xi_ule2 * dule2);
 
@@ -389,10 +415,12 @@ pub fn setbl(xf: &mut Xfoil) -> bool {
             } else {
                 xf.vdel[Xfoil::v_index(iv, 2, 2)] = (xf.vs1[1][3] * u1_a + xf.vs1[1][2] * d1_a)
                     + (xf.vs2[1][3] * u2_a + xf.vs2[1][2] * d2_a)
-                    + (xf.vs1[1][4] + xf.vs2[1][4] + xf.vsx[1]) * (xi_ule1 * ule1_a + xi_ule2 * ule2_a);
+                    + (xf.vs1[1][4] + xf.vs2[1][4] + xf.vsx[1])
+                        * (xi_ule1 * ule1_a + xi_ule2 * ule2_a);
             }
 
-            xf.vdel[Xfoil::v_index(iv, 1, 2)] = xf.vsrez[1] + (xf.vs1[1][3] * due1 + xf.vs1[1][2] * dds1)
+            xf.vdel[Xfoil::v_index(iv, 1, 2)] = xf.vsrez[1]
+                + (xf.vs1[1][3] * due1 + xf.vs1[1][2] * dds1)
                 + (xf.vs2[1][3] * due2 + xf.vs2[1][2] * dds2)
                 + (xf.vs1[1][4] + xf.vs2[1][4] + xf.vsx[1]) * (xi_ule1 * dule1 + xi_ule2 * dule2);
 
@@ -407,10 +435,12 @@ pub fn setbl(xf: &mut Xfoil) -> bool {
             } else {
                 xf.vdel[Xfoil::v_index(iv, 2, 3)] = (xf.vs1[2][3] * u1_a + xf.vs1[2][2] * d1_a)
                     + (xf.vs2[2][3] * u2_a + xf.vs2[2][2] * d2_a)
-                    + (xf.vs1[2][4] + xf.vs2[2][4] + xf.vsx[2]) * (xi_ule1 * ule1_a + xi_ule2 * ule2_a);
+                    + (xf.vs1[2][4] + xf.vs2[2][4] + xf.vsx[2])
+                        * (xi_ule1 * ule1_a + xi_ule2 * ule2_a);
             }
 
-            xf.vdel[Xfoil::v_index(iv, 1, 3)] = xf.vsrez[2] + (xf.vs1[2][3] * due1 + xf.vs1[2][2] * dds1)
+            xf.vdel[Xfoil::v_index(iv, 1, 3)] = xf.vsrez[2]
+                + (xf.vs1[2][3] * due1 + xf.vs1[2][2] * dds1)
                 + (xf.vs2[2][3] * due2 + xf.vs2[2][2] * dds2)
                 + (xf.vs1[2][4] + xf.vs2[2][4] + xf.vsx[2]) * (xi_ule1 * dule1 + xi_ule2 * dule2);
 
@@ -442,7 +472,11 @@ pub fn setbl(xf: &mut Xfoil) -> bool {
                 xf.xssitr[is] = xf.xt;
 
                 // interpolate airfoil geometry to find transition x/c (for user output)
-                let str = if is == 0 { xf.sst - xf.xt } else { xf.sst + xf.xt };
+                let str = if is == 0 {
+                    xf.sst - xf.xt
+                } else {
+                    xf.sst + xf.xt
+                };
                 let chx = xf.xte - xf.xle;
                 let chy = xf.yte - xf.yle;
                 let chsq = chx * chx + chy * chy;
@@ -480,9 +514,11 @@ pub fn setbl(xf: &mut Xfoil) -> bool {
 
             if ibl == xf.itran[is] as usize && xf.com2.x > xf.com1.x {
                 if is == 0 {
-                    xf.tindex[is] = (xf.ist as f64 - xf.itran[is] as f64 + 3.0) - (xf.xt - xf.com1.x) / (xf.com2.x - xf.com1.x);
+                    xf.tindex[is] = (xf.ist as f64 - xf.itran[is] as f64 + 3.0)
+                        - (xf.xt - xf.com1.x) / (xf.com2.x - xf.com1.x);
                 } else {
-                    xf.tindex[is] = (xf.ist as f64 + xf.itran[is] as f64 - 2.0) + (xf.xt - xf.com1.x) / (xf.com2.x - xf.com1.x);
+                    xf.tindex[is] = (xf.ist as f64 + xf.itran[is] as f64 - 2.0)
+                        + (xf.xt - xf.com1.x) / (xf.com2.x - xf.com1.x);
                 }
             }
 
@@ -494,11 +530,21 @@ pub fn setbl(xf: &mut Xfoil) -> bool {
 
         if xf.tforce[is] {
             if xf.show_output {
-                eprintln!("Side {} forced transition at x/c = {:7.4} {:5}", is + 1, xf.xoctr[is], xf.itran[is]);
+                eprintln!(
+                    "Side {} forced transition at x/c = {:7.4} {:5}",
+                    is + 1,
+                    xf.xoctr[is],
+                    xf.itran[is]
+                );
             }
         } else {
             if xf.show_output {
-                eprintln!("Side {}  free  transition at x/c = {:7.4} {:5}", is + 1, xf.xoctr[is], xf.itran[is]);
+                eprintln!(
+                    "Side {}  free  transition at x/c = {:7.4} {:5}",
+                    is + 1,
+                    xf.xoctr[is],
+                    xf.itran[is]
+                );
             }
         }
     }
@@ -615,7 +661,9 @@ pub fn mrchue(xf: &mut Xfoil) -> bool {
 
                 if ibl == xf.iblte[is] as usize + 1 {
                     tte = xf.thet[0][xf.iblte[0] as usize] + xf.thet[1][xf.iblte[1] as usize];
-                    dte = xf.dstr[0][xf.iblte[0] as usize] + xf.dstr[1][xf.iblte[1] as usize] + xf.ante;
+                    dte = xf.dstr[0][xf.iblte[0] as usize]
+                        + xf.dstr[1][xf.iblte[1] as usize]
+                        + xf.ante;
                     cte = (xf.ctau[0][xf.iblte[0] as usize] * xf.thet[0][xf.iblte[0] as usize]
                         + xf.ctau[1][xf.iblte[1] as usize] * xf.thet[1][xf.iblte[1] as usize])
                         / tte;
@@ -652,12 +700,17 @@ pub fn mrchue(xf: &mut Xfoil) -> bool {
                     // see if direct mode is not applicable
                     if ibl != xf.iblte[is] as usize + 1 {
                         // calculate resulting kinematic shape parameter Hk
-                        let msq = uei * uei * xf.hstinv / (xf.gm1bl * (1.0 - 0.5 * uei * uei * xf.hstinv));
+                        let msq = uei * uei * xf.hstinv
+                            / (xf.gm1bl * (1.0 - 0.5 * uei * uei * xf.hstinv));
                         let htest = (dsi + rlx * xf.vsrez[2]) / (thi + rlx * xf.vsrez[1]);
                         let (hktest, _dummy, _dummy2) = hkin(htest, msq);
 
                         // decide whether to do direct or inverse problem based on Hk
-                        let hmax = if ibl < xf.itran[is] as usize { hlmax } else { htmax };
+                        let hmax = if ibl < xf.itran[is] as usize {
+                            hlmax
+                        } else {
+                            htmax
+                        };
                         direct = hktest < hmax;
                     }
 
@@ -675,14 +728,20 @@ pub fn mrchue(xf: &mut Xfoil) -> bool {
                             htarg = xf.com1.hk + 0.03 * (xf.com2.x - xf.com1.x) / xf.com1.t;
                         } else if ibl == xf.itran[is] as usize {
                             // transition interval: weighted laminar and turbulent case
-                            htarg = xf.com1.hk + (0.03 * (xf.xt - xf.com1.x) - 0.15 * (xf.com2.x - xf.xt)) / xf.com1.t;
+                            htarg = xf.com1.hk
+                                + (0.03 * (xf.xt - xf.com1.x) - 0.15 * (xf.com2.x - xf.xt))
+                                    / xf.com1.t;
                         } else if xf.wake {
-                            // turbulent wake case: asymptotic wake behavior with approximate Backward Euler
+                            // turbulent wake case: asymptotic wake behavior
+                            // with approximate Backward Euler
                             let const0 = 0.03 * (xf.com2.x - xf.com1.x) / xf.com1.t;
                             let mut hk2 = xf.com1.hk;
-                            hk2 -= (hk2 + const0 * (hk2 - 1.0).powi(3) - xf.com1.hk) / (1.0 + 3.0 * const0 * (hk2 - 1.0).powi(2));
-                            hk2 -= (hk2 + const0 * (hk2 - 1.0).powi(3) - xf.com1.hk) / (1.0 + 3.0 * const0 * (hk2 - 1.0).powi(2));
-                            hk2 -= (hk2 + const0 * (hk2 - 1.0).powi(3) - xf.com1.hk) / (1.0 + 3.0 * const0 * (hk2 - 1.0).powi(2));
+                            hk2 -= (hk2 + const0 * (hk2 - 1.0).powi(3) - xf.com1.hk)
+                                / (1.0 + 3.0 * const0 * (hk2 - 1.0).powi(2));
+                            hk2 -= (hk2 + const0 * (hk2 - 1.0).powi(3) - xf.com1.hk)
+                                / (1.0 + 3.0 * const0 * (hk2 - 1.0).powi(2));
+                            hk2 -= (hk2 + const0 * (hk2 - 1.0).powi(3) - xf.com1.hk)
+                                / (1.0 + 3.0 * const0 * (hk2 - 1.0).powi(2));
                             htarg = hk2;
                         } else {
                             // turbulent case: relatively fast decrease in Hk downstream
@@ -693,7 +752,11 @@ pub fn mrchue(xf: &mut Xfoil) -> bool {
                         if xf.wake {
                             htarg = htarg.max(1.01);
                         } else {
-                            let hmax = if ibl < xf.itran[is] as usize { hlmax } else { htmax };
+                            let hmax = if ibl < xf.itran[is] as usize {
+                                hlmax
+                            } else {
+                                htmax
+                            };
                             htarg = htarg.max(hmax);
                         }
 
@@ -715,7 +778,10 @@ pub fn mrchue(xf: &mut Xfoil) -> bool {
                     gauss4(&mut xf.vs2, &mut xf.vsrez);
 
                     // added Ue clamp
-                    dmax = (xf.vsrez[1] / thi).abs().max((xf.vsrez[2] / dsi).abs()).max((xf.vsrez[3] / uei).abs());
+                    dmax = (xf.vsrez[1] / thi)
+                        .abs()
+                        .max((xf.vsrez[2] / dsi).abs())
+                        .max((xf.vsrez[3] / uei).abs());
                     if ibl >= xf.itran[is] as usize {
                         dmax = dmax.max((xf.vsrez[0] / cti).abs());
                     }
@@ -757,7 +823,12 @@ pub fn mrchue(xf: &mut Xfoil) -> bool {
 
             if dmax > 1.0E-5 {
                 if xf.show_output {
-                    eprintln!(" MRCHUE: Convergence failed at {:4}  side{}    Res = {:e}", ibl, is + 1, dmax);
+                    eprintln!(
+                        " MRCHUE: Convergence failed at {:4}  side{}    Res = {:e}",
+                        ibl,
+                        is + 1,
+                        dmax
+                    );
                 }
 
                 // the current unconverged solution might still be reasonable...
@@ -773,7 +844,8 @@ pub fn mrchue(xf: &mut Xfoil) -> bool {
                             dsi = dte;
                         } else {
                             thi = xf.thet[is][ibm];
-                            let ratlen = (xf.xssi[is][ibl] - xf.xssi[is][ibm]) / (10.0 * xf.dstr[is][ibm]);
+                            let ratlen =
+                                (xf.xssi[is][ibl] - xf.xssi[is][ibm]) / (10.0 * xf.dstr[is][ibm]);
                             dsi = (xf.dstr[is][ibm] + thi * ratlen) / (1.0 + ratlen);
                         }
                         if ibl == xf.itran[is] as usize {
@@ -842,7 +914,8 @@ pub fn mrchue(xf: &mut Xfoil) -> bool {
             xf.uedg[is][ibl] = uei;
             xf.mass[is][ibl] = dsi * uei;
             xf.tau[is][ibl] = 0.5 * xf.com2.r * xf.com2.u * xf.com2.u * xf.com2.cf;
-            xf.dis[is][ibl] = xf.com2.r * xf.com2.u * xf.com2.u * xf.com2.u * xf.com2.di * xf.com2.hs * 0.5;
+            xf.dis[is][ibl] =
+                xf.com2.r * xf.com2.u * xf.com2.u * xf.com2.u * xf.com2.di * xf.com2.hs * 0.5;
             xf.ctq[is][ibl] = xf.com2.cq;
             xf.delt[is][ibl] = xf.com2.de;
             xf.tstr[is][ibl] = xf.com2.hs * xf.com2.t;
@@ -977,7 +1050,9 @@ pub fn mrchdu(xf: &mut Xfoil) -> bool {
 
                 if ibl == xf.iblte[is] as usize + 1 {
                     tte = xf.thet[0][xf.iblte[0] as usize] + xf.thet[1][xf.iblte[1] as usize];
-                    dte = xf.dstr[0][xf.iblte[0] as usize] + xf.dstr[1][xf.iblte[1] as usize] + xf.ante;
+                    dte = xf.dstr[0][xf.iblte[0] as usize]
+                        + xf.dstr[1][xf.iblte[1] as usize]
+                        + xf.ante;
                     cte = (xf.ctau[0][xf.iblte[0] as usize] * xf.thet[0][xf.iblte[0] as usize]
                         + xf.ctau[1][xf.iblte[1] as usize] * xf.thet[1][xf.iblte[1] as usize])
                         / tte;
@@ -998,7 +1073,8 @@ pub fn mrchdu(xf: &mut Xfoil) -> bool {
                         let uem = xf.uedg[is][ibl - 1];
                         let dsm = xf.dstr[is][ibl - 1];
                         let thm = xf.thet[is][ibl - 1];
-                        let msq = uem * uem * xf.hstinv / (xf.gm1bl * (1.0 - 0.5 * uem * uem * xf.hstinv));
+                        let msq = uem * uem * xf.hstinv
+                            / (xf.gm1bl * (1.0 - 0.5 * uem * uem * xf.hstinv));
                         let (hkr, _dummy, _dummy2) = hkin(dsm / thm, msq);
                         hkref = hkr;
                     }
@@ -1058,14 +1134,18 @@ pub fn mrchdu(xf: &mut Xfoil) -> bool {
                     xf.vs2[3][1] = xf.com2.hk_t * hkref;
                     xf.vs2[3][2] = xf.com2.hk_d * hkref;
                     xf.vs2[3][3] = (xf.com2.hk_u * hkref + sens / ueref) * xf.com2.u_uei;
-                    xf.vsrez[3] = -(hkref * hkref) * (xf.com2.hk / hkref - 1.0) - sens * (xf.com2.u / ueref - 1.0);
+                    xf.vsrez[3] = -(hkref * hkref) * (xf.com2.hk / hkref - 1.0)
+                        - sens * (xf.com2.u / ueref - 1.0);
                 }
 
                 // solve Newton system for current "2" station
                 gauss4(&mut xf.vs2, &mut xf.vsrez);
 
                 // determine max changes and underrelax if necessary (added Ue clamp)
-                dmax = (xf.vsrez[1] / thi).abs().max((xf.vsrez[2] / dsi).abs()).max((xf.vsrez[3] / uei).abs());
+                dmax = (xf.vsrez[1] / thi)
+                    .abs()
+                    .max((xf.vsrez[2] / dsi).abs())
+                    .max((xf.vsrez[3] / uei).abs());
                 if ibl >= xf.itran[is] as usize {
                     dmax = dmax.max((xf.vsrez[0] / (10.0 * cti)).abs());
                 }
@@ -1109,7 +1189,12 @@ pub fn mrchdu(xf: &mut Xfoil) -> bool {
 
             if dmax > DEPS {
                 if xf.show_output {
-                    eprintln!(" MRCHDU: Convergence failed at {:4}  side{}    Res = {:e}", ibl, is + 1, dmax);
+                    eprintln!(
+                        " MRCHDU: Convergence failed at {:4}  side{}    Res = {:e}",
+                        ibl,
+                        is + 1,
+                        dmax
+                    );
                 }
 
                 // the current unconverged solution might still be reasonable...
@@ -1127,7 +1212,8 @@ pub fn mrchdu(xf: &mut Xfoil) -> bool {
                             uei = xf.uedg[is][ibm];
                         } else {
                             thi = xf.thet[is][ibm];
-                            let ratlen = (xf.xssi[is][ibl] - xf.xssi[is][ibm]) / (10.0 * xf.dstr[is][ibm]);
+                            let ratlen =
+                                (xf.xssi[is][ibl] - xf.xssi[is][ibm]) / (10.0 * xf.dstr[is][ibm]);
                             dsi = (xf.dstr[is][ibm] + thi * ratlen) / (1.0 + ratlen);
                             uei = xf.uedg[is][ibm];
                         }
@@ -1194,7 +1280,8 @@ pub fn mrchdu(xf: &mut Xfoil) -> bool {
             xf.uedg[is][ibl] = uei;
             xf.mass[is][ibl] = dsi * uei;
             xf.tau[is][ibl] = 0.5 * xf.com2.r * xf.com2.u * xf.com2.u * xf.com2.cf;
-            xf.dis[is][ibl] = xf.com2.r * xf.com2.u * xf.com2.u * xf.com2.u * xf.com2.di * xf.com2.hs * 0.5;
+            xf.dis[is][ibl] =
+                xf.com2.r * xf.com2.u * xf.com2.u * xf.com2.u * xf.com2.di * xf.com2.hs * 0.5;
             xf.ctq[is][ibl] = xf.com2.cq;
             xf.delt[is][ibl] = xf.com2.de;
             xf.tstr[is][ibl] = xf.com2.hs * xf.com2.t;
@@ -1237,29 +1324,58 @@ pub fn xifset(xf: &mut Xfoil, is: usize) {
         xf.w2[i] = ((xf.y[i] - xf.yle) * chx - (xf.x[i] - xf.xle) * chy) / chsq;
     }
 
-    splind(&xf.w1[..xf.n], &mut xf.w3[..xf.n], &xf.s[..xf.n], -999.0, -999.0);
-    splind(&xf.w2[..xf.n], &mut xf.w4[..xf.n], &xf.s[..xf.n], -999.0, -999.0);
+    splind(
+        &xf.w1[..xf.n],
+        &mut xf.w3[..xf.n],
+        &xf.s[..xf.n],
+        -999.0,
+        -999.0,
+    );
+    splind(
+        &xf.w2[..xf.n],
+        &mut xf.w4[..xf.n],
+        &xf.s[..xf.n],
+        -999.0,
+        -999.0,
+    );
 
     if is == 0 {
         // set approximate arc length of forced transition point for SINVRT
         let mut str = xf.sle + (xf.s[0] - xf.sle) * xf.xstrip[is];
 
         // calculate actual arc length
-        sinvrt(&mut str, xf.xstrip[is], &xf.w1[..xf.n], &xf.w3[..xf.n], &xf.s[..xf.n], xf.show_output);
+        sinvrt(
+            &mut str,
+            xf.xstrip[is],
+            &xf.w1[..xf.n],
+            &xf.w3[..xf.n],
+            &xf.s[..xf.n],
+            xf.show_output,
+        );
 
         // set BL coordinate value
         xf.xiforc = (xf.sst - str).min(xf.xssi[is][xf.iblte[is] as usize]);
     } else {
         // same for bottom side
         let mut str = xf.sle + (xf.s[xf.n - 1] - xf.sle) * xf.xstrip[is];
-        sinvrt(&mut str, xf.xstrip[is], &xf.w1[..xf.n], &xf.w3[..xf.n], &xf.s[..xf.n], xf.show_output);
+        sinvrt(
+            &mut str,
+            xf.xstrip[is],
+            &xf.w1[..xf.n],
+            &xf.w3[..xf.n],
+            &xf.s[..xf.n],
+            xf.show_output,
+        );
         xf.xiforc = (str - xf.sst).min(xf.xssi[is][xf.iblte[is] as usize]);
     }
 
     if xf.xiforc < 0.0 {
         if xf.show_output {
             eprintln!();
-            eprintln!(" ***  Stagnation point is past trip on side {}  ***", is + 1);
+            eprintln!(
+                " ***  Stagnation point is past trip on side {}  ***",
+                is + 1
+            );
         }
         xf.xiforc = xf.xssi[is][xf.iblte[is] as usize];
     }
@@ -1429,7 +1545,11 @@ pub fn update(xf: &mut Xfoil) {
             let ddstr = (dmass - xf.dstr[is][ibl] * duedg) / xf.uedg[is][ibl];
 
             // normalize changes
-            let dn1 = if ibl < xf.itran[is] as usize { dctau / 10.0 } else { dctau / xf.ctau[is][ibl] };
+            let dn1 = if ibl < xf.itran[is] as usize {
+                dctau / 10.0
+            } else {
+                dctau / xf.ctau[is][ibl]
+            };
             let dn2 = dthet / xf.thet[is][ibl];
             let dn3 = ddstr / xf.dstr[is][ibl];
             let dn4 = duedg.abs() / 0.25;
@@ -1552,7 +1672,8 @@ pub fn update(xf: &mut Xfoil) {
             } else {
                 1.00005
             };
-            let msq = xf.uedg[is][ibl].powi(2) * hstinv / (xf.gamm1 * (1.0 - 0.5 * xf.uedg[is][ibl].powi(2) * hstinv));
+            let msq = xf.uedg[is][ibl].powi(2) * hstinv
+                / (xf.gamm1 * (1.0 - 0.5 * xf.uedg[is][ibl].powi(2) * hstinv));
             let mut dsw = xf.dstr[is][ibl] - dswaki;
             dslim(&mut dsw, xf.thet[is][ibl], xf.uedg[is][ibl], msq, hklim);
             xf.dstr[is][ibl] = dsw + dswaki;

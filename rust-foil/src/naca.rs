@@ -114,7 +114,8 @@ pub fn naca5(ides: i32, nside: usize, show_output: bool) -> (Vec<f64>, Vec<f64>,
             * t
             / 0.20;
         if xx[i] < m {
-            yc[i] = (c / 6.0) * (xx[i].powi(3) - 3.0 * m * xx[i].powi(2) + m * m * (3.0 - m) * xx[i]);
+            yc[i] =
+                (c / 6.0) * (xx[i].powi(3) - 3.0 * m * xx[i].powi(2) + m * m * (3.0 - m) * xx[i]);
         } else {
             yc[i] = (c / 6.0) * m.powi(3) * (1.0 - xx[i]);
         }

@@ -174,7 +174,10 @@ impl<F: FoilLike> FoilSimulator<F> {
             return 2.0 * std::f64::consts::PI * alpha;
         }
         let ma = self.foil.borrow().mach(v);
-        if ma > 0.97 || alpha.abs() > 30.0 * DEG2RAD || self.foil.borrow().reynolds(v) < RE_FLAT_PLATE {
+        if ma > 0.97
+            || alpha.abs() > 30.0 * DEG2RAD
+            || self.foil.borrow().reynolds(v) < RE_FLAT_PLATE
+        {
             return 2.0 * std::f64::consts::PI * alpha;
         }
         let (cl_poly, _) = self.get_polars(v);
@@ -186,7 +189,10 @@ impl<F: FoilLike> FoilSimulator<F> {
             return 1.28 * alpha.sin();
         }
         let ma = self.foil.borrow().mach(v);
-        if ma > 0.97 || alpha.abs() > 30.0 * DEG2RAD || self.foil.borrow().reynolds(v) < RE_FLAT_PLATE {
+        if ma > 0.97
+            || alpha.abs() > 30.0 * DEG2RAD
+            || self.foil.borrow().reynolds(v) < RE_FLAT_PLATE
+        {
             return 1.28 * alpha.sin();
         }
         let (_, cd_poly) = self.get_polars(v);
@@ -208,19 +214,13 @@ impl<F: FoilLike> FoilSimulator<F> {
             let (fp_cl, fp_cd) = flat_plate_polys();
             let w = (re / RE_FLAT_PLATE).ln() / (RE_MIN / RE_FLAT_PLATE).ln();
             let (cl_hi, cd_hi) = self.bucket_polars(RE_MIN, mach);
-            return (
-                blend_poly(&fp_cl, &cl_hi, w),
-                blend_poly(&fp_cd, &cd_hi, w),
-            );
+            return (blend_poly(&fp_cl, &cl_hi, w), blend_poly(&fp_cd, &cd_hi, w));
         }
 
         let (lo, hi, w) = re_bracket(re);
         let (cl_lo, cd_lo) = self.bucket_polars(re_grid(lo), mach);
         let (cl_hi, cd_hi) = self.bucket_polars(re_grid(hi), mach);
-        (
-            blend_poly(&cl_lo, &cl_hi, w),
-            blend_poly(&cd_lo, &cd_hi, w),
-        )
+        (blend_poly(&cl_lo, &cl_hi, w), blend_poly(&cd_lo, &cd_hi, w))
     }
 
     /// The fitted (cl, cd) polynomials of the single grid bucket at
@@ -364,17 +364,17 @@ impl<F: FoilLike> FoilSimulator<F> {
 
 /// Degree-9 least-squares fit of cl and cd over alpha (radians).
 fn fit_polar(p: &StoredPolar) -> (Vec<f64>, Vec<f64>) {
-    (
-        polyfit(&p.alpha, &p.cl, 9),
-        polyfit(&p.alpha, &p.cd, 9),
-    )
+    (polyfit(&p.alpha, &p.cl, 9), polyfit(&p.alpha, &p.cd, 9))
 }
 
 /// The flat-plate fallback model, fitted like the Python `Foil didn't
 /// simulate` branch (degree 4 over a degree grid).
 fn flat_plate_polys() -> (Vec<f64>, Vec<f64>) {
     let alpha: Vec<f64> = (-20..=20).map(|a| a as f64).collect();
-    let cl: Vec<f64> = alpha.iter().map(|a| 2.0 * std::f64::consts::PI * a).collect();
+    let cl: Vec<f64> = alpha
+        .iter()
+        .map(|a| 2.0 * std::f64::consts::PI * a)
+        .collect();
     let cd: Vec<f64> = alpha.iter().map(|a| 1.28 * (a * DEG2RAD).sin()).collect();
     (polyfit(&alpha, &cl, 4), polyfit(&alpha, &cd, 4))
 }
@@ -514,7 +514,10 @@ mod tests {
             cd.push(0.005 + 0.3 * a * a);
         }
         let key = cache_key(&f.hash(), g, fs.get_mach(v_for_g));
-        store.lock().unwrap().insert(key, StoredPolar { alpha, cl, cd });
+        store
+            .lock()
+            .unwrap()
+            .insert(key, StoredPolar { alpha, cl, cd });
     }
 
     #[test]
@@ -539,10 +542,20 @@ mod tests {
         let a = 5.0 * DEG2RAD;
         let cl_ref = 2.0 * std::f64::consts::PI * a;
         let cl_est = polyval(&cl_p, a);
-        assert!((cl_est - cl_ref).abs() < 1e-6, "cl_est {} cl_ref {}", cl_est, cl_ref);
+        assert!(
+            (cl_est - cl_ref).abs() < 1e-6,
+            "cl_est {} cl_ref {}",
+            cl_est,
+            cl_ref
+        );
         let cd_ref = 0.005 + 0.3 * a * a;
         let cd_est = polyval(&cd_p, a);
-        assert!((cd_est - cd_ref).abs() < 1e-6, "cd_est {} cd_ref {}", cd_est, cd_ref);
+        assert!(
+            (cd_est - cd_ref).abs() < 1e-6,
+            "cd_est {} cd_ref {}",
+            cd_est,
+            cd_ref
+        );
     }
 
     #[test]

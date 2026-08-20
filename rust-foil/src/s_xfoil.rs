@@ -56,7 +56,11 @@ pub fn mrcl(xf: &mut Xfoil, cls: f64) -> (f64, f64) {
         xf.minf = 0.99;
     }
 
-    let rrat = if xf.reinf1 > 0.0 { xf.reinf / xf.reinf1 } else { 1.0 };
+    let rrat = if xf.reinf1 > 0.0 {
+        xf.reinf / xf.reinf1
+    } else {
+        1.0
+    };
 
     if rrat > 100.0 {
         if xf.show_output {
@@ -85,7 +89,9 @@ pub fn comset(xf: &mut Xfoil) {
         xf.qstar = 999.0;
     } else {
         xf.cpstar = 2.0 / (xf.gamma * xf.minf.powi(2))
-            * (((1.0 + 0.5 * xf.gamm1 * xf.minf.powi(2)) / (1.0 + 0.5 * xf.gamm1)).powf(xf.gamma / xf.gamm1) - 1.0);
+            * (((1.0 + 0.5 * xf.gamm1 * xf.minf.powi(2)) / (1.0 + 0.5 * xf.gamm1))
+                .powf(xf.gamma / xf.gamm1)
+                - 1.0);
         xf.qstar = xf.qinf / xf.minf
             * ((1.0 + 0.5 * xf.gamm1 * xf.minf.powi(2)) / (1.0 + 0.5 * xf.gamm1)).sqrt();
     }

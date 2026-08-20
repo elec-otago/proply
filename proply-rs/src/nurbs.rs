@@ -70,9 +70,8 @@ fn chord_params(points: &[[f64; 3]]) -> Vec<f64> {
     let mut u = vec![0.0; m];
     let mut total = 0.0;
     for i in 1..m {
-        let d = (points[i][0] - points[i - 1][0]).hypot(
-            (points[i][1] - points[i - 1][1]).hypot(points[i][2] - points[i - 1][2]),
-        );
+        let d = (points[i][0] - points[i - 1][0])
+            .hypot((points[i][1] - points[i - 1][1]).hypot(points[i][2] - points[i - 1][2]));
         total += d;
         u[i] = total;
     }
@@ -205,7 +204,9 @@ fn gauss_solve(a: &[f64], n: usize) -> Vec<f64> {
 }
 
 fn mat_vec(a: &[f64], n: usize, x: &[f64]) -> Vec<f64> {
-    (0..n).map(|r| (0..n).map(|c| a[r * n + c] * x[c]).sum()).collect()
+    (0..n)
+        .map(|r| (0..n).map(|c| a[r * n + c] * x[c]).sum())
+        .collect()
 }
 
 /// A degree-1 polyline curve through `points` (control points = points).
@@ -394,16 +395,36 @@ mod tests {
         let knots = common_knots(12, &u);
         let ca = interpolate_with_knots(&prof_a, &u, &knots);
         let cb = interpolate_with_knots(&prof_b, &u, &knots);
-        let a = NurbsCurve { degree: 3, control_points: ca, knots: knots.clone() };
-        let b = NurbsCurve { degree: 3, control_points: cb, knots };
+        let a = NurbsCurve {
+            degree: 3,
+            control_points: ca,
+            knots: knots.clone(),
+        };
+        let b = NurbsCurve {
+            degree: 3,
+            control_points: cb,
+            knots,
+        };
         let s = ruled(&a, &b);
         for (k, p) in prof_a.iter().enumerate() {
             let on = eval_surface(&s, u[k], 0.0);
-            assert!((on[1] - p[1]).abs() < 1e-9, "v=0 point {}: {:?} vs {:?}", k, on, p);
+            assert!(
+                (on[1] - p[1]).abs() < 1e-9,
+                "v=0 point {}: {:?} vs {:?}",
+                k,
+                on,
+                p
+            );
         }
         for (k, p) in prof_b.iter().enumerate() {
             let on = eval_surface(&s, u[k], 1.0);
-            assert!((on[1] - p[1]).abs() < 1e-9, "v=1 point {}: {:?} vs {:?}", k, on, p);
+            assert!(
+                (on[1] - p[1]).abs() < 1e-9,
+                "v=1 point {}: {:?} vs {:?}",
+                k,
+                on,
+                p
+            );
         }
         // Linear in v between the two profiles.
         let mid = eval_surface(&s, u[5], 0.5);
@@ -427,7 +448,11 @@ mod tests {
             .iter()
             .map(|p| {
                 let cp = interpolate_with_knots(p, &u, &knots);
-                NurbsCurve { degree: 3, control_points: cp, knots: knots.clone() }
+                NurbsCurve {
+                    degree: 3,
+                    control_points: cp,
+                    knots: knots.clone(),
+                }
             })
             .collect();
         let s = loft(&curves);

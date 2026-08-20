@@ -270,7 +270,14 @@ pub fn scalc(x: &[f64], y: &[f64], s: &mut [f64]) {
 }
 
 /// Splines 2-D shape X(S), Y(S), along with true arc length parameter S.
-pub fn splnxy(x: &[f64], xs: &mut [f64], y: &[f64], ys: &mut [f64], s: &mut [f64], show_output: bool) {
+pub fn splnxy(
+    x: &[f64],
+    xs: &mut [f64],
+    y: &[f64],
+    ys: &mut [f64],
+    s: &mut [f64],
+    show_output: bool,
+) {
     const KMAX: usize = 32;
     let n = x.len();
     let kk = KMAX;

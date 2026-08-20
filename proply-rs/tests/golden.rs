@@ -30,7 +30,11 @@ fn near_array(got: &[f64], want: &[f64], tol: f64, ctx: &str) {
 }
 
 fn arr(v: &Value) -> Vec<f64> {
-    v.as_array().unwrap().iter().map(|x| x.as_f64().unwrap()).collect()
+    v.as_array()
+        .unwrap()
+        .iter()
+        .map(|x| x.as_f64().unwrap())
+        .collect()
 }
 
 #[test]
@@ -121,7 +125,9 @@ fn polyfit_golden() {
     near_array(&got_cd, &want_cd, 1e-8, "eval cd");
 
     // Degree-4 twist fit.
-    let r: Vec<f64> = (0..40).map(|i| 0.0625 - (0.0625 - 0.005) * i as f64 / 39.0).collect();
+    let r: Vec<f64> = (0..40)
+        .map(|i| 0.0625 - (0.0625 - 0.005) * i as f64 / 39.0)
+        .collect();
     let twist: Vec<f64> = r
         .iter()
         .map(|ri| (25.0 * (ri / 0.0625).powf(0.6) + 5.0 * (ri * 40.0).sin()).to_radians())
@@ -142,15 +148,34 @@ fn motor_golden() {
     near(q, g["Qmax"].as_f64().unwrap(), 1e-9, "Qmax");
     near(rpm, g["RPMmax"].as_f64().unwrap(), 1e-9, "RPMmax");
     near(m.get_pmax(11.0), g["Pmax"].as_f64().unwrap(), 1e-9, "Pmax");
-    near(m.get_torque(3.0), g["torque_at_3A"].as_f64().unwrap(), 1e-12, "torque@3A");
-    near(m.get_rpm(0.01), g["rpm_at_0_01"].as_f64().unwrap(), 1e-9, "rpm@0.01");
+    near(
+        m.get_torque(3.0),
+        g["torque_at_3A"].as_f64().unwrap(),
+        1e-12,
+        "torque@3A",
+    );
+    near(
+        m.get_rpm(0.01),
+        g["rpm_at_0_01"].as_f64().unwrap(),
+        1e-9,
+        "rpm@0.01",
+    );
 }
 
 #[test]
 fn bem_equations_golden() {
     let g = golden("bem.json");
     let fs = PlateSim { chord: 0.008 };
-    let (dv, ap, theta, rpm, r, dr, u_0, b) = (5.0, 0.05, 28.0_f64.to_radians(), 12000.0, 0.03, 0.002, 1.0, 3.0);
+    let (dv, ap, theta, rpm, r, dr, u_0, b) = (
+        5.0,
+        0.05,
+        28.0_f64.to_radians(),
+        12000.0,
+        0.03,
+        0.002,
+        1.0,
+        3.0,
+    );
     let omega = proply_rs::optimize::rpm2omega(rpm);
     let p = &g["precalc"];
     near(omega, p["omega"].as_f64().unwrap(), 1e-9, "omega");
@@ -158,13 +183,29 @@ fn bem_equations_golden() {
     near(cl, p["CL"].as_f64().unwrap(), 1e-9, "CL");
     near(cd, p["CD"].as_f64().unwrap(), 1e-9, "CD");
     near(phi, p["phi"].as_f64().unwrap(), 1e-9, "phi");
-    let (dv_new, ap_new) = proply_rs::optimize::iterate(&fs, fs.chord, dv, ap, theta, omega, r, dr, u_0, b);
+    let (dv_new, ap_new) =
+        proply_rs::optimize::iterate(&fs, fs.chord, dv, ap, theta, omega, r, dr, u_0, b);
     let it = &g["iterate"];
     near(dv_new, it["dv_new"].as_f64().unwrap(), 1e-9, "dv_new");
-    near(ap_new, it["a_prime_new"].as_f64().unwrap(), 1e-9, "a_prime_new");
+    near(
+        ap_new,
+        it["a_prime_new"].as_f64().unwrap(),
+        1e-9,
+        "a_prime_new",
+    );
     let f = &g["forces"];
-    near(proply_rs::optimize::d_t(dv, r, dr, u_0), f["dT"].as_f64().unwrap(), 1e-9, "dT");
-    near(proply_rs::optimize::d_m(dv, ap, r, dr, omega, u_0), f["dM"].as_f64().unwrap(), 1e-9, "dM");
+    near(
+        proply_rs::optimize::d_t(dv, r, dr, u_0),
+        f["dT"].as_f64().unwrap(),
+        1e-9,
+        "dT",
+    );
+    near(
+        proply_rs::optimize::d_m(dv, ap, r, dr, omega, u_0),
+        f["dM"].as_f64().unwrap(),
+        1e-9,
+        "dM",
+    );
     near(
         proply_rs::optimize::dv_from_thrust(0.3, 0.05, 1.0),
         f["dv_from_thrust"].as_f64().unwrap(),
@@ -180,7 +221,8 @@ fn optimizer_matches_slsqp_reference() {
     // Nelder-Mead is a different (derivative-free) algorithm.
     let g = golden("bem.json");
     let fs = PlateSim { chord: 0.008 };
-    let (dv_goal, theta, rpm, r, dr, u_0, b) = (5.0, 28.0_f64.to_radians(), 12000.0, 0.03, 0.002, 1.0, 3.0);
+    let (dv_goal, theta, rpm, r, dr, u_0, b) =
+        (5.0, 28.0_f64.to_radians(), 12000.0, 0.03, 0.002, 1.0, 3.0);
     let (dv, ap, err) = bem_iterate(&fs, dv_goal, theta, rpm, r, dr, u_0, b);
     assert!(err < 1e-6, "bem err {}", err);
     let x = &g["slsqp_bem"]["x"];
@@ -217,7 +259,10 @@ fn buhl_golden() {
         let s = &g[name];
         let a = arr(&s["a"]);
         let want = arr(&s["ct"]);
-        let got: Vec<f64> = a.iter().map(|ai| proply_rs::optimize::ct_buhl(*ai, f)).collect();
+        let got: Vec<f64> = a
+            .iter()
+            .map(|ai| proply_rs::optimize::ct_buhl(*ai, f))
+            .collect();
         near_array(&got, &want, 1e-12, &format!("ct_buhl {}", name));
     }
 
@@ -226,7 +271,10 @@ fn buhl_golden() {
     let ct = arr(&inv["ct"]);
     for (name, f) in [("F1", 1.0), ("F08", 0.8)] {
         let want = arr(&inv[name]);
-        let got: Vec<f64> = ct.iter().map(|c| proply_rs::optimize::a_buhl(*c, f)).collect();
+        let got: Vec<f64> = ct
+            .iter()
+            .map(|c| proply_rs::optimize::a_buhl(*c, f))
+            .collect();
         near_array(&got, &want, 1e-12, &format!("a_buhl {}", name));
     }
 
@@ -234,7 +282,12 @@ fn buhl_golden() {
     for f in [1.0, 0.8] {
         for c in [0.2, 0.5, 0.9, 0.96, 1.0, 1.2, 1.5, 1.9] {
             let a = proply_rs::optimize::a_buhl(c, f);
-            near(proply_rs::optimize::ct_buhl(a, f), c, 1e-9, &format!("round-trip F={} CT={}", f, c));
+            near(
+                proply_rs::optimize::ct_buhl(a, f),
+                c,
+                1e-9,
+                &format!("round-trip F={} CT={}", f, c),
+            );
         }
     }
 }

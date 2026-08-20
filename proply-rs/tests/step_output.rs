@@ -22,7 +22,9 @@ fn synthetic_prop() -> Prop {
     // Four stations hub -> tip with simple foils (no design loop needed for
     // the geometry).
     for r in [0.006, 0.02, 0.04, 0.06] {
-        let foil = Rc::new(RefCell::new(FoilFamily::Naca4(Naca4::new(0.012, 0.12, 0.06, 0.4))));
+        let foil = Rc::new(RefCell::new(FoilFamily::Naca4(Naca4::new(
+            0.012, 0.12, 0.06, 0.4,
+        ))));
         let be = BladeElement::new(r, 0.002, foil, 0.4, 10000.0, 1.0, store.clone());
         p.blade_elements.push(be);
     }
@@ -35,7 +37,10 @@ fn step_round_trip() {
     let text = step_out::write_prop(&mut p, 12).expect("write_prop");
     // The file is a valid Part 21 document.
     assert!(text.starts_with("ISO-10303-21;"), "wrong header");
-    assert!(text.contains("ADVANCED_BREP_SHAPE_REPRESENTATION"), "no B-rep");
+    assert!(
+        text.contains("ADVANCED_BREP_SHAPE_REPRESENTATION"),
+        "no B-rep"
+    );
 
     // Round-trip through step-io's own reader.
     let (model, report) = step_io::read(text.as_bytes()).expect("step_io read");
@@ -50,7 +55,10 @@ fn step_round_trip() {
     // assembly placements (blade + hub instances).
     assert!(text.contains("'blade'"), "blade part missing");
     assert!(text.contains("'hub'"), "hub part missing");
-    assert!(text.contains("NEXT_ASSEMBLY_USAGE_OCCURRENCE"), "no assembly");
+    assert!(
+        text.contains("NEXT_ASSEMBLY_USAGE_OCCURRENCE"),
+        "no assembly"
+    );
     assert!(text.contains("MANIFOLD_SOLID_BREP"), "no manifold solid");
 }
 
@@ -71,7 +79,9 @@ fn stations_are_vertically_centred_on_the_hub() {
     let store: Arc<Mutex<PolarStore>> =
         Arc::new(Mutex::new(PolarStore::load("/nonexistent/cache.json")));
     for twist in [0.0, 0.4, -0.4] {
-        let foil = Rc::new(RefCell::new(FoilFamily::Naca4(Naca4::new(0.012, 0.12, 0.06, 0.4))));
+        let foil = Rc::new(RefCell::new(FoilFamily::Naca4(Naca4::new(
+            0.012, 0.12, 0.06, 0.4,
+        ))));
         let be = BladeElement::new(0.006, 0.002, foil, twist, 10000.0, 1.0, store.clone());
         let (lower, upper) = be.get_foil_points(24, 0.0);
         let mut zmin = f64::INFINITY;
@@ -97,7 +107,10 @@ fn hub_step_round_trip() {
 
     // The file is a valid Part 21 document.
     assert!(text.starts_with("ISO-10303-21;"), "wrong header");
-    assert!(text.contains("ADVANCED_BREP_SHAPE_REPRESENTATION"), "no B-rep");
+    assert!(
+        text.contains("ADVANCED_BREP_SHAPE_REPRESENTATION"),
+        "no B-rep"
+    );
 
     // Round-trip through step-io's own reader.
     let (model, report) = step_io::read(text.as_bytes()).expect("step_io read");
