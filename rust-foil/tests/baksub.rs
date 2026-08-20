@@ -36,8 +36,9 @@ fn dense_solve(a_in: [[f64; 4]; 4], b_in: [f64; 4], n: usize) -> [f64; 4] {
         // eliminate
         for r in (k + 1)..n {
             let m = a[r][k] / a[k][k];
-            for c in k..n {
-                a[r][c] -= m * a[k][c];
+            let (a_before, a_from_r) = a.split_at_mut(r);
+            for (c, ar_c) in a_from_r[0].iter_mut().enumerate().take(n).skip(k) {
+                *ar_c -= m * a_before[k][c];
             }
             b[r] -= m * b[k];
         }
@@ -74,9 +75,7 @@ fn check(a: [[f64; 4]; 4], b: [f64; 4], n: usize) {
     ludcmp(&mut z, &mut indx, n);
 
     let mut x = vec![0.0f64; 4];
-    for i in 0..n {
-        x[i] = b[i];
-    }
+    x[..n].copy_from_slice(&b[..n]);
     baksub(&z, &indx, &mut x, n);
 
     for i in 0..n {

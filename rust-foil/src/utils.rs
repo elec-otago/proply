@@ -69,8 +69,8 @@ pub fn setexp(s: &mut [f64], ds1: f64, smax: f64, show_output: bool) {
 /// `thold`, ensuring that the position change does not cross the ATAN2
 /// branch cut (which is in the -x direction).
 pub fn atanc(y: f64, x: f64, thold: f64) -> f64 {
-    const PI: f64 = 3.1415926535897932384;
-    const TPI: f64 = 6.2831853071795864769;
+    const PI: f64 = std::f64::consts::PI;
+    const TPI: f64 = std::f64::consts::TAU;
 
     // set new position angle, ignoring branch cut in ATAN2 for now
     let thnew = y.atan2(x);

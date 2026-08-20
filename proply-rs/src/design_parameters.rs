@@ -108,7 +108,7 @@ impl DesignParameters {
 
     /// Disc area (kept for parity with the Python `area()` method).
     pub fn area(&self) -> f64 {
-        3.1415 * self.radius * self.radius
+        std::f64::consts::PI * self.radius * self.radius
     }
 }
 

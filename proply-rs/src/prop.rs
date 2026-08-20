@@ -21,6 +21,7 @@ use crate::pchip::Pchip;
 use crate::polyfit::{polyfit, polyval};
 use crate::simulator::FoilSimulator;
 use crate::smooth::smooth;
+use indicatif::{ProgressBar, ProgressStyle};
 
 /// Camber values scanned by the lifting-line design when no explicit camber
 /// is given (the JSON `camber` key / `--camber`): each candidate gets a full
@@ -159,6 +160,7 @@ impl Prop {
     /// Create a blade element with an explicit chord `c` (the lifting-line
     /// design sizes the chord directly instead of the geometric fit) and
     /// camber fraction `camber` (NACA 4-series `m`).
+    #[cfg(test)]
     fn new_blade_element_with_chord(
         &mut self,
         r: f64,
@@ -322,6 +324,16 @@ impl Prop {
         let mut chords: Vec<f64> = Vec::new();
         let mut prev_twist = 0.0;
 
+        // Station bar: each iteration sizes one blade element, triggering the
+        // lazy first-touch polar sweeps on a cold cache.
+        let pb = ProgressBar::new(radial_points.len() as u64);
+        pb.set_style(
+            ProgressStyle::with_template(
+                "{spinner:.green} [{elapsed_precise}] {pos}/{len} BEM stations (eta {eta})",
+            )
+            .unwrap(),
+        );
+
         for r in &radial_points {
             let u = u_0 + dv_goal;
             let v = omega * r;
@@ -357,7 +369,7 @@ impl Prop {
             total_thrust += d_t;
             total_torque += d_m;
 
-            println!(
+            pb.println(format!(
                 "r={} theta={}, dv={}, a_prime={}, thrust={}, torque={}, eff={} ",
                 r,
                 theta.to_degrees(),
@@ -366,12 +378,14 @@ impl Prop {
                 d_t,
                 d_m,
                 d_t / d_m
-            );
-            println!("{}", be);
+            ));
+            pb.println(be.to_string());
 
             self.blade_elements.push(be);
             prev_twist = theta;
+            pb.inc(1);
         }
+        pb.finish();
 
         self.blade_elements.reverse();
         twist_angles.reverse();
@@ -407,12 +421,6 @@ impl Prop {
         println!("Total Thrust: {:5.2}, Torque: {:5.3}", thrust_final, torque);
         let _ = (total_thrust, total_torque);
         (torque, thrust_final)
-    }
-
-    /// Angle of attack (rad) giving the maximum CL/CD at speed `v`.  See
-    /// [`best_ld`] for how it is found.
-    fn best_alpha<F: FoilLike>(fs: &FoilSimulator<F>, v: f64) -> f64 {
-        Self::best_ld::<F>(fs, v).0
     }
 
     /// The maximum CL/CD at speed `v` and the angle of attack (rad) that
@@ -470,11 +478,21 @@ impl Prop {
     /// Populate the polar cache for `(foil, v)` work items on all available
     /// cores: the first-touch rust-foil sweeps dominate a cold design run,
     /// and the pool overlaps them.  The caller must deduplicate items
-    /// (workers do not coordinate).  No-op in plate mode.
-    fn warm_polar_pool(&self, work: &[(Naca4, f64)]) {
+    /// (workers do not coordinate).  No-op in plate mode.  Progress is
+    /// reported on a bar labelled `what` (hidden when stderr is not a TTY).
+    fn warm_polar_pool(&self, work: &[(Naca4, f64)], what: &str) {
         if work.is_empty() || self.plate_mode {
             return;
         }
+        let pb = ProgressBar::new(work.len() as u64);
+        pb.set_style(
+            ProgressStyle::with_template(
+                "[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} foil polars ({msg}, eta {eta})",
+            )
+            .unwrap()
+            .progress_chars("=>-"),
+        );
+        pb.set_message(what.to_string());
         let queue = Mutex::new(work.to_vec());
         let n_workers = thread::available_parallelism()
             .map(|n| n.get())
@@ -485,14 +503,17 @@ impl Prop {
             for _ in 0..n_workers {
                 let queue = &queue;
                 let store = store.clone();
+                let pb = pb.clone();
                 s.spawn(move || {
                     while let Some((foil, v)) = queue.lock().unwrap().pop() {
                         let fs = FoilSimulator::new(Rc::new(RefCell::new(foil)), store.clone());
                         fs.warm_polars(v);
+                        pb.inc(1);
                     }
                 });
             }
         });
+        pb.finish();
     }
 
     /// One camber candidate's design pass: build the station elements from
@@ -594,19 +615,21 @@ impl Prop {
         // torque (efficiency) among shapes that meet the target.  Seeded at the
         // full chord — the thrust-capable geometry — so it cannot be trapped in
         // a thin/low-thrust region.
+        // (da, err, thrust, torque, alpha, chord, phi) — one design candidate.
+        type MeetOutcome = (f64, f64, f64, f64, Vec<f64>, Vec<f64>, Vec<f64>);
         let meet_thrust = |controls: &[f64],
                            elems: &mut Vec<BladeElement<Naca4>>,
                            pg_r: &RefCell<Vec<f64>>,
                            hint_da: Option<f64>|
-         -> (f64, f64, f64, f64, Vec<f64>, Vec<f64>, Vec<f64>, bool) {
+         -> (MeetOutcome, bool) {
             // returns (da, err, thrust, torque, alpha, chord, phi, reachable)
             let mut cur: Vec<f64> = pg_r.borrow().clone();
-            let mut bst: Option<(f64, f64, f64, f64, Vec<f64>, Vec<f64>, Vec<f64>)> = None; // da, err, t, q, alpha, chord, phi
+            let mut bst: Option<MeetOutcome> = None; // da, err, t, q, alpha, chord, phi
             let mut prev: Option<(f64, f64)> = None; // (da, thrust)
             let mut bracket: Option<(f64, f64)> = None;
             let better = |err: f64,
                           q: f64,
-                          b: &Option<(f64, f64, f64, f64, Vec<f64>, Vec<f64>, Vec<f64>)>|
+                          b: &Option<MeetOutcome>|
              -> bool {
                 match b {
                     None => q > 0.0,
@@ -632,7 +655,7 @@ impl Prop {
                             controls.iter().map(|c| format!("{:.4}", c)).collect::<Vec<_>>().join(" "),
                             hd, t, q
                         );
-                        return (hd, err, t, q, alphas, chords, phis, true);
+                        return ((hd, err, t, q, alphas, chords, phis), true);
                     }
                     bst = Some((hd, err, t, q, alphas, chords, phis));
                     prev = Some((hd, t));
@@ -681,9 +704,12 @@ impl Prop {
             *pg_r.borrow_mut() = cur.clone();
             match bst {
                 Some((da, err, t, q, alphas, chords, phis)) => {
-                    (da, err, t, q, alphas, chords, phis, err <= 0.05)
+                    ((da, err, t, q, alphas, chords, phis), err <= 0.05)
                 }
-                None => (0.0, 1.0, 0.0, 0.0, Vec::new(), Vec::new(), Vec::new(), false),
+                None => (
+                    (0.0, 1.0, 0.0, 0.0, Vec::new(), Vec::new(), Vec::new()),
+                    false,
+                ),
             }
         };
 
@@ -692,7 +718,7 @@ impl Prop {
                 .map(|k| CH_FLOOR * (cap_ctl[k] / CH_FLOOR).powf(x[k].clamp(0.0, 1.0)))
                 .collect();
             let hint = *da_hint.borrow();
-            let (da, err, t, q, _al, _ch, _ph, _reach) = {
+            let ((da, err, t, q, _al, _ch, _ph), _reach) = {
                 let mut e = state.borrow_mut();
                 meet_thrust(&controls, &mut e, &pg, hint)
             };
@@ -709,8 +735,10 @@ impl Prop {
             q + 50.0 * err
         };
 
-        let mut nm = optimize::NelderMead::default();
-        nm.maxiter = 120;
+        let nm = optimize::NelderMead {
+            maxiter: 120,
+            ..Default::default()
+        };
         let bounds: Vec<Option<(f64, f64)>> = vec![Some((0.0, 1.0)); n_ctrl];
         // First start at the full chord (the thrust-capable geometry); each
         // later start warm-starts from the running best point so the simplex
@@ -725,7 +753,7 @@ impl Prop {
                 let scale = if i == 1 { 0.85 } else { 0.7 };
                 best_x.iter().map(|&v| (scale * v).clamp(0.0, 1.0)).collect()
             };
-            let (x, f) = nm.minimize(&obj, &x0, &bounds);
+            let (x, f) = nm.minimize(obj, &x0, &bounds);
             if f < best_f {
                 best_f = f;
                 best_x = x;
@@ -747,7 +775,7 @@ impl Prop {
         let controls: Vec<f64> = (0..n_ctrl)
             .map(|k| CH_FLOOR * (cap_ctl[k] / CH_FLOOR).powf(best_x[k].clamp(0.0, 1.0)))
             .collect();
-        let (da, err, r_t, r_q, _al, chords, phis, _reach) = {
+        let ((da, err, r_t, r_q, _al, chords, phis), _reach) = {
             let hint = *da_hint.borrow();
             meet_thrust(&controls, &mut elements, &pg, hint)
         };
@@ -861,7 +889,7 @@ impl Prop {
             }
             rows.push(row);
         }
-        self.warm_polar_pool(&work);
+        self.warm_polar_pool(&work, "seeding warm-up");
 
         // Seed the best-L/D attack angles from the (now cached) polars.
         // Each seed is (label, per-station camber, smoothed attack angles).
@@ -909,7 +937,7 @@ impl Prop {
                     work.push((f, vv));
                 }
             }
-            self.warm_polar_pool(&work);
+            self.warm_polar_pool(&work, "composed-camber warm-up");
             // Each station keeps its winning candidate's attack angle.
             let alpha_raw: Vec<f64> = (0..m).map(|i| raw_alphas[winners[i]][i]).collect();
             let alpha_base = smooth_alpha_curve(&rr, &alpha_raw);
@@ -974,15 +1002,15 @@ impl Prop {
         // geometry outcome (chord and twist per station).
         println!("Lifting-line blade stations");
         let mut elements: Vec<BladeElement<Naca4>> = Vec::with_capacity(m);
-        for i in 0..m {
+        for (i, &ri) in rr.iter().enumerate() {
             let alpha =
                 (win.alpha_base[i] + win.da).clamp(-lift_line::ALPHA_MAX, lift_line::ALPHA_MAX);
-            let phi0 = u_0.atan2(omega * rr[i]).max(1.0e-3);
-            let c = chord_law(&self.param, n_blades, rr[i], 0.0, s_cap);
+            let phi0 = u_0.atan2(omega * ri).max(1.0e-3);
+            let c = chord_law(&self.param, n_blades, ri, 0.0, s_cap);
             let foil =
-                Rc::new(RefCell::new(station_foil(&self.param, rr[i], c, win.camber_dist[i])));
+                Rc::new(RefCell::new(station_foil(&self.param, ri, c, win.camber_dist[i])));
             let mut be = BladeElement::new(
-                rr[i],
+                ri,
                 self.radial_resolution,
                 foil,
                 phi0 + 0.12,
@@ -997,7 +1025,7 @@ impl Prop {
             be.set_twist(win.phis[i] + alpha);
             println!(
                 "r={} camber={} alpha_base={} alpha={} phi={} twist={} chord={} ",
-                rr[i],
+                ri,
                 win.camber_dist[i],
                 win.alpha_base[i].to_degrees(),
                 alpha.to_degrees(),

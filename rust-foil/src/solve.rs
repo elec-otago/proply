@@ -111,9 +111,7 @@ pub fn ludcmp(a: &mut [f64], indx: &mut [i32], n: usize) {
 
         if j != imax {
             for k in 0..n {
-                let dum = a[k * nsiz + imax];
-                a[k * nsiz + imax] = a[k * nsiz + j];
-                a[k * nsiz + j] = dum;
+                a.swap(k * nsiz + imax, k * nsiz + j);
             }
             vv[imax] = vv[j];
         }

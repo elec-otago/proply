@@ -579,14 +579,16 @@ pub fn solve_with_influence<F: FoilLike>(
     let r: Vec<f64> = stations.iter().map(|s| s.r).collect();
     let dr = &infl.dr;
 
-    let mut res = LiftLineResult::default();
-    res.gamma = vec![0.0; m];
-    res.u_i = vec![0.0; m];
-    res.v_i = vec![0.0; m];
-    res.alpha = vec![0.0; m];
-    res.phi = vec![0.0; m];
-    res.d_thrust = vec![0.0; m];
-    res.d_torque = vec![0.0; m];
+    let mut res = LiftLineResult {
+        gamma: vec![0.0; m],
+        u_i: vec![0.0; m],
+        v_i: vec![0.0; m],
+        alpha: vec![0.0; m],
+        phi: vec![0.0; m],
+        d_thrust: vec![0.0; m],
+        d_torque: vec![0.0; m],
+        ..Default::default()
+    };
 
     // Exact linear influence, then a damped-Newton circulation solve.
     let u_mat = infl.matrices();
@@ -595,9 +597,9 @@ pub fn solve_with_influence<F: FoilLike>(
 
     // Final induced velocities and inflow angles from the converged gamma.
     let flow = eval_flow(&gamma, stations, u_0, omega, &u_mat, &infl.vdiag, fs);
-    for i in 0..m {
+    for (i, g) in gamma.iter().enumerate() {
         res.u_i[i] = flow.u[i] - u_0;
-        res.v_i[i] = infl.vdiag[i] * gamma[i];
+        res.v_i[i] = infl.vdiag[i] * g;
         res.phi[i] = flow.phi[i];
         res.alpha[i] = flow.alpha[i];
     }

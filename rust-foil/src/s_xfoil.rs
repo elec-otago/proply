@@ -107,11 +107,9 @@ pub fn cpcalc(q: &[f64], qinf: f64, minf: f64, cp: &mut [f64], show_output: bool
         }
     }
 
-    if denneg {
-        if show_output {
-            eprintln!();
-            eprintln!("CPCALC: Local speed too large. Compressibility corrections invalid.");
-        }
+    if denneg && show_output {
+        eprintln!();
+        eprintln!("CPCALC: Local speed too large. Compressibility corrections invalid.");
     }
 }
 

@@ -156,7 +156,7 @@ mod tests {
         let mut t = 0.0;
         while t <= 3.0 {
             let v = p.eval(t);
-            assert!(v >= -1e-12 && v <= 1.0 + 1e-12, "overshoot at {}: {}", t, v);
+            assert!((-1e-12..=1.0 + 1e-12).contains(&v), "overshoot at {}: {}", t, v);
             t += 0.05;
         }
     }

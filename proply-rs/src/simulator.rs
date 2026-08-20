@@ -128,11 +128,14 @@ fn blend_poly(lo: &[f64], hi: &[f64], w: f64) -> Vec<f64> {
 /// like the Python `self.fs = FoilSimulator(self.foil)` — so chord changes
 /// made through `set_chord` are seen by the simulator (they feed the
 /// Reynolds number).
+/// (hash, reynolds) -> fitted (cl, cd) polynomial coefficients.
+type PolarEq = (String, u64);
+/// Keyed cache of polar fits, `PolarEq -> (cl, cd) coefficient vectors`.
+type PolyCache = RefCell<HashMap<PolarEq, (Vec<f64>, Vec<f64>)>>;
 pub struct FoilSimulator<F: FoilLike> {
     foil: Rc<RefCell<F>>,
     store: Arc<Mutex<PolarStore>>,
-    /// (hash, reynolds) -> fitted (cl, cd) polynomial coefficients.
-    poly_cache: RefCell<HashMap<(String, u64), (Vec<f64>, Vec<f64>)>>,
+    poly_cache: PolyCache,
     /// When set, CL/CD come from the analytic flat-plate model (2 pi alpha,
     /// 1.28 sin alpha) instead of simulated polars — used for testing the
     /// design chain against the Python `PlateSimulatedFoil`.
@@ -447,7 +450,7 @@ mod tests {
         // v = 10 m/s, chord 0.05: Re = 1.225*10*0.05/15.11e-6 = 40536,
         // which lies between grid points 1 and 2.
         let f = Naca4::new(0.05, 0.12, 0.0, 0.4);
-        let fs = FoilSimulator::new(Rc::new(RefCell::new(f)), test_store());
+        let _fs = FoilSimulator::new(Rc::new(RefCell::new(f)), test_store());
         let re = 1.225 * 10.0 * 0.05 / 15.11e-6;
         let (lo, hi, w) = re_bracket(re);
         assert_eq!((lo, hi), (1, 2), "re = {}", re);

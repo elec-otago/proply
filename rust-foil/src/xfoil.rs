@@ -159,10 +159,8 @@ pub fn naca(xf: &mut Xfoil, ides1: i32) {
     xf.lbflap = false;
 
     xf.nb = nb;
-    for i in 0..nb {
-        xf.xb[i] = xb[i];
-        xf.yb[i] = yb[i];
-    }
+    xf.xb[..nb].copy_from_slice(&xb[..nb]);
+    xf.yb[..nb].copy_from_slice(&yb[..nb]);
 
     scalc(&xf.xb[..nb], &xf.yb[..nb], &mut xf.sb[..nb]);
     segspl(&xf.xb[..nb], &mut xf.xbp[..nb], &xf.sb[..nb]);
@@ -577,7 +575,8 @@ pub fn pangen(xf: &mut Xfoil, shopar: bool) {
             let sbcorn = xf.sb[ib - 1];
 
             // find current-airfoil panel which contains corner
-            for i in 0..n {
+            let mut i = 0;
+            while i < n {
                 // keep stepping until first node past corner
                 if xf.s[i] > sbcorn {
                     // move remainder of panel nodes to make room for additional node
@@ -612,6 +611,7 @@ pub fn pangen(xf: &mut Xfoil, shopar: bool) {
                     // go on to next input geometry point to check for corner
                     break;
                 }
+                i += 1;
             }
         }
     }

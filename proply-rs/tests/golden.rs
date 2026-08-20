@@ -154,11 +154,11 @@ fn bem_equations_golden() {
     let omega = proply_rs::optimize::rpm2omega(rpm);
     let p = &g["precalc"];
     near(omega, p["omega"].as_f64().unwrap(), 1e-9, "omega");
-    let (cl, cd, phi) = proply_rs::optimize::precalc(&fs, dv, ap, theta, omega, r, dr, u_0, b as f64);
+    let (cl, cd, phi) = proply_rs::optimize::precalc(&fs, dv, ap, theta, omega, r, dr, u_0, b);
     near(cl, p["CL"].as_f64().unwrap(), 1e-9, "CL");
     near(cd, p["CD"].as_f64().unwrap(), 1e-9, "CD");
     near(phi, p["phi"].as_f64().unwrap(), 1e-9, "phi");
-    let (dv_new, ap_new) = proply_rs::optimize::iterate(&fs, fs.chord, dv, ap, theta, omega, r, dr, u_0, b as f64);
+    let (dv_new, ap_new) = proply_rs::optimize::iterate(&fs, fs.chord, dv, ap, theta, omega, r, dr, u_0, b);
     let it = &g["iterate"];
     near(dv_new, it["dv_new"].as_f64().unwrap(), 1e-9, "dv_new");
     near(ap_new, it["a_prime_new"].as_f64().unwrap(), 1e-9, "a_prime_new");
@@ -181,13 +181,13 @@ fn optimizer_matches_slsqp_reference() {
     let g = golden("bem.json");
     let fs = PlateSim { chord: 0.008 };
     let (dv_goal, theta, rpm, r, dr, u_0, b) = (5.0, 28.0_f64.to_radians(), 12000.0, 0.03, 0.002, 1.0, 3.0);
-    let (dv, ap, err) = bem_iterate(&fs, dv_goal, theta, rpm, r, dr, u_0, b as f64);
+    let (dv, ap, err) = bem_iterate(&fs, dv_goal, theta, rpm, r, dr, u_0, b);
     assert!(err < 1e-6, "bem err {}", err);
     let x = &g["slsqp_bem"]["x"];
     near(dv, x[0].as_f64().unwrap(), 0.05, "bem dv vs SLSQP");
     near(ap, x[1].as_f64().unwrap(), 0.005, "bem a_prime vs SLSQP");
 
-    let (x4, fun) = optimize_all(&fs, dv_goal, rpm, r, dr, u_0, b as f64, 0.012);
+    let (x4, fun) = optimize_all(&fs, dv_goal, rpm, r, dr, u_0, b, 0.012);
     let xa = &g["slsqp_all"]["x"];
     // The objective is flat in theta and chord near the optimum, so those
     // may differ while the objective value matches (NM actually finds a

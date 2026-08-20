@@ -86,19 +86,14 @@ fn chord_params(points: &[[f64; 3]]) -> Vec<f64> {
 /// (averaged per P&T eq. 9.8, which keeps the collocation matrix
 /// well-conditioned).
 fn clamped_knots(m: usize, degree: usize, u: &[f64]) -> Vec<f64> {
-    let mut knots = Vec::with_capacity(m + degree + 1);
-    for _ in 0..=degree {
-        knots.push(0.0);
-    }
+    let mut knots = vec![0.0; degree + 1];
     // U_{j+p} = (u_j + u_{j+1} + u_{j+2}) / p, j = 1 .. m-p-1
     let p = degree as f64;
     for j in 1..=(m - degree - 1) {
         let s: f64 = (0..degree).map(|k| u[j + k]).sum();
         knots.push(s / p);
     }
-    for _ in 0..=degree {
-        knots.push(1.0);
-    }
+    knots.extend(std::iter::repeat_n(1.0, degree + 1));
     knots
 }
 
@@ -290,9 +285,9 @@ pub fn ruled(a: &NurbsCurve, b: &NurbsCurve) -> NurbsSurface {
     assert_eq!(a.control_points.len(), b.control_points.len());
     let n_u = a.control_points.len();
     let mut control = vec![vec![[0.0; 3]; 2]; n_u];
-    for i in 0..n_u {
-        control[i][0] = a.control_points[i];
-        control[i][1] = b.control_points[i];
+    for (i, row) in control.iter_mut().enumerate() {
+        row[0] = a.control_points[i];
+        row[1] = b.control_points[i];
     }
     NurbsSurface {
         degree_u: a.degree,

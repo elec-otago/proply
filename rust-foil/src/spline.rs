@@ -124,16 +124,16 @@ pub fn trisol(a: &mut [f64], b: &[f64], c: &mut [f64], d: &mut [f64]) {
     let kk = a.len();
     for k in 1..kk {
         let km = k - 1;
-        c[km] = c[km] / a[km];
-        d[km] = d[km] / a[km];
-        a[k] = a[k] - b[k] * c[km];
-        d[k] = d[k] - b[k] * d[km];
+        c[km] /= a[km];
+        d[km] /= a[km];
+        a[k] -= b[k] * c[km];
+        d[k] -= b[k] * d[km];
     }
 
-    d[kk - 1] = d[kk - 1] / a[kk - 1];
+    d[kk - 1] /= a[kk - 1];
 
     for k in (0..kk - 1).rev() {
-        d[k] = d[k] - c[k] * d[k + 1];
+        d[k] -= c[k] * d[k + 1];
     }
 }
 
@@ -339,7 +339,7 @@ pub fn splnxy(x: &[f64], xs: &mut [f64], y: &[f64], ys: &mut [f64], s: &mut [f64
             s[i] = s[i - 1] + sint.sqrt();
         }
 
-        serr = serr / (s[n - 1] - s[0]);
+        serr /= s[n - 1] - s[0];
         if show_output {
             eprintln!("  {}  {:e}", _ipass, serr);
         }

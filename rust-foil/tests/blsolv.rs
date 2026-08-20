@@ -144,8 +144,8 @@ fn blsolv_three_stations() {
             }
         }
         for mc in 1..=nst {
-            for r in 0..3 {
-                m[st][mc - 1][r] = 0.5 + st as f64 * 0.7 + mc as f64 * 0.3 + r as f64 * 0.05;
+            for (r, mval) in m[st][mc - 1].iter_mut().enumerate() {
+                *mval = 0.5 + st as f64 * 0.7 + mc as f64 * 0.3 + r as f64 * 0.05;
             }
         }
     }
@@ -184,8 +184,8 @@ fn blsolv_three_stations() {
             }
         }
         for mc in 1..=nst {
-            for r in 0..3 {
-                xf.vm[Xfoil::vm_index(st, mc, r + 1)] = m[st][mc - 1][r];
+            for (r, mval) in m[st][mc - 1].iter().enumerate() {
+                xf.vm[Xfoil::vm_index(st, mc, r + 1)] = *mval;
             }
         }
         for r in 0..3 {

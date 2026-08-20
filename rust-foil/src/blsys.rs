@@ -369,11 +369,17 @@ pub fn trchek2(xf: &mut Xfoil) -> bool {
 
     // Check if ANY of the printed variables contain NaN's. If they do,
     // convergence will never be reached.
-    if x1.is_nan() || xt.is_nan() || x2.is_nan() || ampl1.is_nan() || amplt.is_nan() || xf.com2.ampl.is_nan() || ax.is_nan() || da2.is_nan()
+    if (x1.is_nan()
+        || xt.is_nan()
+        || x2.is_nan()
+        || ampl1.is_nan()
+        || amplt.is_nan()
+        || xf.com2.ampl.is_nan()
+        || ax.is_nan()
+        || da2.is_nan())
+        && xf.abort_on_nan
     {
-        if xf.abort_on_nan {
-            return false;
-        }
+        return false;
     }
 
     // test for free or forced transition
@@ -432,12 +438,12 @@ pub fn trchek2(xf: &mut Xfoil) -> bool {
     dt_a1 = d1 * wf1_a1 + xf.com2.d * wf2_a1;
     ut_a1 = u1 * wf1_a1 + xf.com2.u * wf2_a1;
 
-    xf.xt_x1 = x1 * wf1_x1 + x2 * wf2_x1 + xf.xt_x1;
+    xf.xt_x1 += x1 * wf1_x1 + x2 * wf2_x1;
     tt_x1 = t1 * wf1_x1 + xf.com2.t * wf2_x1;
     dt_x1 = d1 * wf1_x1 + xf.com2.d * wf2_x1;
     ut_x1 = u1 * wf1_x1 + xf.com2.u * wf2_x1;
 
-    xf.xt_x2 = x1 * wf1_x2 + x2 * wf2_x2 + xf.xt_x2;
+    xf.xt_x2 += x1 * wf1_x2 + x2 * wf2_x2;
     tt_x2 = t1 * wf1_x2 + xf.com2.t * wf2_x2;
     dt_x2 = d1 * wf1_x2 + xf.com2.d * wf2_x2;
     ut_x2 = u1 * wf1_x2 + xf.com2.u * wf2_x2;
@@ -551,7 +557,7 @@ pub fn dampl(hk: f64, th: f64, rt: f64) -> (f64, f64, f64, f64) {
     let grc_hk = aa_hk + 0.7 * bb_hk;
 
     let gr = rt.log10();
-    let gr_rt = 1.0 / (2.3025851 * rt);
+    let gr_rt = 1.0 / (std::f64::consts::LN_10 * rt);
 
     if gr < grcrit - DGR {
         // no amplification for Rtheta < Rcrit
@@ -618,7 +624,7 @@ pub fn dampl2(hk: f64, th: f64, rt: f64) -> (f64, f64, f64, f64) {
     let grc_hk = aa_hk + 0.7 * bb_hk;
 
     let gr = rt.log10();
-    let gr_rt = 1.0 / (2.3025851 * rt);
+    let gr_rt = 1.0 / (std::f64::consts::LN_10 * rt);
 
     if gr < grc - DGR {
         return (0.0, 0.0, 0.0, 0.0);
@@ -878,9 +884,9 @@ pub fn cft(hk: f64, rt: f64, msq: f64, cffac: f64) -> (f64, f64, f64, f64) {
 
     let thk = (4.0 - hk / 0.875).tanh();
 
-    let cfo = cffac * 0.3 * arg.exp() * (grt / 2.3026).powf(gex);
+    let cfo = cffac * 0.3 * arg.exp() * (grt / std::f64::consts::LN_10).powf(gex);
     let cf = (cfo + 1.1E-4 * (thk - 1.0)) / fc;
-    let cf_hk = (-1.33 * cfo - 0.31 * (grt / 2.3026).ln() * cfo - 1.1E-4 * (1.0 - thk * thk) / 0.875) / fc;
+    let cf_hk = (-1.33 * cfo - 0.31 * (grt / std::f64::consts::LN_10).ln() * cfo - 1.1E-4 * (1.0 - thk * thk) / 0.875) / fc;
     let cf_rt = gex * cfo / (fc * grt) / rt;
     let cf_msq = gex * cfo / (fc * grt) * (-0.25 * gm1 / (fc * fc)) - 0.25 * gm1 * cf / (fc * fc);
 
@@ -1397,7 +1403,7 @@ pub fn blsys(xf: &mut Xfoil) {
         // at similarity station, "1" variables are really "2" variables
         for k in 0..4 {
             for l in 0..5 {
-                xf.vs2[k][l] = xf.vs1[k][l] + xf.vs2[k][l];
+                xf.vs2[k][l] += xf.vs1[k][l];
                 xf.vs1[k][l] = 0.0;
             }
         }

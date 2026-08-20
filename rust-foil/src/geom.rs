@@ -81,6 +81,7 @@ pub fn lefind(sle: &mut f64, x: &[f64], xp: &[f64], y: &[f64], yp: &[f64], s: &[
 
 /// Calculates arc length `sopp` of the point which is opposite of point `si`,
 /// on the other side of the airfoil baseline.
+#[allow(clippy::too_many_arguments)] // XFOIL port signature
 pub fn sopps(sopp: &mut f64, si: f64, x: &[f64], xp: &[f64], y: &[f64], yp: &[f64], s: &[f64], sle: f64, show_output: bool) {
     let n = s.len();
 
@@ -249,6 +250,7 @@ pub fn geopar(
 /// Calculates geometric properties of shape X,Y (centroid, inertias,
 /// principal-axis angles).  `itype = 1` integrates over the whole area dx dy,
 /// `itype = 2` integrates over skin area t ds.
+#[allow(clippy::too_many_arguments)] // XFOIL port signature
 pub fn aecalc(
     x: &[f64],
     y: &[f64],
@@ -263,7 +265,7 @@ pub fn aecalc(
     apx2: &mut f64,
 ) {
     let n = x.len();
-    const PI: f64 = 3.141592653589793238;
+    const PI: f64 = std::f64::consts::PI;
 
     let mut sint = 0.0;
     let mut aint = 0.0;
@@ -375,6 +377,7 @@ pub fn aecalc(
 
 /// Calculates max thickness and camber at airfoil points (discrete-point
 /// approximation).
+#[allow(clippy::too_many_arguments)] // XFOIL port signature
 pub fn tccalc(x: &[f64], xp: &[f64], y: &[f64], yp: &[f64], s: &[f64], thick: &mut f64, cambr: &mut f64, show_output: bool) {
     let n = s.len();
 
@@ -444,7 +447,7 @@ pub fn cang(x: &[f64], y: &[f64], iprint: i32, amax: &mut f64, imax: &mut usize,
 
         let crossp =
             (dx2 * dy1 - dy2 * dx1) / ((dx1 * dx1 + dy1 * dy1) * (dx2 * dx2 + dy2 * dy2)).sqrt();
-        let angl = crossp.asin() * (180.0 / 3.1415926);
+        let angl = crossp.asin() * (180.0 / std::f64::consts::PI);
         if iprint == 2 && show_output {
             eprintln!("{:3} {:9.4} {:9.4} {:9.3}", i + 1, x[i], y[i], angl);
         }

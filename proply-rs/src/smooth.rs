@@ -78,8 +78,8 @@ mod tests {
         let mut x = vec![0.0; 15];
         x[7] = 1.0;
         let y = smooth(&x, 5, "flat");
-        for i in 5..=9 {
-            assert!((y[i] - 0.2).abs() < 1e-12, "y[{}] = {}", i, y[i]);
+        for (i, yv) in y.iter().enumerate().take(10).skip(5) {
+            assert!((yv - 0.2).abs() < 1e-12, "y[{}] = {}", i, yv);
         }
         assert!(y[4].abs() < 1e-12);
         assert!(y[10].abs() < 1e-12);

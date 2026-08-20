@@ -104,7 +104,7 @@ pub fn specal(xf: &mut Xfoil) {
                 break;
             }
 
-            rlx = 0.5 * rlx;
+            rlx *= 0.5;
         }
 
         // set new CL(M)

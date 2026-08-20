@@ -99,10 +99,8 @@ impl XFoil {
         let n_in = x.len();
         let xf = &mut self.state;
 
-        for i in 0..n_in {
-            xf.xb[i] = x[i];
-            xf.yb[i] = y[i];
-        }
+        xf.xb[..n_in].copy_from_slice(&x[..n_in]);
+        xf.yb[..n_in].copy_from_slice(&y[..n_in]);
         xf.nb = n_in;
 
         // calculate airfoil area assuming counterclockwise ordering
@@ -229,11 +227,7 @@ impl XFoil {
     /// Sets the Reynolds number.  A value of 0 selects inviscid mode.
     pub fn set_reynolds(&mut self, re: f64) {
         let xf = &mut self.state;
-        if re == 0.0 {
-            xf.lvisc = false;
-        } else {
-            xf.lvisc = true;
-        }
+        xf.lvisc = re != 0.0;
         xf.reinf1 = re;
         xf.lbli_ni = false;
         xf.lipan = false;

@@ -116,7 +116,7 @@ fn wake_gap_persists_across_alpha_sweep() {
     // xicalc, so it should not vary meaningfully with alpha).
     let mut xf = XFoil::new();
     xf.set_show_output(false);
-    xf.naca(0012);
+    xf.naca(12);
     xf.set_reynolds(1.0e6);
     xf.set_max_iter(100);
 

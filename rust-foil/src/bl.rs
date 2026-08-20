@@ -103,20 +103,16 @@ pub fn setbl(xf: &mut Xfoil) -> bool {
     // while sidestepping the &mut xf aliasing that long-lived field borrows
     // would create).  They are returned to the state at the end of setbl.
     let mut usav = std::mem::take(&mut xf.bl_usav);
-    for is in 0..2 {
-        for ibl in 2..=xf.nbl[is] as usize {
-            usav[is][ibl] = xf.uedg[is][ibl];
-        }
+    for (is, usav_is) in usav.iter_mut().enumerate() {
+        let n = xf.nbl[is] as usize;
+        usav_is[2..=n].copy_from_slice(&xf.uedg[is][2..=n]);
     }
 
     ueset(xf);
 
-    for is in 0..2 {
-        for ibl in 2..=xf.nbl[is] as usize {
-            let temp = usav[is][ibl];
-            usav[is][ibl] = xf.uedg[is][ibl];
-            xf.uedg[is][ibl] = temp;
-        }
+    for (is, usav_is) in usav.iter_mut().enumerate() {
+        let n = xf.nbl[is] as usize;
+        usav_is[2..=n].swap_with_slice(&mut xf.uedg[is][2..=n]);
     }
 
     let ile1 = xf.ipan[0][2] as usize;
@@ -216,17 +212,16 @@ pub fn setbl(xf: &mut Xfoil) -> bool {
 
             let mut dsi = mdi / uei;
 
-            let dswaki;
-            if xf.wake {
+            let dswaki = if xf.wake {
                 let iw = ibl - xf.iblte[is] as usize;
                 // WAKE GAP indexing: wgap is a 0-based array of length IWX.
                 // BL station `ibl == iblte[is] + iw` (iw = 1..nw) must read
                 // wgap[iw-1].  Using wgap[iw] here would read one element past
                 // the intended slot and, at iw == IWX, past the array end.
-                dswaki = xf.wgap[iw - 1];
+                xf.wgap[iw - 1]
             } else {
-                dswaki = 0.0;
-            }
+                0.0
+            };
 
             // set derivatives of DSI (= D2)
             let d2_m2 = 1.0 / uei;
@@ -576,14 +571,13 @@ pub fn mrchue(xf: &mut Xfoil) -> bool {
             let xsi = xf.xssi[is][ibl];
             let mut uei = xf.uedg[is][ibl];
 
-            let dswaki;
-            if xf.wake {
+            let dswaki = if xf.wake {
                 let iw = ibl - xf.iblte[is] as usize;
                 // wgap is 0-based; BL wake station iw (1-based) reads wgap[iw-1].
-                dswaki = xf.wgap[iw - 1];
+                xf.wgap[iw - 1]
             } else {
-                dswaki = 0.0;
-            }
+                0.0
+            };
 
             let mut direct = true;
             let mut htarg = 0.0;
@@ -937,14 +931,13 @@ pub fn mrchdu(xf: &mut Xfoil) -> bool {
                 }
             }
 
-            let dswaki;
-            if xf.wake {
+            let dswaki = if xf.wake {
                 let iw = ibl - xf.iblte[is] as usize;
                 // wgap is 0-based; BL wake station iw (1-based) reads wgap[iw-1].
-                dswaki = xf.wgap[iw - 1];
+                xf.wgap[iw - 1]
             } else {
-                dswaki = 0.0;
-            }
+                0.0
+            };
 
             if ibl <= xf.iblte[is] as usize {
                 dsi = (dsi - dswaki).max(1.02000 * thi) + dswaki;
@@ -1039,9 +1032,7 @@ pub fn mrchdu(xf: &mut Xfoil) -> bool {
                     let mut vztmp = [0.0f64; 4];
                     for k in 0..4 {
                         vztmp[k] = xf.vsrez[k];
-                        for l in 0..5 {
-                            vtmp[k][l] = xf.vs2[k][l];
-                        }
+                        vtmp[k].copy_from_slice(&xf.vs2[k]);
                     }
 
                     // set unit dHk
@@ -1543,26 +1534,24 @@ pub fn update(xf: &mut Xfoil) {
             xf.dstr[is][ibl] += rlx * ddstr;
             xf.uedg[is][ibl] += rlx * duedg;
 
-            let dswaki;
-            if ibl > xf.iblte[is] as usize {
+            let dswaki = if ibl > xf.iblte[is] as usize {
                 let iw = ibl - xf.iblte[is] as usize;
                 // wgap is 0-based; BL wake station iw (1-based) reads wgap[iw-1].
-                dswaki = xf.wgap[iw - 1];
+                xf.wgap[iw - 1]
             } else {
-                dswaki = 0.0;
-            }
+                0.0
+            };
 
             // eliminate absurd transients
             if ibl >= xf.itran[is] as usize {
                 xf.ctau[is][ibl] = xf.ctau[is][ibl].min(0.25);
             }
 
-            let hklim;
-            if ibl <= xf.iblte[is] as usize {
-                hklim = 1.02;
+            let hklim = if ibl <= xf.iblte[is] as usize {
+                1.02
             } else {
-                hklim = 1.00005;
-            }
+                1.00005
+            };
             let msq = xf.uedg[is][ibl].powi(2) * hstinv / (xf.gamm1 * (1.0 - 0.5 * xf.uedg[is][ibl].powi(2) * hstinv));
             let mut dsw = xf.dstr[is][ibl] - dswaki;
             dslim(&mut dsw, xf.thet[is][ibl], xf.uedg[is][ibl], msq, hklim);

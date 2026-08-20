@@ -198,14 +198,13 @@ pub fn psilin(xf: &mut Xfoil, i: usize, xi: f64, yi: f64, nxi: f64, nyi: f64, ps
             let rs2 = rx2 * rx2 + ry2 * ry2;
 
             // set reflection flag SGN to avoid branch problems with arctan
-            let sgn;
-            if io < n {
+            let sgn = if io < n {
                 // no problem on airfoil surface
-                sgn = 1.0;
+                1.0
             } else {
                 // make sure arctan falls between -/+ Pi/2
-                sgn = yy.signum();
-            }
+                yy.signum()
+            };
 
             // set log(r^2) and arctan(x/y), correcting for reflection if any
             if io != jo && rs1 > 0.0 {
@@ -471,6 +470,7 @@ pub fn psilin(xf: &mut Xfoil, i: usize, xi: f64, yi: f64, nxi: f64, nyi: f64, ps
 /// Calculates current streamfunction Psi and tangential velocity Qtan at
 /// panel node or wake node I due to freestream and wake sources Sig, plus
 /// sensitivity vectors dPsi/dSig (DZDM) and dQtan/dSig (DQDM).
+#[allow(clippy::too_many_arguments)] // XFOIL port signature
 pub fn pswlin(xf: &mut Xfoil, i: usize, xi: f64, yi: f64, nxi: f64, nyi: f64, psi: &mut f64, psi_ni: &mut f64) {
     let n = xf.n;
     let nw = xf.nw;
@@ -524,12 +524,11 @@ pub fn pswlin(xf: &mut Xfoil, i: usize, xi: f64, yi: f64, nxi: f64, nyi: f64, ps
         let rs1 = rx1 * rx1 + ry1 * ry1;
         let rs2 = rx2 * rx2 + ry2 * ry2;
 
-        let sgn;
-        if io >= n && io < n + nw {
-            sgn = 1.0;
+        let sgn = if io >= n && io < n + nw {
+            1.0
         } else {
-            sgn = yy.signum();
-        }
+            yy.signum()
+        };
 
         let (g1, t1);
         if io != jo && rs1 > 0.0 {

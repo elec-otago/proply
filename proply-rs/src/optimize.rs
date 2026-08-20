@@ -368,8 +368,8 @@ impl NelderMead {
 
             // Convergence: simplex size and function spread.
             let mut size: f64 = 0.0;
-            for i in 1..=n {
-                for (j, v) in simplex[i].0.iter().enumerate() {
+            for s in simplex.iter().take(n + 1).skip(1) {
+                for (j, v) in s.0.iter().enumerate() {
                     size = size.max((v - best.0[j]).abs());
                 }
             }
@@ -380,13 +380,13 @@ impl NelderMead {
 
             // Centroid of all but the worst.
             let mut centroid = vec![0.0; n];
-            for i in 0..n {
-                for j in 0..n {
-                    centroid[j] += simplex[i].0[j];
+            for s in simplex.iter().take(n) {
+                for (j, v) in s.0.iter().enumerate() {
+                    centroid[j] += v;
                 }
             }
-            for j in 0..n {
-                centroid[j] /= n as f64;
+            for c in centroid.iter_mut() {
+                *c /= n as f64;
             }
 
             // Reflect.
@@ -523,7 +523,7 @@ pub fn optimize_all<S: FoilSim>(
     let mut best: Option<(Vec<f64>, f64)> = None;
     for x0 in starts {
         let (x, fun) = nm.minimize(|x| min_all(x, fs, dv_goal, rpm, r, dr, u_0, b), &x0, &bounds);
-        if best.as_ref().map_or(true, |(_, f)| fun < *f) {
+        if best.as_ref().is_none_or(|(_, f)| fun < *f) {
             best = Some((x, fun));
         }
     }
@@ -551,11 +551,11 @@ mod tests {
         let rpm = 12000.0;
         let (r, dr, u_0, b) = (0.03, 0.002, 1.0, 3.0);
         let omega = rpm2omega(rpm);
-        let (cl, cd, phi) = precalc(&fs, dv, a_prime, theta, omega, r, dr, u_0, b as f64);
+        let (cl, cd, phi) = precalc(&fs, dv, a_prime, theta, omega, r, dr, u_0, b);
         assert!((cl - 2.027597).abs() < 1e-4, "cl {}", cl);
         assert!((cd - 0.405927).abs() < 1e-4, "cd {}", cd);
         assert!((phi - 0.165990).abs() < 1e-5, "phi {}", phi);
-        let (dv_new, ap_new) = iterate(&fs, fs.chord, dv, a_prime, theta, omega, r, dr, u_0, b as f64);
+        let (dv_new, ap_new) = iterate(&fs, fs.chord, dv, a_prime, theta, omega, r, dr, u_0, b);
         assert!((dv_new - 13.08411).abs() < 1e-3, "dv_new {}", dv_new);
         assert!((ap_new - 0.132057).abs() < 1e-4, "ap_new {}", ap_new);
         assert!((d_t(5.0, 0.03, 0.002, 1.0) - 2.0 * std::f64::consts::PI * 0.002 * 5.0 * 1.225 * 6.0 * (0.002 + 0.06)).abs() < 1e-12);
