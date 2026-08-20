@@ -31,6 +31,7 @@ struct Args {
     ar: Option<f64>,
     chord_spline_n: Option<usize>,
     camber: Option<f64>,
+    cst: Option<bool>,
     help: bool,
 }
 
@@ -54,8 +55,10 @@ DESIGN OPTIONS:
     --resolution <MM>      Radial (spanwise) resolution in millimetres;
                            2 x (radius - hub_radius) stations
                            (default: 40).
-    --naca                 NACA airfoil family (accepted; the only family
-                           ported).
+    --naca                 NACA airfoil family (default).
+    --cst                  CST (Kulfan) airfoil family: every station uses
+                           the default 18-parameter section, re-thicknessed
+                           and cambered to the design's radial laws.
     --auto                 Re-run the design loop, reducing the thrust
                            target until the torque drops below ~1.5 x Qmax.
     --ar <N>               Minimum blade aspect ratio (R - hub)/<mean chord>;
@@ -76,9 +79,9 @@ OUTPUT OPTIONS:
 
 ALL OPTIONS IN JSON:
     Every design/run option above can instead be set in the --param JSON
-    file (keys: bem, lifting_line, auto, resolution, n, ar, plate, dir,
-    step_file, chord_spline_n, camber).  An explicit CLI flag overrides the
-    JSON value, which overrides the built-in default.
+    file (keys: bem, lifting_line, auto, resolution, n, ar, plate, cst,
+    dir, step_file, chord_spline_n, camber).  An explicit CLI flag
+    overrides the JSON value, which overrides the built-in default.
 
 OTHER:
     --help, -h             Print this help and exit.
@@ -100,6 +103,7 @@ fn parse_args() -> Result<Args, String> {
         ar: None,
         chord_spline_n: None,
         camber: None,
+        cst: None,
         help: false,
     };
     let mut it = std::env::args().skip(1);
@@ -121,7 +125,8 @@ fn parse_args() -> Result<Args, String> {
             "--n" => a.n = Some(value()?.parse().map_err(|_| "bad --n".to_string())?),
             "--bem" => a.bem = Some(true),
             "--auto" => a.auto = Some(true),
-            "--naca" => {} // the only foil family supported by this port
+            "--naca" => {} // NACA 4-series family (the default)
+            "--cst" => a.cst = Some(true), // CST (Kulfan) foil family
             "--resolution" => a.resolution = Some(value()?.parse().map_err(|_| "bad --resolution".to_string())?),
             "--dir" => a.dir = Some(value()?),
             "--step-file" => a.step_file = Some(value()?),
@@ -190,6 +195,9 @@ fn main() {
     }
     if let Some(v) = args.camber {
         param.camber = Some(v);
+    }
+    if let Some(v) = args.cst {
+        param.cst = v;
     }
     if let Some(v) = args.plate {
         param.plate = v;

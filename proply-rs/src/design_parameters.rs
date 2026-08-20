@@ -42,6 +42,11 @@ pub struct DesignParameters {
     /// best-performing one.
     #[serde(default)]
     pub camber: Option<f64>,
+    /// Use the CST (Kulfan) foil family instead of the NACA 4-series: every
+    /// station foil is the default 18-parameter section, re-thicknessed and
+    /// cambered to the same radial laws.
+    #[serde(default)]
+    pub cst: bool,
     // ---- run / design options (mirror the CLI flags so a JSON file can
     // carry the whole design) ----
     pub bem: bool,
@@ -80,6 +85,7 @@ impl Default for DesignParameters {
             scimitar_percent: d(0.0),
             chord_spline_n: 3,
             camber: None,
+            cst: false,
             bem: true,
             lifting_line: false,
             auto: false,
@@ -170,7 +176,8 @@ mod tests {
             "dir": "out",
             "step_file": "x.step",
             "chord_spline_n": 5,
-            "camber": 0.03
+            "camber": 0.03,
+            "cst": true
         }"#;
         let p = DesignParameters::from_json(json).unwrap();
         assert!(!p.bem);
@@ -184,6 +191,7 @@ mod tests {
         assert_eq!(p.step_file, "x.step");
         assert_eq!(p.chord_spline_n, 5);
         assert!((p.camber.unwrap() - 0.03).abs() < 1e-12);
+        assert!(p.cst);
 
         // Absent keys fall back to the defaults.
         let p2 = DesignParameters::from_json(r#"{
@@ -199,6 +207,7 @@ mod tests {
         assert!(!p2.plate);
         assert_eq!(p2.chord_spline_n, 3);
         assert!(p2.camber.is_none());
+        assert!(!p2.cst);
     }
 
     #[test]

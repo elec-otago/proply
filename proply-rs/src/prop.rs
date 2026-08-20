@@ -14,7 +14,7 @@ use std::thread;
 use crate::blade_element::BladeElement;
 use crate::cache::PolarStore;
 use crate::design_parameters::DesignParameters;
-use crate::foil::{FoilLike, Naca4};
+use crate::foil::{Cst, FoilFamily, FoilLike, Naca4};
 use crate::lift_line::{self, Station};
 use crate::optimize;
 use crate::pchip::Pchip;
@@ -76,14 +76,25 @@ fn foil_thickness(param: &DesignParameters, r: f64) -> f64 {
     s + k * r.powf(p)
 }
 
-/// The NACA 4-series foil of one station: the thickness law at radius `r`,
-/// chord `c`, camber fraction `camber` and the parameter trailing edge.
-/// Plain data (clonable, sendable) so worker threads can build their own.
-fn station_foil(param: &DesignParameters, r: f64, c: f64, camber: f64) -> Naca4 {
+/// The foil of one station: the thickness law at radius `r`, chord `c`,
+/// camber fraction `camber` and the parameter trailing edge.  The family is
+/// [`DesignParameters::cst`]: the default NACA 4-series, or a CST (Kulfan)
+/// section — the default 18-parameter shape re-thicknessed and cambered to
+/// the same laws.  Plain data (clonable, sendable) so worker threads can
+/// build their own.
+fn station_foil(param: &DesignParameters, r: f64, c: f64, camber: f64) -> FoilFamily {
     let thickness = foil_thickness(param, r);
-    let mut f = Naca4::new(c, thickness / c, camber, 0.4);
-    f.base.set_trailing_edge(param.trailing_edge / 1000.0);
-    f
+    if param.cst {
+        let mut f = Cst::default(c);
+        f.set_thickness(thickness / c);
+        f.set_camber(camber);
+        f.set_trailing_edge(param.trailing_edge / 1000.0);
+        FoilFamily::Cst(f)
+    } else {
+        let mut f = Naca4::new(c, thickness / c, camber, 0.4);
+        f.base.set_trailing_edge(param.trailing_edge / 1000.0);
+        FoilFamily::Naca4(f)
+    }
 }
 
 /// A propeller: a collection of blade elements plus the design parameters.
@@ -92,7 +103,7 @@ pub struct Prop {
     pub radial_resolution: f64,
     pub radial_steps: usize,
     pub n_blades: usize,
-    pub blade_elements: Vec<BladeElement<Naca4>>,
+    pub blade_elements: Vec<BladeElement<FoilFamily>>,
     store: Arc<Mutex<PolarStore>>,
     scimitar_interpolator: Option<Pchip>,
     max_depth_interpolator: Option<(Vec<f64>, Vec<f64>)>,
@@ -121,19 +132,18 @@ impl Prop {
         self.plate_mode = on;
     }
 
-    /// Create a blade element with a NACA4 foil sized for the station.
-    fn new_blade_element(&mut self, r: f64, rpm: f64, twist: f64) -> BladeElement<Naca4> {
+    /// Create a blade element with a foil sized for the station (the
+    /// configured family, default NACA4).
+    fn new_blade_element(&mut self, r: f64, rpm: f64, twist: f64) -> BladeElement<FoilFamily> {
         let y_limit = self.get_max_depth(r);
         let x_limit = self.get_max_chord(r, twist);
-        let thickness = self.get_foil_thickness(r);
 
-        let foil = Rc::new(RefCell::new(Naca4::new(
+        let foil = Rc::new(RefCell::new(station_foil(
+            &self.param,
+            r,
             x_limit,
-            thickness / x_limit,
             self.param.camber.unwrap_or(0.0),
-            0.4,
         )));
-        foil.borrow_mut().set_trailing_edge(self.param.trailing_edge / 1000.0);
 
         let c_max = {
             let f = foil.borrow();
@@ -168,7 +178,7 @@ impl Prop {
         twist: f64,
         c: f64,
         camber: f64,
-    ) -> BladeElement<Naca4> {
+    ) -> BladeElement<FoilFamily> {
         let foil = Rc::new(RefCell::new(station_foil(&self.param, r, c, camber)));
 
         let mut be = BladeElement::new(
@@ -480,7 +490,7 @@ impl Prop {
     /// and the pool overlaps them.  The caller must deduplicate items
     /// (workers do not coordinate).  No-op in plate mode.  Progress is
     /// reported on a bar labelled `what` (hidden when stderr is not a TTY).
-    fn warm_polar_pool(&self, work: &[(Naca4, f64)], what: &str) {
+    fn warm_polar_pool(&self, work: &[(FoilFamily, f64)], what: &str) {
         if work.is_empty() || self.plate_mode {
             return;
         }
@@ -549,7 +559,7 @@ impl Prop {
 
         // Station elements: the seed chord law at each radius, twisted to a
         // first guess (the circulation solve sets the final twist).
-        let mut elements: Vec<BladeElement<Naca4>> = Vec::with_capacity(m);
+        let mut elements: Vec<BladeElement<FoilFamily>> = Vec::with_capacity(m);
         for (i, &r) in rr.iter().enumerate() {
             let phi0 = u_0.atan2(omega * r).max(1.0e-3);
             let c = chord_law(param, n_blades, r, 0.0, s_cap);
@@ -580,7 +590,7 @@ impl Prop {
         // the geometrically-allowed chord for safety), attack angle prescribed.
         let eval = |controls: &[f64],
                     da: f64,
-                    elems: &mut Vec<BladeElement<Naca4>>,
+                    elems: &mut Vec<BladeElement<FoilFamily>>,
                     seed: &[f64]|
          -> (f64, f64, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
             let alphas: Vec<f64> = alpha_base
@@ -600,7 +610,7 @@ impl Prop {
                     alpha: alphas[i],
                 })
                 .collect();
-            let fs_refs: Vec<&FoilSimulator<Naca4>> = elems.iter().map(|be| &be.fs).collect();
+            let fs_refs: Vec<&FoilSimulator<FoilFamily>> = elems.iter().map(|be| &be.fs).collect();
             let res = lift_line::solve_with_influence(&stations, n_blades, omega, u_0, &fs_refs, seed, infl);
             for i in 0..m {
                 elems[i].set_twist(res.phi[i] + alphas[i]);
@@ -618,7 +628,7 @@ impl Prop {
         // (da, err, thrust, torque, alpha, chord, phi) — one design candidate.
         type MeetOutcome = (f64, f64, f64, f64, Vec<f64>, Vec<f64>, Vec<f64>);
         let meet_thrust = |controls: &[f64],
-                           elems: &mut Vec<BladeElement<Naca4>>,
+                           elems: &mut Vec<BladeElement<FoilFamily>>,
                            pg_r: &RefCell<Vec<f64>>,
                            hint_da: Option<f64>|
          -> (MeetOutcome, bool) {
@@ -869,11 +879,11 @@ impl Prop {
         // station foils are collected for every candidate first so a single
         // worker pool can warm all the polar buckets the seeding queries
         // (the first-touch rust-foil sweeps dominate a cold run).
-        let mut rows: Vec<Vec<(Naca4, f64)>> = Vec::with_capacity(cambers.len());
-        let mut work: Vec<(Naca4, f64)> = Vec::new();
+        let mut rows: Vec<Vec<(FoilFamily, f64)>> = Vec::with_capacity(cambers.len());
+        let mut work: Vec<(FoilFamily, f64)> = Vec::new();
         let mut seen: HashSet<(String, u64)> = HashSet::new();
         for &m_c in &cambers {
-            let row: Vec<(Naca4, f64)> = rr
+            let row: Vec<(FoilFamily, f64)> = rr
                 .iter()
                 .map(|&r| {
                     let vv = ((u_0 * u_0) + (omega * r).powi(2)).sqrt();
@@ -904,7 +914,7 @@ impl Prop {
                 if self.plate_mode {
                     fs.set_plate_mode(true);
                 }
-                let (a, l) = Self::best_ld::<Naca4>(&fs, *vv);
+                let (a, l) = Self::best_ld::<FoilFamily>(&fs, *vv);
                 alpha_raw.push(a);
                 ld_row.push(l);
             }
@@ -927,7 +937,7 @@ impl Prop {
         // the same objective.
         if self.param.camber.is_none() {
             let (m_dist, winners) = compose_camber(&rr, &lds, &cambers);
-            let mut work: Vec<(Naca4, f64)> = Vec::new();
+            let mut work: Vec<(FoilFamily, f64)> = Vec::new();
             for (i, &r) in rr.iter().enumerate() {
                 let vv = ((u_0 * u_0) + (omega * r).powi(2)).sqrt();
                 let c = chord_law(&self.param, n_blades, r, 0.0, s_cap);
@@ -1001,7 +1011,7 @@ impl Prop {
         // Rebuild the winning elements on this thread from the pass's plain
         // geometry outcome (chord and twist per station).
         println!("Lifting-line blade stations");
-        let mut elements: Vec<BladeElement<Naca4>> = Vec::with_capacity(m);
+        let mut elements: Vec<BladeElement<FoilFamily>> = Vec::with_capacity(m);
         for (i, &ri) in rr.iter().enumerate() {
             let alpha =
                 (win.alpha_base[i] + win.da).clamp(-lift_line::ALPHA_MAX, lift_line::ALPHA_MAX);
@@ -1240,14 +1250,46 @@ mod tests {
 
     #[test]
     fn blade_element_camber_is_applied() {
-        // The camber candidate must reach the NACA 4-series foil (it keys
-        // the polar cache, so a wrong m silently designs a different blade).
+        // The camber candidate must reach the foil (it keys the polar
+        // cache, so a wrong m silently designs a different blade).
         let mut p = test_prop();
         let be = p.new_blade_element_with_chord(0.02, 1000.0, 0.1, 0.008, 0.04);
-        assert!(
-            (be.foil.borrow().m - 0.04).abs() < 1.0e-12,
-            "camber not applied"
-        );
+        let f = be.foil.borrow();
+        let m = match &*f {
+            FoilFamily::Naca4(n) => n.m,
+            FoilFamily::Cst(_) => panic!("expected a NACA4 foil (default family)"),
+        };
+        assert!((m - 0.04).abs() < 1.0e-12, "camber not applied");
+    }
+
+    #[test]
+    fn blade_element_cst_family_is_applied() {
+        // With the CST family selected, stations carry Cst foils re-sized to
+        // the station laws: the camber candidate mapped onto the LEM weight,
+        // and the thickness law (thickness/chord at this station) reaching
+        // the foil exactly.
+        let mut p = test_prop();
+        p.param.cst = true;
+        p.param.hub_depth = 0.006; // nonzero root depth: thickness law > 0
+        let be = p.new_blade_element_with_chord(0.02, 1000.0, 0.1, 0.008, 0.04);
+        let f = be.foil.borrow();
+        match &*f {
+            FoilFamily::Cst(c) => {
+                assert!(
+                    (c.params.leading_edge_weight).abs() > 0.1,
+                    "LEM weight {}",
+                    c.params.leading_edge_weight
+                );
+                let t_law = p.get_foil_thickness(0.02) / 0.008;
+                assert!(
+                    (c.thickness() - t_law).abs() < 1e-6,
+                    "thickness {} vs law {}",
+                    c.thickness(),
+                    t_law
+                );
+            }
+            FoilFamily::Naca4(_) => panic!("expected a CST foil with param.cst set"),
+        }
     }
 
     #[test]

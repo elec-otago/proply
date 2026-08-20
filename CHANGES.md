@@ -1,5 +1,52 @@
 # CHANGES
 
+## 2026-08-20 — CST (Kulfan) parametrization in rust-foil
+
+### rust-foil
+
+- **`KulfanParams`** — new canonical geometry representation (CST "with
+  LEM", the exact 18-parameter flavor AeroSandbox/NeuralFoil use):
+  `Default` (AeroSandbox defaults, 8 weights/side), `coordinates()`
+  (closed TE→LE→TE loop at cosine stations), `upper_y()`/`lower_y()`,
+  `fit_from_coordinates()` (linear least squares via the existing `gauss`,
+  with the negative-TE re-solve), `fit_from_coordinates_n()`, and
+  `from_naca()` (NACA 4/5-digit → parameters).  No new dependencies.
+- **`XFoil::cst(&KulfanParams)`** — new public API; `KulfanParams` is
+  re-exported at the crate root.
+- **`XFoil::naca()` now generates through CST**: the designation is fitted
+  to 8 weights/side and the buffer is produced by the CST path (cosine
+  stations instead of TE-bunched).  The NACA shape is not exactly
+  CST-representable; the fit error is ~1.1–1.5e-4 in y/c (worst case),
+  which the reference polars in `tests/naca0012.rs` stay within — **the
+  whole existing suite passes unchanged** (no re-baselining needed).
+- The naca/cst buffer-setting tail is factored into a private
+  `set_buffer` helper (scalc + segspl×2 + geopar + pangen).
+- `tests/cst.rs`: forward sanity, fit round-trip (~1e-15 on CST points),
+  NACA symmetry (lower ≈ −upper, LEM ≈ 0, TE ≈ 2.5e-3), geometric
+  fidelity (thickness/camber within 1e-3), naca↔cst buffer identity, and
+  end-to-end viscous convergence.  (Note: the `Default` section has a
+  perfectly sharp TE, on which XFOIL's viscous solve does not converge;
+  inviscid and blunt-TE solves are fine.)
+
+### proply-rs
+
+- **CST foil family**: `--cst` (or `"cst": true` in the design JSON)
+  switches every station foil from the NACA 4-series to a CST (Kulfan)
+  section: rust-foil's canonical 18-parameter `KulfanParams` shape (default
+  AeroSandbox section), re-thicknessed (weights scaled linearly — thickness
+  is linear in the weights) and cambered (LEM weight set from the same
+  camber candidates) to the design's radial laws.  The trailing-edge gap
+  maps onto the CST TE term.
+- New `foil::Cst` (FoilLike: shape points, hash, bounding box, …) and the
+  `foil::FoilFamily` enum the design loop now dispatches on (`Prop` holds
+  `BladeElement<FoilFamily>` instead of `BladeElement<Naca4>`); the NACA4
+  path is bit-identical (golden tests unchanged).  `Cst::from_naca(code)`
+  exposes NACA sections as CST parameters.
+- The simulator is unchanged: CST station shapes feed the same
+  coordinate path (TE closed for the polar solve) as NACA4.
+- Verified end-to-end: `--cst --bem` and `--cst --lifting-line` designs
+  converge and write valid STEP output.
+
 ## 2026-08-12 — Parallel alpha sweeps in rust-foil
 
 ### rust-foil

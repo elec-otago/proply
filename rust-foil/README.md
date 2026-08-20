@@ -31,8 +31,19 @@ let x = vec![1.0, 0.95, 0.9, ...];
 let y = vec![0.0, 0.05, 0.08, ...];
 xf.set_airfoil(&x, &y);
 
-// ... or use a built-in NACA airfoil
+// ... or use a built-in NACA airfoil (generated through a CST fit)
 xf.naca(2412);
+
+// ... or define the airfoil directly with CST (Kulfan) parameters —
+// the canonical geometry representation (8 weights per side + LEM + TE)
+use rust_foil::KulfanParams;
+xf.cst(&KulfanParams::default());
+
+// fit CST parameters to an arbitrary coordinate loop, or generate
+// coordinates / NACA sections as parameters
+let params = KulfanParams::fit_from_coordinates(&x, &y);
+let (xs, ys, _nb) = params.coordinates(200);
+let (naca_params, _name) = KulfanParams::from_naca(2412, false).unwrap();
 
 xf.set_reynolds(1.0e6);
 xf.set_mach(0.0);
@@ -65,7 +76,8 @@ cargo run --release --example lift_curve
 | ------ | ----------- |
 | `new()` | Create a solver instance |
 | `set_airfoil(&[f64], &[f64])` | Set airfoil from coordinates (input points become the panel nodes) |
-| `naca(u32)` | Generate and panel a NACA 4- or 5-digit airfoil |
+| `naca(u32)` | Generate and panel a NACA 4- or 5-digit airfoil (via a CST fit) |
+| `cst(&KulfanParams)` | Generate and panel an airfoil from CST (Kulfan) parameters |
 | `airfoil()` | Get the current buffer airfoil coordinates |
 | `repanel(...)` | Re-panel the buffer airfoil with custom bunching parameters |
 | `set_reynolds / reynolds` | Set/get the Reynolds number (`0` selects inviscid mode) |

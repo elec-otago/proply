@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use proply_rs::blade_element::BladeElement;
 use proply_rs::cache::PolarStore;
 use proply_rs::design_parameters::DesignParameters;
-use proply_rs::foil::Naca4;
+use proply_rs::foil::{FoilFamily, Naca4};
 use proply_rs::prop::Prop;
 use proply_rs::step_out;
 
@@ -22,7 +22,7 @@ fn synthetic_prop() -> Prop {
     // Four stations hub -> tip with simple foils (no design loop needed for
     // the geometry).
     for r in [0.006, 0.02, 0.04, 0.06] {
-        let foil = Rc::new(RefCell::new(Naca4::new(0.012, 0.12, 0.06, 0.4)));
+        let foil = Rc::new(RefCell::new(FoilFamily::Naca4(Naca4::new(0.012, 0.12, 0.06, 0.4))));
         let be = BladeElement::new(r, 0.002, foil, 0.4, 10000.0, 1.0, store.clone());
         p.blade_elements.push(be);
     }
@@ -71,7 +71,7 @@ fn stations_are_vertically_centred_on_the_hub() {
     let store: Arc<Mutex<PolarStore>> =
         Arc::new(Mutex::new(PolarStore::load("/nonexistent/cache.json")));
     for twist in [0.0, 0.4, -0.4] {
-        let foil = Rc::new(RefCell::new(Naca4::new(0.012, 0.12, 0.06, 0.4)));
+        let foil = Rc::new(RefCell::new(FoilFamily::Naca4(Naca4::new(0.012, 0.12, 0.06, 0.4))));
         let be = BladeElement::new(0.006, 0.002, foil, twist, 10000.0, 1.0, store.clone());
         let (lower, upper) = be.get_foil_points(24, 0.0);
         let mut zmin = f64::INFINITY;

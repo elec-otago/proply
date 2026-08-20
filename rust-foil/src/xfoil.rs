@@ -3,8 +3,8 @@
 //! pangen.  The interactive top-level menu is not ported.
 
 use crate::bl::blpini;
+use crate::cst::KulfanParams;
 use crate::geom::{cang, geopar, lefind};
-use crate::naca::{naca4, naca5};
 use crate::panel::{apcalc, ncalc};
 use crate::spline::{curv, deval, scalc, segspl, seval, trisol};
 use crate::s_xfoil::{comset, mrcl, tecalc};
@@ -115,42 +115,12 @@ pub fn init(xf: &mut Xfoil) {
     xf.cl_msq = 0.0;
 }
 
-/// Sets the buffer airfoil to the specified NACA 4- or 5-digit airfoil and
-/// panels it.
-pub fn naca(xf: &mut Xfoil, ides1: i32) {
-    // number of points per side
-    let nside = IQX / 3;
-
-    let mut ides = ides1;
-
-    let mut itype = 0;
-    if ides <= 25099 {
-        itype = 5;
-    }
-    if ides <= 9999 {
-        itype = 4;
-    }
-
-    if itype == 0 {
-        if xf.show_output {
-            eprintln!("This designation not implemented.");
-        }
-        return;
-    }
-
-    let (xb, yb, nb, name) = if itype == 4 {
-        naca4(ides, nside)
-    } else {
-        naca5(ides, nside, xf.show_output)
-    };
-
-    if nb == 0 {
-        return; // naca5 illegal designation
-    }
-
-    let _ = &mut ides;
-
-    xf.name = name;
+/// Sets the buffer airfoil from a closed TE→LE→TE coordinate loop and
+/// panels it: the shared tail of `naca` and `cst` (scalc + segspl×2 +
+/// geopar + pangen).  Unit-chord input is already normalized, so no
+/// `geom::norm` is applied.
+fn set_buffer(xf: &mut Xfoil, xb: &[f64], yb: &[f64], nb: usize, name: &str) {
+    xf.name = name.to_string();
 
     xf.lclock = false;
 
@@ -198,6 +168,28 @@ pub fn naca(xf: &mut Xfoil, ides1: i32) {
 
     // set paneling
     pangen(xf, true);
+}
+
+/// Sets the buffer airfoil from CST parameters (the canonical geometry
+/// representation) and panels it.
+pub fn cst(xf: &mut Xfoil, params: &KulfanParams) {
+    // number of points per side (same resolution as NACA's nside = IQX/3)
+    let nside = IQX / 3;
+    let (xb, yb, nb) = params.coordinates(nside);
+    set_buffer(xf, &xb, &yb, nb, "CST");
+}
+
+/// Sets the buffer airfoil to the specified NACA 4- or 5-digit airfoil and
+/// panels it.  The designation is converted to CST parameters (8 weights
+/// per side) via a linear least-squares fit of the analytic NACA
+/// coordinates, and the buffer is generated from those parameters — the
+/// same geometry path as [`cst`].
+pub fn naca(xf: &mut Xfoil, ides1: i32) {
+    let ides = ides1 as u32;
+    if let Some((params, name)) = KulfanParams::from_naca(ides, xf.show_output) {
+        cst(xf, &params);
+        xf.name = name;
+    }
 }
 
 /// Sets the paneling distribution from the buffer airfoil geometry, thus

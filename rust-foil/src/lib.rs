@@ -17,6 +17,7 @@
 
 mod bl;
 mod blsys;
+mod cst;
 mod gdes;
 mod geom;
 mod naca;
@@ -30,6 +31,7 @@ pub mod state;
 mod utils;
 mod xfoil;
 
+pub use cst::KulfanParams;
 pub use solve::blsolv;
 pub use solve::gauss;
 // LU factor/back-substitution are internal to the inviscid solve, but exposed
@@ -209,13 +211,23 @@ impl XFoil {
         ([xble, yble], xf.chordb, [xbte, ybte])
     }
 
-    /// Generates and panels the specified NACA 4- or 5-digit airfoil.
+    /// Generates and panels the specified NACA 4- or 5-digit airfoil.  The
+    /// designation is converted to CST parameters (8 weights per side) via a
+    /// linear least-squares fit, so the buffer geometry is a CST
+    /// approximation of the analytic NACA shape (max |dy/c| ~ 1e-4; see
+    /// [`KulfanParams::from_naca`]).
     pub fn naca(&mut self, spec: u32) {
         if spec == 0 {
             eprintln!("Invalid NACA specifier. Specify a NACA 4 or 5 series airfoil code.");
         } else {
             xfoil::naca(&mut self.state, spec as i32);
         }
+    }
+
+    /// Generates and panels the airfoil described by the CST parameters
+    /// (the canonical geometry representation).
+    pub fn cst(&mut self, params: &KulfanParams) {
+        xfoil::cst(&mut self.state, params);
     }
 
     /// Returns the current buffer airfoil coordinates (input points).

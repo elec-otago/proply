@@ -8,8 +8,12 @@ STEP (AP242) file with true NURBS surfaces — no OpenSCAD, no STL.
 
 ## Status
 
-First milestone: the NACA path (`--naca --bem`) with STEP output.
-Deferred: ARA-D foils (`--arad`), GMSH meshing (`--mesh`).
+The NACA path (`--naca --bem`) with STEP output is the shipped design
+solver.  A CST (Kulfan) foil family (`--cst` / `"cst": true` in the JSON)
+is available alongside it: every station foil is rust-foil's canonical
+18-parameter `KulfanParams` section (default AeroSandbox shape),
+re-thicknessed and cambered to the same radial laws.  Deferred: ARA-D
+foils (`--arad`), GMSH meshing (`--mesh`).
 
 ## Usage
 
@@ -23,6 +27,14 @@ point, then writes `build/out/<name>.step` — an assembly containing the
 hub and `blades` copies of the blade solid.  `--auto` re-runs the design
 loop, reducing the thrust target until the torque drops below
 `1.5 × Qmax`.
+
+Design the same propeller with CST (Kulfan) station foils instead of the
+NACA 4-series:
+
+```sh
+cargo run --release -p proply-rs -- --cst --bem --n 40 --resolution 30 \
+    --dir=build/out --param='props/test_prop.json'
+```
 
 The hub includes the `center_hole` mounting bore as a single closed shell:
 outer and bore cylinders plus two annular caps (ring faces with an inner
