@@ -578,6 +578,7 @@ impl Prop {
         label: &str,
         camber_dist: &[f64],
         alpha_base: &[f64],
+        pb: &ProgressBar,
     ) -> Option<PassOutcome> {
         let m = rr.len();
 
@@ -769,6 +770,8 @@ impl Prop {
                 meet_thrust(&controls, &mut e, &pg, hint)
             };
             *da_hint.borrow_mut() = Some(da);
+            pb.inc(1);
+            pb.set_message(format!("{}: T={:.3} Q={:.4}", label, t, q));
             if hint.is_none() {
                 println!(
                     "lift-line [{}] ctrl=[{}] da={:.3}: T={:.4} Q={:.4}",
@@ -950,10 +953,22 @@ impl Prop {
 
         // Seed the best-L/D attack angles from the (now cached) polars.
         // Each seed is (label, per-station camber, smoothed attack angles).
+        // The per-station best-L/D scans mostly hit the warmed polars, but
+        // on a cold cache they simulate their own (serially) and the phase
+        // runs minutes with no other output: show a bar (hidden when
+        // stderr is not a TTY).
         let mut seeds: Vec<(String, Vec<f64>, Vec<f64>)> = Vec::with_capacity(cambers.len() + 1);
         let mut raw_alphas: Vec<Vec<f64>> = Vec::with_capacity(cambers.len());
         let mut lds: Vec<Vec<f64>> = Vec::with_capacity(cambers.len());
+        let seed_pb = ProgressBar::new((rows.len() * m) as u64);
+        seed_pb.set_style(
+            ProgressStyle::with_template(
+                "{spinner:.green} [{elapsed_precise}] {pos}/{len} station seeds ({msg}, eta {eta})",
+            )
+            .unwrap(),
+        );
         for (row, &m_c) in rows.iter().zip(cambers.iter()) {
+            seed_pb.set_message(format!("m={:.2}", m_c));
             let mut alpha_raw: Vec<f64> = Vec::with_capacity(m);
             let mut ld_row: Vec<f64> = Vec::with_capacity(m);
             for (f, vv) in row {
@@ -965,6 +980,7 @@ impl Prop {
                 let (a, l) = Self::best_ld::<FoilFamily>(&fs, *vv);
                 alpha_raw.push(a);
                 ld_row.push(l);
+                seed_pb.inc(1);
             }
             // The raw best-L/D angles are jagged station-to-station: quantised to
             // whole degrees by the scan, and stepped wherever the Reynolds number
@@ -977,6 +993,7 @@ impl Prop {
             raw_alphas.push(alpha_raw);
             lds.push(ld_row);
         }
+        seed_pb.finish();
 
         // The composed per-station distribution: best candidate at each
         // radius (thick root sections prefer little or no camber, thin
@@ -1020,11 +1037,26 @@ impl Prop {
         let radial_res = self.radial_resolution;
         let plate_mode = self.plate_mode;
         let mut outcomes: Vec<PassOutcome> = Vec::new();
+        // Each pass's Nelder-Mead evaluations carry full circulation solves
+        // and, on a cold cache, fresh polar simulations (the moved chords
+        // hit new Reynolds buckets), so minutes can pass between printed
+        // improvements: one shared evaluation counter across the parallel
+        // passes keeps the phase visibly moving (hidden when stderr is not
+        // a TTY).
+        let eval_pb = ProgressBar::new_spinner();
+        eval_pb.set_style(
+            ProgressStyle::with_template(
+                "{spinner:.green} [{elapsed_precise}] {pos} design evaluations ({msg})",
+            )
+            .unwrap(),
+        );
+        eval_pb.set_message("camber candidate passes");
         thread::scope(|s| {
             let handles: Vec<_> = seeds
                 .into_iter()
                 .map(|(label, camber_dist, alpha_base)| {
                     let (store, rr, ref_r, cap_ctl, infl) = (&store, &rr, &ref_r, &cap_ctl, &infl);
+                    let eval_pb = &eval_pb;
                     s.spawn(move || {
                         Self::run_design_pass(
                             param,
@@ -1045,6 +1077,7 @@ impl Prop {
                             &label,
                             &camber_dist,
                             &alpha_base,
+                            eval_pb,
                         )
                     })
                 })
@@ -1055,6 +1088,7 @@ impl Prop {
                 }
             }
         });
+        eval_pb.finish();
 
         let win = match outcomes
             .into_iter()

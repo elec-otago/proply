@@ -1,5 +1,26 @@
 # CHANGES
 
+## 2026-08-20 — Progress bars for the serial lifting-line phases
+
+### proply-rs
+
+The two long silent stretches of the lifting-line design now show
+progress (indicatif bars, like the warm-up bars; hidden when stderr is
+not a TTY):
+
+- After the seeding warm-up, the per-station best-L/D seeding scan has
+  a `station seeds` bar (one item per candidate x station, labelled with
+  the camber candidate being scanned).  On a cold cache these scans
+  simulate their own polars and the phase runs minutes with no output.
+- After the composed-camber warm-up, the parallel candidate design
+  passes share an evaluation counter (`design evaluations`), with the
+  latest pass result as the message — the Nelder-Mead passes run full
+  circulation solves (and, on a cold cache, fresh polars for the moved
+  chords' Reynolds buckets), so minutes pass between printed
+  improvements.
+
+All six TODO.md items are now done; the file is empty.
+
 ## 2026-08-20 — Polar warm-up pool actually parallel
 
 ### proply-rs
@@ -30,6 +51,34 @@ cold run drops **944 s -> 622 s** with a bit-identical design result
 serial phases (the best-L/D seeding scan and the post-warm-up design
 passes) are unaffected — that is what the remaining TODO progress-bar
 items track.
+
+## 2026-08-20 — YAML design summaries and gallery integration
+
+### proply-rs
+
+- Every design run now writes a YAML summary beside the STEP output
+  (`<name>.yml` in the output directory, or next to an explicit
+  `--step-file`): the design parameters, the motor operating point
+  (optimum RPM / torque / power), the performance totals (thrust, torque,
+  shaft power, propulsive efficiency `T u_0 / P`, hover figure of merit
+  `T^{3/2}/(sqrt(2 rho A) P)`, tip speed) and the hub->tip per-station
+  section list (radius, r/R, chord, twist, camber, thickness — plus the
+  converged induced velocity and element loads for BEM designs; the
+  lifting-line loop reports loads only in the totals, so those fields are
+  omitted there instead of written as zeros).
+- New `yaml_out` module (`serde_yaml`, new dependency); `Cst::camber()`
+  added as the exact inverse of `set_camber` for per-station camber of
+  CST designs.
+
+### Gallery
+
+- The Makefile design rule is now a grouped target producing the STEP
+  model and the YAML summary together (one design run writes both;
+  regenerates if either is missing), `make summaries` regenerates just
+  the summaries, and `make clean` removes them.
+- `build/out/*.yml` are committed — everything else under `build/` stays
+  ignored — and every prop entry in [GALLERY.md](GALLERY.md) links its
+  summary next to the parameter JSON.
 
 ## 2026-08-20 — CST (Kulfan) parametrization in rust-foil
 
