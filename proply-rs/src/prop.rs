@@ -487,14 +487,28 @@ impl Prop {
 
     /// Populate the polar cache for `(foil, v)` work items on all available
     /// cores: the first-touch rust-foil sweeps dominate a cold design run,
-    /// and the pool overlaps them.  The caller must deduplicate items
-    /// (workers do not coordinate).  No-op in plate mode.  Progress is
-    /// reported on a bar labelled `what` (hidden when stderr is not a TTY).
+    /// and the pool overlaps them.  The work list is flattened to one task
+    /// per *distinct* `(foil, Reynolds bucket, Mach)` warm target —
+    /// adjacent stations share bracketing buckets, so per-station tasks
+    /// would pile every worker onto the same first bucket and serialize
+    /// behind the per-key claim gate; distinct tasks keep every worker on a
+    /// distinct simulation.  No-op in plate mode.  Progress is reported on
+    /// a bar labelled `what` (hidden when stderr is not a TTY).
     fn warm_polar_pool(&self, work: &[(FoilFamily, f64)], what: &str) {
         if work.is_empty() || self.plate_mode {
             return;
         }
-        let pb = ProgressBar::new(work.len() as u64);
+        let mut seen = HashSet::new();
+        let mut tasks: Vec<(FoilFamily, f64, f64)> = Vec::new();
+        for (foil, v) in work {
+            let fs = FoilSimulator::new(Rc::new(RefCell::new(foil.clone())), self.store.clone());
+            for (re, mach) in fs.warm_plan(*v) {
+                if seen.insert((foil.hash(), re.to_bits(), mach.to_bits())) {
+                    tasks.push((foil.clone(), re, mach));
+                }
+            }
+        }
+        let pb = ProgressBar::new(tasks.len() as u64);
         pb.set_style(
             ProgressStyle::with_template(
                 "[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} foil polars ({msg}, eta {eta})",
@@ -503,11 +517,12 @@ impl Prop {
             .progress_chars("=>-"),
         );
         pb.set_message(what.to_string());
-        let queue = Mutex::new(work.to_vec());
+        let n_tasks = tasks.len();
+        let queue = Mutex::new(tasks);
         let n_workers = thread::available_parallelism()
             .map(|n| n.get())
             .unwrap_or(1)
-            .min(work.len());
+            .min(n_tasks);
         let store = self.store.clone();
         thread::scope(|s| {
             for _ in 0..n_workers {
@@ -515,9 +530,18 @@ impl Prop {
                 let store = store.clone();
                 let pb = pb.clone();
                 s.spawn(move || {
-                    while let Some((foil, v)) = queue.lock().unwrap().pop() {
+                    // pop through a `match` (not `while let`): the guard of
+                    // `while let ... = queue.lock().unwrap().pop()` lives to
+                    // the end of the loop body, so the first worker would
+                    // hold the queue lock for its whole simulation and
+                    // serialize the entire pool.
+                    loop {
+                        let (foil, re, mach) = match queue.lock().unwrap().pop() {
+                            Some(task) => task,
+                            None => break,
+                        };
                         let fs = FoilSimulator::new(Rc::new(RefCell::new(foil)), store.clone());
-                        fs.warm_polars(v);
+                        fs.warm_bucket(re, mach);
                         pb.inc(1);
                     }
                 });

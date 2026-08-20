@@ -1,5 +1,36 @@
 # CHANGES
 
+## 2026-08-20 — Polar warm-up pool actually parallel
+
+### proply-rs
+
+The lifting-line design's polar warm-up pool (`warm_polar_pool`, used by
+the seeding and composed-camber warm-ups) ran fully serial despite
+spawning a worker per core — the whole pool contended on one mutex:
+
+- **Queue-lock guard lifetime (the real serialization)**: the worker loop
+  was `while let Some(task) = queue.lock().unwrap().pop() { simulate }` —
+  the `MutexGuard` temporary lives to the end of the loop *body*, so the
+  first worker held the queue lock for its entire rust-foil sweep and
+  every other worker blocked on `pop()` (diagnosed from per-thread
+  backtraces: one worker in `viscal`, seven in `lock_contended` with zero
+  CPU time ever).  The loop now pops through a `match` so the guard drops
+  before the simulation starts.
+- **Bucket-level tasks**: the work list is flattened to one task per
+  distinct `(foil, Reynolds-grid bucket, Mach)` warm target
+  (`FoilSimulator::warm_plan` / `warm_bucket`, split out of
+  `warm_polars`).  Adjacent stations share bracketing buckets, so
+  per-station tasks would otherwise pile every worker onto the same first
+  bucket behind the per-key claim gate.
+
+Measured on a cold-cache `dys_1806_2300kv` lifting-line design
+(resolution 30, 8 cores): warm-up now runs at ~7.25 cores, and the whole
+cold run drops **944 s -> 622 s** with a bit-identical design result
+(same winning camber, attack offset, thrust and torque).  The remaining
+serial phases (the best-L/D seeding scan and the post-warm-up design
+passes) are unaffected — that is what the remaining TODO progress-bar
+items track.
+
 ## 2026-08-20 — CST (Kulfan) parametrization in rust-foil
 
 ### rust-foil

@@ -291,28 +291,47 @@ impl<F: FoilLike> FoilSimulator<F> {
         (cl_poly, cd_poly)
     }
 
-    /// Simulate and cache the polar buckets an evaluation at speed `v` would
-    /// need: the two Reynolds-grid buckets bracketing the foil's raw
-    /// Reynolds number there (the low-Re blend zone needs only the first
-    /// bucket).  This is the expensive first-touch path of [`get_polars`],
-    /// exposed so a worker pool can populate the shared store before a
-    /// design loop runs.  No-op in plate mode (no polars are consulted).
-    pub fn warm_polars(&self, v: f64) {
+    /// The `(Reynolds-grid bucket, Mach)` warm targets an evaluation at
+    /// speed `v` will consult: the two grid buckets bracketing the foil's
+    /// raw Reynolds number there (the low-Re blend zone needs only the
+    /// first bucket; below the blend floor nothing is simulated).
+    /// Split out so a worker pool can deduplicate its queue on these —
+    /// adjacent stations share bracketing buckets, and per-station tasks
+    /// would otherwise pile every worker onto the same first bucket.
+    pub fn warm_plan(&self, v: f64) -> Vec<(f64, f64)> {
         if self.plate_mode {
-            return;
+            return Vec::new();
         }
         let re = self.foil.borrow().reynolds(v);
         let mach = self.get_mach(v);
         if re < RE_FLAT_PLATE {
-            return; // analytic branch: nothing is simulated
+            return Vec::new(); // analytic branch: nothing is simulated
         }
         if re < RE_MIN {
-            self.bucket_polars(RE_MIN, mach);
-            return;
+            return vec![(RE_MIN, mach)];
         }
         let (lo, hi, _) = re_bracket(re);
-        self.bucket_polars(re_grid(lo), mach);
-        self.bucket_polars(re_grid(hi), mach);
+        vec![(re_grid(lo), mach), (re_grid(hi), mach)]
+    }
+
+    /// Simulate and cache one [`warm_plan`] target (a Reynolds-grid bucket
+    /// at a Mach number).  Cheap when the bucket is already cached; this
+    /// is the expensive first-touch path of [`get_polars`], split out so a
+    /// worker pool can populate the shared store one distinct bucket per
+    /// task.  No-op in plate mode (no polars are consulted).
+    pub fn warm_bucket(&self, reynolds: f64, mach: f64) {
+        if self.plate_mode {
+            return;
+        }
+        self.bucket_polars(reynolds, mach);
+    }
+
+    /// Simulate and cache the polar buckets an evaluation at speed `v`
+    /// would need ([`warm_plan`] + [`warm_bucket`]).
+    pub fn warm_polars(&self, v: f64) {
+        for (re, mach) in self.warm_plan(v) {
+            self.warm_bucket(re, mach);
+        }
     }
 
     /// Simulate the polar with rust-foil and store it in the shared cache.
@@ -479,6 +498,31 @@ mod tests {
         // v=80 -> Ma = 0.2424 -> rounded to 0.25
         assert!((fs.get_mach(80.0) - 0.25).abs() < 1e-9);
         assert!((fs.get_mach(100.0) - 0.30).abs() < 1e-9);
+    }
+
+    #[test]
+    fn warm_plan_lists_distinct_bucket_targets() {
+        // The warm targets are the bracketing Reynolds-grid buckets at the
+        // rounded Mach — what a worker pool deduplicates its queue on.
+        let chord = 0.05;
+        let v = 22.0; // Re ~ 89179, between grid points 1 and 2
+        let f = Naca4::new(chord, 0.12, 0.0, 0.4);
+        let store = test_store();
+        let fs = FoilSimulator::new(Rc::new(RefCell::new(f.clone())), store.clone());
+        let (lo, hi, _) = re_bracket(f.reynolds(v));
+        let plan = fs.warm_plan(v);
+        assert_eq!(plan.len(), 2, "{:?}", plan);
+        assert_eq!(plan[0], (re_grid(lo), fs.get_mach(v)));
+        assert_eq!(plan[1], (re_grid(hi), fs.get_mach(v)));
+
+        // The low-Re blend zone needs only the first bucket; below the
+        // blend floor nothing is simulated at all.
+        let v_for = |re: f64| re * 15.11e-6 / (1.225 * chord);
+        assert_eq!(
+            fs.warm_plan(v_for(RE_MIN * 0.9)),
+            vec![(RE_MIN, fs.get_mach(v_for(RE_MIN * 0.9)))]
+        );
+        assert!(fs.warm_plan(v_for(RE_FLAT_PLATE * 0.9)).is_empty());
     }
 
     #[test]
