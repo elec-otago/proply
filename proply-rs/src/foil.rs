@@ -453,6 +453,12 @@ impl Cst {
         self.params.leading_edge_weight = if lem > 0.0 { m / lem } else { 0.0 };
     }
 
+    /// Max camber (fraction of chord) — the inverse of [`set_camber`], with
+    /// the same exactness caveat.
+    pub fn camber(&self) -> f64 {
+        self.params.leading_edge_weight * Self::lem_max(&self.params)
+    }
+
     /// Hash of the unit-chord shape: all 18 parameters at 6 decimals plus
     /// the (normalized) trailing edge.  Chord-independent, so a chord scale
     /// change reuses the same cached polar for the same Reynolds bucket.

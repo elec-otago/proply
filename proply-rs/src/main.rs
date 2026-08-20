@@ -14,6 +14,7 @@ use proply_rs::motor::Motor;
 use proply_rs::optimize;
 use proply_rs::prop::Prop;
 use proply_rs::step_out;
+use proply_rs::yaml_out;
 
 /// CLI options.  Value/flag options are `Option` so an explicitly-passed flag
 /// can be distinguished from "not given" (allowing the JSON parameter file to
@@ -299,6 +300,29 @@ fn main() {
             exit(1);
         }
     }
+
+    // YAML summary of the finished design: beside the STEP output (so
+    // <propname>.yml in the output directory, or next to an explicit
+    // --step-file).
+    let yaml_filename = std::path::Path::new(&step_filename)
+        .with_extension("yml")
+        .to_string_lossy()
+        .into_owned();
+    let motor_info = yaml_out::MotorInfo {
+        kv_rpm_per_volt: param.motor_Kv,
+        voltage_v: param.motor_volts,
+        winding_resistance_ohm: param.motor_winding_resistance,
+        no_load_current_a: param.motor_no_load_current,
+        optimum_rpm,
+        optimum_torque_nm: optimum_torque,
+        max_power_w: power,
+    };
+    let yaml_text = yaml_out::summary(&p, optimum_rpm, t, q, &motor_info);
+    yaml_out::write_yaml_file(&yaml_filename, &yaml_text).unwrap_or_else(|e| {
+        eprintln!("cannot write {}: {}", yaml_filename, e);
+        exit(1);
+    });
+    println!("Wrote {}", yaml_filename);
 
     // Persist any newly simulated polars.
     store.lock().unwrap().save();

@@ -24,7 +24,31 @@ cargo run --release -p proply-rs -- --naca --bem --n 40 --resolution 30 \
 
 This designs the propeller at the motor's maximum-efficiency operating
 point, then writes `build/out/<name>.step` — an assembly containing the
-hub and `blades` copies of the blade solid.  `--auto` re-runs the design
+hub and `blades` copies of the blade solid — and `build/out/<name>.yml`,
+a YAML summary of the design (excerpt):
+
+```yaml
+performance:
+  rpm: 13062.659355
+  thrust_n: 3.774991
+  torque_nm: 0.074784
+  shaft_power_w: 102.298489
+  figure_of_merit: 0.413492
+sections:                        # hub -> tip
+- r_m: 0.005
+  r_over_R: 0.08
+  chord_m: 0.005444
+  twist_deg: 62.958388
+  camber: 0.0
+  thickness_m: 0.002613
+```
+
+The summary records the design parameters, the motor operating point
+(RPM, torque, power), the performance totals (thrust, torque, shaft
+power, propulsive efficiency, hover figure of merit, tip speed) and the
+per-station section list (radius, chord, twist, camber, thickness, and
+— for BEM designs — the converged induced velocity and element loads).
+`--auto` re-runs the design
 loop, reducing the thrust target until the torque drops below
 `1.5 × Qmax`.
 
