@@ -10,16 +10,17 @@
     "motor_no_load_current": 0.5,
     "motor_winding_resistance": 0.405,
 
-    "motor_torque": 334.8, 
-    "motor_RPM": 1950.0, 
+    "motor_torque": 334.8,
+    "motor_RPM": 1950.0,
     "blades": 2,
-    "thrust": 1000.0,
+    "thrust": 1500.0,
 
     "radius": 0.5,
     "tip_chord": 0.07,
     "scimitar_percent": 0.0,
     "trailing_edge": 2.0,
     "hub_radius": 0.05,
+    "center_hole": 0.01,
     "hub_depth": 0.05,
 
     "exclude_zone": [

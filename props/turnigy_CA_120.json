@@ -14,7 +14,7 @@
     "thrust": 200.0,
 
     "radius": 0.35,
-    "tip_chord": 0.07,
+    "tip_chord": 0.02,
     "scimitar_percent": 0.0,
     "trailing_edge": 2.0,
     "hub_radius": 0.05,
