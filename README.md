@@ -39,7 +39,9 @@ cargo run --release -p proply-rs -- --naca --bem --n 40 --resolution 30 \
 ```
 
 This writes `build/out/<name>.step` — an assembly containing the hub and
-`blades` copies of the blade solid.
+`blades` copies of the blade solid — and `build/out/<name>.yml`, a YAML
+summary of the design (motor operating point, performance totals, and the
+per-station section list).
 
 - `--auto` re-runs the design loop, reducing the thrust target until the
   torque drops below `1.5 × Qmax`.
@@ -55,7 +57,8 @@ This writes `build/out/<name>.step` — an assembly containing the hub and
 `make gallery` designs every prop in `props/` and renders each STEP file to
 `images/<name>.png` with FreeCAD (headless, via
 [`props/renderprop.py`](props/renderprop.py)); the results are collected in
-[GALLERY.md](GALLERY.md).
+[GALLERY.md](GALLERY.md), where every prop also links its YAML design
+summary (`make summaries` regenerates just those).
 
 The full CLI reference and port notes (deviations from the Python
 implementation, deferred features) are in

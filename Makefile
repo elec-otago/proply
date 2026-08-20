@@ -2,7 +2,8 @@
 #
 #   make gallery            design all props and render each to images/
 #   make steps              design all props (STEP files in build/out/)
-#   make clean              remove generated STEP and PNG files
+#   make summaries          design all props (YAML summaries in build/out/)
+#   make clean              remove generated STEP, YAML and PNG files
 #
 # Designs use the coupled lifting-line solver by default.  Switch design
 # modes by overriding DESIGN_FLAGS, e.g.
@@ -10,17 +11,20 @@
 
 DESIGN_FLAGS ?= --naca --lifting-line --n 40 --resolution 30
 
-PROPS := $(wildcard props/*.json)
-STEPS := $(PROPS:props/%.json=build/out/%.step)
-PNGS  := $(PROPS:props/%.json=images/%.png)
+PROPS  := $(wildcard props/*.json)
+STEPS  := $(PROPS:props/%.json=build/out/%.step)
+YAMLS  := $(PROPS:props/%.json=build/out/%.yml)
+PNGS   := $(PROPS:props/%.json=images/%.png)
 
 # Changing DESIGN_FLAGS must redesign every prop: the flags are recorded in
-# a stamp the STEP rules depend on, refreshed only when they change.
+# a stamp the design rules depend on, refreshed only when they change.
 STAMP := build/out/.design_flags
 
 all: gallery
 
 steps: $(STEPS)
+
+summaries: $(YAMLS)
 
 gallery: $(PNGS)
 
@@ -29,22 +33,25 @@ $(STAMP): Makefile
 	@printf '%s\n' "$(DESIGN_FLAGS)" > $@.tmp
 	@if cmp -s $@.tmp $@; then rm -f $@.tmp; else mv $@.tmp $@; echo "design flags changed -> redesigning all props"; fi
 
-# --step-file pins the output name to the JSON file stem: the "name" field
-# inside the JSON does not always match (and ntm_28_26_1200Kv.json omits it).
-build/out/%.step: props/%.json $(STAMP)
+# One design run writes both artefacts (the STEP model and the YAML
+# summary), so they are a grouped target: the design is rerun whenever
+# either output is missing or outdated.  --step-file pins the output name
+# to the JSON file stem: the "name" field inside the JSON does not always
+# match (and ntm_28_26_1200Kv.json omits it).
+build/out/%.step build/out/%.yml &: props/%.json $(STAMP)
 	@mkdir -p $(dir $@)
-	cargo run --release -p proply-rs -- $(DESIGN_FLAGS) --step-file=$@ --param=$<
+	cargo run --release -p proply-rs -- $(DESIGN_FLAGS) --step-file=build/out/$*.step --param=$<
 
 # freecadcmd forwards script arguments only when each is preceded by --pass,
 # and it crashes during Qt teardown *after* the image is saved, so the exit
 # status is ignored and success is judged by the PNG existing.
-images/%.png: build/out/%.step props/renderprop.py
+images/%.png: build/out/%.step build/out/%.yml props/renderprop.py
 	@mkdir -p images
 	-freecadcmd props/renderprop.py --pass --step --pass $< --pass --png --pass $@
 	test -f $@
 
 clean:
-	rm -f $(STEPS) $(PNGS) $(STAMP)
+	rm -f $(STEPS) $(YAMLS) $(PNGS) $(STAMP)
 
-.PHONY: all steps gallery clean
+.PHONY: all steps summaries gallery clean
 .DELETE_ON_ERROR:

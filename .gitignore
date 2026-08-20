@@ -9,7 +9,7 @@ __pycache__/
 # Distribution / packaging
 .Python
 env/
-build/
+build/*
 develop-eggs/
 dist/
 downloads/
@@ -68,6 +68,13 @@ target/
 
 # proply-rs runtime polar cache
 foil_cache.json
+
+# proply-rs design outputs: the YAML summaries in build/out are committed
+# (linked from GALLERY.md); STEP files and everything else under build/
+# stay ignored (the re-inclusion dance requires listing build/ children).
+!build/out/
+build/out/*
+!build/out/*.yml
 
 # proply-rs local artifacts
 llF/
