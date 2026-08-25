@@ -337,7 +337,7 @@ fn build_hub(
     param: &crate::design_parameters::DesignParameters,
 ) -> Result<(), String> {
     let hub_r = (param.hub_radius + 0.05e-3) * MM;
-    let bore_r = param.center_hole * MM;
+    let bore_r = param.center_hole() * MM;
     if bore_r >= hub_r {
         return Err(format!(
             "step: center_hole ({:.3} mm) must be smaller than the hub radius ({:.3} mm)",

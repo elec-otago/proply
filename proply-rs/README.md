@@ -79,7 +79,8 @@ cargo run --release -p proply-rs -- --arad --bem --n 40 --resolution 30 \
 The hub includes the `center_hole` mounting bore as a single closed shell:
 outer and bore cylinders plus two annular caps (ring faces with an inner
 bound), written so every circular edge is split into two semicircular arcs
-shared by exactly two faces.  FreeCAD's OCCT importer reads the solid back
+shared by exactly two faces.  When the JSON omits `center_hole` it defaults
+to half the `hub_radius`.  FreeCAD's OCCT importer reads the solid back
 as watertight (`freecadcmd` + `Part.read` reports valid, closed solids).
 
 The first run simulates a polar (an 80-point alpha sweep) for each blade

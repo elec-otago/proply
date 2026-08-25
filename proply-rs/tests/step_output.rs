@@ -137,7 +137,7 @@ fn hub_step_round_trip() {
 #[test]
 fn hub_rejects_bore_larger_than_hub() {
     let param = DesignParameters {
-        center_hole: 0.006, // 6 mm bore vs 5.05 mm hub radius
+        center_hole: Some(0.006), // 6 mm bore vs 5.05 mm hub radius
         ..Default::default()
     };
     let res = step_out::hub_only_step(&param);

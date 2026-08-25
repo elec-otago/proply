@@ -2,8 +2,9 @@
 //! Propeller design parameters, parsed from a JSON file.
 //!
 //! Mirrors `proply/design_parameters.py`: the same JSON schema, with the
-//! Python class attributes as defaults for missing keys (`center_hole` was
-//! already optional in the Python version).
+//! Python class attributes as defaults for missing keys.  `center_hole` is
+//! optional and defaults to half the `hub_radius` (the Python used a fixed
+//! 5 mm).
 
 use serde::Deserialize;
 
@@ -19,7 +20,10 @@ pub struct DesignParameters {
     pub radius: f64,
     pub thrust: f64,
     pub blades: usize,
-    pub center_hole: f64,
+    /// Mounting bore radius (m).  Absent in the JSON: half the hub radius
+    /// (see [`DesignParameters::center_hole`]).
+    #[serde(default)]
+    pub center_hole: Option<f64>,
     pub tip_chord: f64,
     pub hub_radius: f64,
     pub hub_depth: f64,
@@ -89,7 +93,7 @@ impl Default for DesignParameters {
             radius: d(0.0625),
             thrust: d(2.0),
             blades: 2,
-            center_hole: d(5.0 / 1000.0),
+            center_hole: None,
             tip_chord: d(7.0 / 1000.0),
             hub_radius: d(5.0 / 1000.0),
             hub_depth: d(0.0),
@@ -121,6 +125,12 @@ impl Default for DesignParameters {
 }
 
 impl DesignParameters {
+    /// The mounting bore radius (m): the JSON `center_hole` when given,
+    /// else half the hub radius.
+    pub fn center_hole(&self) -> f64 {
+        self.center_hole.unwrap_or(0.5 * self.hub_radius)
+    }
+
     /// Load from a JSON file, exactly like `DesignParameters(filename)`.
     pub fn from_file(filename: &str) -> Result<Self, String> {
         let data = std::fs::read_to_string(filename)
@@ -197,7 +207,7 @@ mod tests {
         assert_eq!(p.name, "test");
         assert_eq!(p.blades, 3);
         assert!((p.radius - 0.02).abs() < 1e-12);
-        assert!((p.center_hole - 1.5e-3).abs() < 1e-12);
+        assert!((p.center_hole() - 1.5e-3).abs() < 1e-12);
         assert!((p.motor_Kv - 11500.0).abs() < 1e-9);
         assert!((p.scimitar_percent + 5.0).abs() < 1e-12);
     }
@@ -325,6 +335,16 @@ mod tests {
             "motor_no_load_current": 0.5
         }"#;
         let p = DesignParameters::from_json(json).unwrap();
-        assert!((p.center_hole - 0.005).abs() < 1e-12);
+        assert!(
+            (p.center_hole() - 0.5 * 0.004).abs() < 1e-12,
+            "bore {} should be half the hub radius",
+            p.center_hole()
+        );
+        // The Default (hub_radius 5 mm) follows the same rule.
+        assert!(
+            (DesignParameters::default().center_hole() - 0.0025).abs() < 1e-12,
+            "default bore {}",
+            DesignParameters::default().center_hole()
+        );
     }
 }
