@@ -43,8 +43,28 @@ This writes `build/out/<name>.step` — an assembly containing the hub and
 summary of the design (motor operating point, performance totals, and the
 per-station section list).
 
-- `--auto` re-runs the design loop, reducing the thrust target until the
-  torque drops below `1.5 × Qmax`.
+- Every design converges onto the motor's operating point: the thrust
+  target (the JSON `thrust` key) is iterated until the blade absorbs the
+  design torque at the design RPM, at maximum efficiency (`--auto` is
+  implied, and still accepted for compatibility).
+- Quantity keys in the design JSON may carry unit suffixes as quoted
+  strings — lengths in `m`, `cm` or `mm`, thrust in `N`, `kg` or `g`
+  (kilogram-force):
+
+  ```json
+      "radius": "6.8cm",
+      "tip_chord": "5mm",
+      "center_hole": "1.5mm",
+      "hub_radius": "6 mm",
+      "hub_depth": "6mm",
+      "trailing_edge": "0.25mm",
+      "thrust": "500g"
+  ```
+
+  A bare number keeps its historical unit — metres for lengths, newtons
+  for thrust, millimetres for `trailing_edge` — so existing files parse
+  exactly as before.  `center_hole` may be omitted: it defaults to half
+  the `hub_radius`.
 - A `motor_torque` + `motor_RPM` pair in the design JSON pins the
   operating point directly (e.g. an engine's rated torque and speed),
   overriding the electric motor model derived from `motor_Kv` and

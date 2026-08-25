@@ -4,7 +4,10 @@
 //! Mirrors `proply/design_parameters.py`: the same JSON schema, with the
 //! Python class attributes as defaults for missing keys.  `center_hole` is
 //! optional and defaults to half the `hub_radius` (the Python used a fixed
-//! 5 mm).
+//! 5 mm).  Physical quantities also accept unit-suffixed strings
+//! (`"6 mm"`, `"6.8cm"`, `"500g"`); a bare number keeps its historical
+//! unit — metres for lengths, newtons for thrust, millimetres for
+//! `trailing_edge` (see [`crate::units`]).
 
 use serde::Deserialize;
 
@@ -17,16 +20,24 @@ fn d(v: f64) -> f64 {
 #[allow(non_snake_case)] // field names match the JSON schema and the Python attributes
 pub struct DesignParameters {
     pub name: String,
+    #[serde(deserialize_with = "crate::units::de_length_m")]
     pub radius: f64,
+    #[serde(deserialize_with = "crate::units::de_force_n")]
     pub thrust: f64,
     pub blades: usize,
     /// Mounting bore radius (m).  Absent in the JSON: half the hub radius
     /// (see [`DesignParameters::center_hole`]).
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::units::de_opt_length_m")]
     pub center_hole: Option<f64>,
+    #[serde(deserialize_with = "crate::units::de_length_m")]
     pub tip_chord: f64,
+    #[serde(deserialize_with = "crate::units::de_length_m")]
     pub hub_radius: f64,
+    #[serde(deserialize_with = "crate::units::de_length_m")]
     pub hub_depth: f64,
+    /// Trailing-edge gap, in millimetres when bare (its historical unit —
+    /// divided by 1000 at the use site).
+    #[serde(deserialize_with = "crate::units::de_length_mm")]
     pub trailing_edge: f64,
     pub forward_airspeed: f64,
     pub altitude: f64,
@@ -97,7 +108,9 @@ impl Default for DesignParameters {
             tip_chord: d(7.0 / 1000.0),
             hub_radius: d(5.0 / 1000.0),
             hub_depth: d(0.0),
-            trailing_edge: d(0.5 / 1000.0),
+            // A millimetre field: 0.5 mm (the old 0.5/1000.0 value was
+            // divided by 1000 again at the use site, a 0.5 um edge).
+            trailing_edge: d(0.5),
             forward_airspeed: d(1.0),
             altitude: d(0.0),
             motor_volts: d(11.0),
@@ -346,5 +359,68 @@ mod tests {
             "default bore {}",
             DesignParameters::default().center_hole()
         );
+    }
+
+    #[test]
+    fn unit_suffixed_json_matches_bare_numbers() {
+        // The same design written with unit suffixes must parse to the
+        // same parameters as the bare-number (SI) form.  trailing_edge is
+        // the exception: its bare unit is millimetres, so 0.25 == "0.25mm".
+        let base = r#"{
+            "name": "units", "blades": 2,
+            "radius": 0.068, "tip_chord": 0.005, "hub_radius": 0.006,
+            "hub_depth": 0.006, "center_hole": 0.0015, "trailing_edge": 0.25,
+            "thrust": 4.0
+        }"#;
+        let suffixed = r#"{
+            "name": "units", "blades": 2,
+            "radius": "6.8cm", "tip_chord": "5mm", "hub_radius": "6 mm",
+            "hub_depth": "6mm", "center_hole": "1.5mm", "trailing_edge": "0.25mm",
+            "thrust": "4N"
+        }"#;
+        let a = DesignParameters::from_json(base).unwrap();
+        let b = DesignParameters::from_json(suffixed).unwrap();
+        for (what, x, y) in [
+            ("radius", a.radius, b.radius),
+            ("tip_chord", a.tip_chord, b.tip_chord),
+            ("hub_radius", a.hub_radius, b.hub_radius),
+            ("hub_depth", a.hub_depth, b.hub_depth),
+            ("thrust", a.thrust, b.thrust),
+        ] {
+            assert!((x - y).abs() < 1e-15, "{}: {} vs {}", what, x, y);
+        }
+        assert_eq!(a.center_hole, b.center_hole);
+        assert!((a.trailing_edge - b.trailing_edge).abs() < 1e-15);
+        assert!((a.trailing_edge - 0.25).abs() < 1e-12, "bare mm field");
+    }
+
+    #[test]
+    fn thrust_in_kilograms_and_grams() {
+        let json = |t: &str| {
+            format!(r#"{{"name": "x", "radius": 0.05, "blades": 2, "thrust": "{t}"}}"#)
+        };
+        let kg = DesignParameters::from_json(&json("0.5kg")).unwrap();
+        let g = DesignParameters::from_json(&json("500g")).unwrap();
+        assert!(
+            (kg.thrust - g.thrust).abs() < 1e-9,
+            "kg {} vs g {}",
+            kg.thrust,
+            g.thrust
+        );
+        assert!((kg.thrust - 0.5 * 9.80665).abs() < 1e-9, "kgf {}", kg.thrust);
+    }
+
+    #[test]
+    fn wrong_unit_kind_errors() {
+        let err = DesignParameters::from_json(
+            r#"{"name": "x", "radius": "500g", "blades": 2, "thrust": 1.0}"#,
+        )
+        .unwrap_err();
+        assert!(err.contains("m, cm, mm"), "{}", err);
+        let err = DesignParameters::from_json(
+            r#"{"name": "x", "radius": 0.05, "blades": 2, "thrust": "5 furlongs"}"#,
+        )
+        .unwrap_err();
+        assert!(err.contains("N, kg, g"), "{}", err);
     }
 }

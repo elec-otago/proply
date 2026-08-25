@@ -87,6 +87,9 @@ ALL OPTIONS IN JSON:
     file (keys: bem, lifting_line, auto, resolution, n, ar, plate, cst,
     arad, dir, step_file, chord_spline_n, camber).  An explicit CLI flag
     overrides the JSON value, which overrides the built-in default.
+    Quantities may carry unit suffixes as quoted strings (\"6 mm\", \"6.8cm\",
+    \"500g\", \"0.5kg\"); a bare number keeps its historical unit (metres,
+    newtons, millimetres for trailing_edge).
     A motor_torque + motor_RPM pair in the JSON sets the design's
     operating point directly (e.g. an engine), overriding the electric
     motor model derived from motor_Kv/motor_volts & co.

@@ -60,6 +60,24 @@ the torque-matched design is the maximum-efficiency design at that
 operating point — the achieved thrust is an output.  This replaces the
 old `--auto` torque ceiling (`--auto` is still accepted, and implied).
 
+Quantity keys in the design JSON may carry unit suffixes as quoted
+strings — lengths in `m`, `cm` or `mm`, thrust in `N`, `kg` or `g`
+(kilogram-force):
+
+```json
+    "radius": "6.8cm",
+    "tip_chord": "5mm",
+    "center_hole": "1.5mm",
+    "hub_radius": "6 mm",
+    "hub_depth": "6mm",
+    "trailing_edge": "0.25mm",
+    "thrust": "500g"
+```
+
+A bare number keeps its historical unit — metres for lengths, newtons
+for thrust, millimetres for `trailing_edge` — so every existing file
+parses exactly as before.
+
 Design the same propeller with CST (Kulfan) station foils instead of the
 NACA 4-series:
 
