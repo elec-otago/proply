@@ -63,8 +63,9 @@ DESIGN OPTIONS:
     --arad                 ARA-D airfoil family: the table-driven propeller
                            sections from the legacy proply, blended over the
                            design's radial thickness law (inherent camber).
-    --auto                 Re-run the design loop, reducing the thrust
-                           target until the torque drops below ~1.5 x Qmax.
+    --auto                 Implied (accepted for compatibility): every
+                           design converges onto the motor operating point,
+                           absorbing the design torque at the design RPM.
     --ar <N>               Minimum blade aspect ratio (R - hub)/<mean chord>;
                            caps the chord (thinner blade) in the lifting line.
     --chord-spline-n <N>   Number of control points for the smooth spline
@@ -275,27 +276,14 @@ fn main() {
     );
     println!("\n\n");
 
-    let mut thrust = param.thrust;
-    let goal_torque = optimum_torque * 1.5;
-    let (mut q, mut t) = if param.lifting_line {
-        p.lift_line_design(optimum_rpm, thrust, param.ar)
-    } else {
-        p.full_optimize(optimum_rpm, thrust)
-    };
+    // The design converges onto the motor operating point: the thrust
+    // target is iterated until the blade absorbs the design torque at the
+    // design RPM.  The inner loops maximise efficiency at a matched thrust,
+    // so the converged design is the maximum-efficiency design at that
+    // operating point (`--auto` is implied — the old 1.5 x Qmax ceiling is
+    // subsumed by matching the operating point exactly).
+    let (q, t) = p.design_for_torque(optimum_rpm, optimum_torque, param.thrust, param.ar);
     println!("Total Thrust: {:5.2}, Torque: {:5.3}", t, q);
-    if param.auto {
-        while q > goal_torque {
-            thrust *= 0.95 * goal_torque / q;
-            // Re-run with the same design loop that produced the initial
-            // design (lifting-line or BEM).
-            (q, t) = if param.lifting_line {
-                p.lift_line_design(optimum_rpm, thrust, param.ar)
-            } else {
-                p.full_optimize(optimum_rpm, thrust)
-            };
-            println!("Total Thrust: {:5.2} (N), Torque: {:5.2} (Nm)", t, q);
-        }
-    }
 
     let step_filename = if param.step_file.is_empty() {
         format!("{}/{}.step", param.dir, param.name)

@@ -51,9 +51,14 @@ The summary records the design parameters, the motor operating point
 power, propulsive efficiency, hover figure of merit, tip speed) and the
 per-station section list (radius, chord, twist, camber, thickness, and
 — for BEM designs — the converged induced velocity and element loads).
-`--auto` re-runs the design
-loop, reducing the thrust target until the torque drops below
-`1.5 × Qmax`.
+
+The design converges onto the motor's operating point: the thrust target
+(the JSON `thrust` key) is iterated until the blade absorbs the design
+torque at the design RPM.  The inner loops maximise efficiency at a
+matched thrust, and the shaft power is fixed once (torque, RPM) is, so
+the torque-matched design is the maximum-efficiency design at that
+operating point — the achieved thrust is an output.  This replaces the
+old `--auto` torque ceiling (`--auto` is still accepted, and implied).
 
 Design the same propeller with CST (Kulfan) station foils instead of the
 NACA 4-series:

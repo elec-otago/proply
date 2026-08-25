@@ -64,6 +64,11 @@ pub struct DesignParameters {
     // carry the whole design) ----
     pub bem: bool,
     pub lifting_line: bool,
+    /// Implied since the operating-point match: the design loop always
+    /// iterates the thrust target until the blade absorbs the design
+    /// torque at the design RPM.  Kept (parsed but unused) so old JSON
+    /// files and scripts passing `--auto` keep working.
+    #[serde(default)]
     pub auto: bool,
     pub resolution: usize,
     pub n: usize,

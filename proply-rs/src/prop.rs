@@ -358,6 +358,11 @@ impl Prop {
             let y_limit = self.get_max_depth(*r);
             let x_limit = self.get_max_chord(*r, prev_twist);
             let maxchord = be.foil.borrow().get_max_chord(x_limit, y_limit, prev_twist);
+            // A degenerate station (zero chord extent makes both bounding-box
+            // scales infinite/undefined) must bound the chord to zero, not
+            // NaN: a NaN bound panics the optimizer's clamp.  This happens
+            // with a zero hub_depth (zero-thickness blade law).
+            let maxchord = if maxchord.is_finite() { maxchord } else { 0.0 };
 
             let x = optimize::optimize_all(
                 &be.fs,
@@ -437,6 +442,99 @@ impl Prop {
         println!("Total Thrust: {:5.2}, Torque: {:5.3}", thrust_final, torque);
         let _ = (total_thrust, total_torque);
         (torque, thrust_final)
+    }
+
+    /// One design pass with the configured loop (lifting line or BEM).
+    fn run_design(&mut self, rpm: f64, thrust: f64, ar: Option<f64>) -> (f64, f64) {
+        if self.param.lifting_line {
+            self.lift_line_design(rpm, thrust, ar)
+        } else {
+            self.full_optimize(rpm, thrust)
+        }
+    }
+
+    /// Converge the design onto the operating point: iterate the thrust
+    /// target until the blade absorbs exactly `q_target` of torque at `rpm`
+    /// (the design RPM), starting from `thrust_seed` (the JSON `thrust`
+    /// key — the achieved thrust becomes an output, not a constraint).
+    ///
+    /// This is the maximum-efficiency design at that operating point.  The
+    /// shaft power is fixed once (torque, RPM) is, and the inner loops
+    /// already maximise efficiency at a matched thrust (per-station
+    /// best-L/D attack angles; the torque-minimising lifting line), so the
+    /// torque-matched member of that family of designs is the one that puts
+    /// all of the available power to work.  Absorbed torque rises
+    /// monotonically with the thrust target, so a damped multiplicative
+    /// secant on the target converges from either side.
+    ///
+    /// If the geometry cannot reach the target (chord/depth caps limit the
+    /// loading), the closest design is returned with a warning.
+    pub fn design_for_torque(
+        &mut self,
+        rpm: f64,
+        q_target: f64,
+        thrust_seed: f64,
+        ar: Option<f64>,
+    ) -> (f64, f64) {
+        const MAX_ITERS: usize = 30;
+        /// Relative torque tolerance for a converged match.
+        const TOL: f64 = 1.0e-2;
+        /// Damping exponent for the target update: ideally T ∝ Q^(2/3) in
+        /// hover (T ∝ P^(2/3)) and ~Q^1 in cruise, so 0.8 keeps the fixed
+        /// point iteration stable across both regimes.
+        const DAMPING: f64 = 0.8;
+
+        let mut thrust = thrust_seed.max(1.0e-3);
+        // (relative error, thrust target) of the closest design so far —
+        // the fallback if the iteration cannot close on the target.
+        let mut best: Option<(f64, f64)> = None;
+        for iter in 0..MAX_ITERS {
+            let (q, t) = self.run_design(rpm, thrust, ar);
+            let err = (q - q_target).abs() / q_target;
+            println!(
+                "Operating point match {:2}: thrust target {:6.3} N -> T={:6.3} N, Q={:6.4} Nm (design Q={:6.4}, err {:4.2}%)",
+                iter + 1,
+                thrust,
+                t,
+                q,
+                q_target,
+                100.0 * err
+            );
+            if err < TOL {
+                return (q, t);
+            }
+            if best.is_none_or(|(e, _)| err < e) {
+                best = Some((err, thrust));
+            }
+            if !q.is_finite() || q <= 1.0e-9 {
+                eprintln!(
+                    "proply: torque match stalled (absorbed Q={:.4}, design Q={:.4})",
+                    q, q_target
+                );
+                break;
+            }
+            let next = thrust * (q_target / q).powf(DAMPING);
+            if (next - thrust).abs() / thrust < 1.0e-3 {
+                eprintln!(
+                    "proply: torque match stalled at Q={:.4} Nm (design Q={:.4})",
+                    q, q_target
+                );
+                break;
+            }
+            thrust = next;
+        }
+        // Not converged: re-run the closest design so the blade in place is
+        // the one being reported.
+        if let Some((_, t_best)) = best {
+            if (t_best - thrust).abs() > 1.0e-9 {
+                eprintln!(
+                    "proply: falling back to the closest design (thrust target {:.3} N)",
+                    t_best
+                );
+                return self.run_design(rpm, t_best, ar);
+            }
+        }
+        self.run_design(rpm, thrust, ar)
     }
 
     /// The maximum CL/CD at speed `v` and the angle of attack (rad) that
@@ -1461,5 +1559,49 @@ mod tests {
             t
         );
         assert!(q < 0.5, "torque {} not bounded", q);
+    }
+
+    #[test]
+    fn bem_design_matches_target_torque() {
+        // Plate polars (no rust-foil) so this is fast: the operating-point
+        // match must land the absorbed torque on the target at the design
+        // RPM, converging from the seed thrust target.
+        let mut p = test_prop();
+        p.param.hub_depth = 0.003; // nonzero thickness law, as real props have
+        p.radial_steps = 10;
+        p.set_plate_mode(true);
+        let (q0, _t0) = p.full_optimize(12000.0, 2.0);
+        assert!(q0 > 0.0, "reference torque {} not positive", q0);
+        let q_target = 0.8 * q0;
+        let (q, t) = p.design_for_torque(12000.0, q_target, 2.0, None);
+        assert!(
+            (q - q_target).abs() / q_target < 0.01,
+            "Q {} vs target {}",
+            q,
+            q_target
+        );
+        assert!(t.is_finite() && t > 0.0, "thrust {}", t);
+        // The converged geometry stays in place for the STEP/YAML writers.
+        assert!(!p.blade_elements.is_empty());
+    }
+
+    #[test]
+    fn lifting_line_design_matches_target_torque() {
+        // The same convergence through the coupled lifting-line loop.
+        let mut p = test_prop();
+        p.param.lifting_line = true;
+        p.radial_steps = 10;
+        p.set_plate_mode(true);
+        let (q0, _) = p.lift_line_design(12000.0, 2.0, None);
+        assert!(q0 > 0.0, "reference torque {} not positive", q0);
+        let q_target = 0.7 * q0;
+        let (q, t) = p.design_for_torque(12000.0, q_target, 2.0, None);
+        assert!(
+            (q - q_target).abs() / q_target < 0.01,
+            "Q {} vs target {}",
+            q,
+            q_target
+        );
+        assert!(t.is_finite() && t > 0.0, "thrust {}", t);
     }
 }
