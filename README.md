@@ -80,8 +80,6 @@ solids are watertight with positive volume.
 
 ## TODO
 
-- [ ] **ARA-D foil family (`--arad`)** — not yet ported; only NACA 4-digit
-      foils are implemented.
 - [ ] **GMSH meshing (`--mesh`)** — not yet ported; the design output is the
       STEP file only.
 - [ ] **Version the port-verification tooling** — the reference scripts

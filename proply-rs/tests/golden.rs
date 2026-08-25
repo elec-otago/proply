@@ -3,7 +3,7 @@
 //! generated from the Python implementation (numpy/scipy) by
 //! `build/golden/gen_golden.py`.
 
-use proply_rs::foil::{FoilLike, Naca4};
+use proply_rs::foil::{Arad, FoilLike, Naca4};
 use proply_rs::motor::Motor;
 use proply_rs::optimize::{bem_iterate, optimize_all, PlateSim};
 use proply_rs::pchip::Pchip;
@@ -137,6 +137,28 @@ fn polyfit_golden() {
     let want_tw = arr(&g["twist_eval"]);
     let got_tw: Vec<f64> = rrev.iter().map(|ri| polyval(&c4, *ri)).collect();
     near_array(&got_tw, &want_tw, 1e-7, "twist eval");
+}
+
+#[test]
+fn arad_golden() {
+    // The ARA-D family pipeline (table smoothing + thickness blend + shape
+    // points) against the numpy/scipy replication in gen_golden.py, at a
+    // base-table thickness (t=0.06), an inter-table blend (t=0.09) and a
+    // ramp thickness (t=0.30).  Tolerance covers the QR-vs-numpy polyfit.
+    let g = golden("arad.json");
+    for name in ["t06_node", "t09_blend", "t30_ramp"] {
+        let s = &g[name];
+        let t = s["thickness"].as_f64().unwrap();
+        let chord = s["chord"].as_f64().unwrap();
+        let te = s["te"].as_f64().unwrap();
+        let mut f = Arad::new(chord, t);
+        f.set_trailing_edge(te);
+        let (xl, yl, xu, yu) = f.get_shape_points(42);
+        near_array(&xl, &arr(&s["xl"]), 1e-12, &format!("{} xl", name));
+        near_array(&yl, &arr(&s["yl"]), 1e-6, &format!("{} yl", name));
+        near_array(&xu, &arr(&s["xu"]), 1e-12, &format!("{} xu", name));
+        near_array(&yu, &arr(&s["yu"]), 1e-6, &format!("{} yu", name));
+    }
 }
 
 #[test]

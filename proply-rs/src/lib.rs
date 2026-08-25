@@ -6,6 +6,7 @@
 //! `rust-foil` crate (a Rust port of XFOIL) supplies airfoil polars.
 //! The final propeller is written out as a STEP (AP242) file.
 
+pub mod arad;
 pub mod blade_element;
 pub mod cache;
 pub mod design_parameters;

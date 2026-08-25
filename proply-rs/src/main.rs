@@ -32,6 +32,7 @@ struct Args {
     chord_spline_n: Option<usize>,
     camber: Option<f64>,
     cst: Option<bool>,
+    arad: Option<bool>,
     help: bool,
 }
 
@@ -59,6 +60,9 @@ DESIGN OPTIONS:
     --cst                  CST (Kulfan) airfoil family: every station uses
                            the default 18-parameter section, re-thicknessed
                            and cambered to the design's radial laws.
+    --arad                 ARA-D airfoil family: the table-driven propeller
+                           sections from the legacy proply, blended over the
+                           design's radial thickness law (inherent camber).
     --auto                 Re-run the design loop, reducing the thrust
                            target until the torque drops below ~1.5 x Qmax.
     --ar <N>               Minimum blade aspect ratio (R - hub)/<mean chord>;
@@ -80,7 +84,7 @@ OUTPUT OPTIONS:
 ALL OPTIONS IN JSON:
     Every design/run option above can instead be set in the --param JSON
     file (keys: bem, lifting_line, auto, resolution, n, ar, plate, cst,
-    dir, step_file, chord_spline_n, camber).  An explicit CLI flag
+    arad, dir, step_file, chord_spline_n, camber).  An explicit CLI flag
     overrides the JSON value, which overrides the built-in default.
     A motor_torque + motor_RPM pair in the JSON sets the design's
     operating point directly (e.g. an engine), overriding the electric
@@ -107,6 +111,7 @@ fn parse_args() -> Result<Args, String> {
         chord_spline_n: None,
         camber: None,
         cst: None,
+        arad: None,
         help: false,
     };
     let mut it = std::env::args().skip(1);
@@ -130,6 +135,7 @@ fn parse_args() -> Result<Args, String> {
             "--auto" => a.auto = Some(true),
             "--naca" => {}                 // NACA 4-series family (the default)
             "--cst" => a.cst = Some(true), // CST (Kulfan) foil family
+            "--arad" => a.arad = Some(true), // ARA-D table-driven foil family
             "--resolution" => {
                 a.resolution = Some(
                     value()?
@@ -154,7 +160,6 @@ fn parse_args() -> Result<Args, String> {
             }
             "--help" | "-h" => a.help = true,
             "--mesh" => return Err("--mesh (GMSH) is not yet ported".into()),
-            "--arad" => return Err("--arad (ARA-D foils) is not yet ported".into()),
             other => return Err(format!("unknown argument: {}", other)),
         }
     }
@@ -212,6 +217,9 @@ fn main() {
     if let Some(v) = args.cst {
         param.cst = v;
     }
+    if let Some(v) = args.arad {
+        param.arad = v;
+    }
     if let Some(v) = args.plate {
         param.plate = v;
     }
@@ -227,6 +235,11 @@ fn main() {
             "proply-rs: select a design loop (set `bem` or `lifting_line`, or pass \
              --bem / --lifting-line)"
         );
+        exit(1);
+    }
+
+    if param.cst && param.arad {
+        eprintln!("proply-rs: choose one foil family (--naca, --cst or --arad)");
         exit(1);
     }
 

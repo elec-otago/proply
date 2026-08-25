@@ -54,6 +54,12 @@ pub struct DesignParameters {
     /// cambered to the same radial laws.
     #[serde(default)]
     pub cst: bool,
+    /// Use the ARA-D foil family (the table-driven propeller sections of
+    /// the legacy proply, blended over the radial thickness law) instead of
+    /// the NACA 4-series.  The family carries its own camber, so the
+    /// `camber` setting/scan does not apply.  Mutually exclusive with `cst`.
+    #[serde(default)]
+    pub arad: bool,
     // ---- run / design options (mirror the CLI flags so a JSON file can
     // carry the whole design) ----
     pub bem: bool,
@@ -95,6 +101,7 @@ impl Default for DesignParameters {
             motor_torque: None,
             motor_RPM: None,
             cst: false,
+            arad: false,
             bem: true,
             lifting_line: false,
             auto: false,
@@ -210,7 +217,8 @@ mod tests {
             "step_file": "x.step",
             "chord_spline_n": 5,
             "camber": 0.03,
-            "cst": true
+            "cst": true,
+            "arad": true
         }"#;
         let p = DesignParameters::from_json(json).unwrap();
         assert!(!p.bem);
@@ -225,6 +233,7 @@ mod tests {
         assert_eq!(p.chord_spline_n, 5);
         assert!((p.camber.unwrap() - 0.03).abs() < 1e-12);
         assert!(p.cst);
+        assert!(p.arad);
 
         // Absent keys fall back to the defaults.
         let p2 = DesignParameters::from_json(
@@ -243,6 +252,7 @@ mod tests {
         assert_eq!(p2.chord_spline_n, 3);
         assert!(p2.camber.is_none());
         assert!(!p2.cst);
+        assert!(!p2.arad);
     }
 
     #[test]

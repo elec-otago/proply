@@ -105,6 +105,7 @@ fn family_camber(f: &FoilFamily) -> f64 {
     match f {
         FoilFamily::Naca4(n) => n.m,
         FoilFamily::Cst(c) => c.camber(),
+        FoilFamily::Arad(a) => a.camber(),
     }
 }
 
@@ -178,7 +179,13 @@ pub fn summary(p: &Prop, rpm: f64, thrust: f64, torque: f64, motor: &MotorInfo) 
             stations: sections.len(),
             spanwise_resolution: param.resolution,
             loft_points: param.n,
-            foil_family: if param.cst { "cst" } else { "naca4" },
+            foil_family: if param.arad {
+                "arad"
+            } else if param.cst {
+                "cst"
+            } else {
+                "naca4"
+            },
             camber: param.camber.map(r6),
             min_aspect_ratio: param.ar,
             chord_spline_n: param.chord_spline_n,

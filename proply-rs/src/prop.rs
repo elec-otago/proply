@@ -14,7 +14,7 @@ use std::thread;
 use crate::blade_element::BladeElement;
 use crate::cache::PolarStore;
 use crate::design_parameters::DesignParameters;
-use crate::foil::{Cst, FoilFamily, FoilLike, Naca4};
+use crate::foil::{Arad, Cst, FoilFamily, FoilLike, Naca4};
 use crate::lift_line::{self, Station};
 use crate::optimize;
 use crate::pchip::Pchip;
@@ -77,13 +77,19 @@ fn foil_thickness(param: &DesignParameters, r: f64) -> f64 {
 
 /// The foil of one station: the thickness law at radius `r`, chord `c`,
 /// camber fraction `camber` and the parameter trailing edge.  The family is
-/// [`DesignParameters::cst`]: the default NACA 4-series, or a CST (Kulfan)
-/// section — the default 18-parameter shape re-thicknessed and cambered to
-/// the same laws.  Plain data (clonable, sendable) so worker threads can
-/// build their own.
+/// [`DesignParameters::arad`] / [`DesignParameters::cst`]: the default NACA
+/// 4-series, a CST (Kulfan) section — the default 18-parameter shape
+/// re-thicknessed and cambered to the same laws — or the table-driven
+/// ARA-D family, which carries its own camber (the `camber` argument does
+/// not apply, as in the Python `ARADProp`).  Plain data (clonable,
+/// sendable) so worker threads can build their own.
 fn station_foil(param: &DesignParameters, r: f64, c: f64, camber: f64) -> FoilFamily {
     let thickness = foil_thickness(param, r);
-    if param.cst {
+    if param.arad {
+        let mut f = Arad::new(c, thickness / c);
+        f.base.set_trailing_edge(param.trailing_edge / 1000.0);
+        FoilFamily::Arad(f)
+    } else if param.cst {
         let mut f = Cst::default(c);
         f.set_thickness(thickness / c);
         f.set_camber(camber);
@@ -1371,7 +1377,9 @@ mod tests {
         let f = be.foil.borrow();
         let m = match &*f {
             FoilFamily::Naca4(n) => n.m,
-            FoilFamily::Cst(_) => panic!("expected a NACA4 foil (default family)"),
+            FoilFamily::Cst(_) | FoilFamily::Arad(_) => {
+                panic!("expected a NACA4 foil (default family)")
+            }
         };
         assert!((m - 0.04).abs() < 1.0e-12, "camber not applied");
     }
@@ -1403,6 +1411,33 @@ mod tests {
                 );
             }
             FoilFamily::Naca4(_) => panic!("expected a CST foil with param.cst set"),
+            FoilFamily::Arad(_) => panic!("expected a CST foil with param.cst set"),
+        }
+    }
+
+    #[test]
+    fn blade_element_arad_family_is_applied() {
+        // With the ARA-D family selected, stations carry Arad foils sized to
+        // the station thickness law (thickness/chord reaching the foil
+        // exactly).  The camber candidate does not apply: the ARA-D tables
+        // carry their own camber, so every candidate yields the same foil.
+        let mut p = test_prop();
+        p.param.arad = true;
+        p.param.hub_depth = 0.006; // nonzero root depth: thickness law > 0
+        let be = p.new_blade_element_with_chord(0.02, 1000.0, 0.1, 0.008, 0.04);
+        let f = be.foil.borrow();
+        match &*f {
+            FoilFamily::Arad(a) => {
+                let t_law = p.get_foil_thickness(0.02) / 0.008;
+                assert!(
+                    (a.thickness() - t_law).abs() < 1e-12,
+                    "thickness {} vs law {}",
+                    a.thickness(),
+                    t_law
+                );
+                assert!(a.camber() > 0.01, "inherent camber {}", a.camber());
+            }
+            _ => panic!("expected an ARA-D foil with param.arad set"),
         }
     }
 

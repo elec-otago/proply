@@ -4,8 +4,12 @@
 //! `Foil` is the base class (a flat plate); `Naca4` generates the NACA
 //! 4-series shape with cosine spacing and an optional trailing-edge gap;
 //! `Cst` defines the shape directly from Kulfan (CST) parameters
-//! (rust-foil's canonical geometry representation).  [`FoilFamily`] is the
-//! station-level dispatch over the foil families the design loop can use.
+//! (rust-foil's canonical geometry representation); `Arad` (in
+//! [`crate::arad`]) is the table-driven ARA-D family.  [`FoilFamily`] is
+//! the station-level dispatch over the foil families the design loop can
+//! use.
+
+pub use crate::arad::Arad;
 
 /// A foil: chord (m), thickness (fraction of chord) and trailing-edge gap
 /// (fraction of chord).
@@ -565,11 +569,13 @@ impl FoilLike for Cst {
 
 /// The station foil family: which shape generator a blade element uses.
 /// The design loop touches only this type, so switching families is a
-/// per-prop choice (`DesignParameters::cst`) instead of a code change.
+/// per-prop choice (`DesignParameters::cst` / `DesignParameters::arad`)
+/// instead of a code change.
 #[derive(Debug, Clone)]
 pub enum FoilFamily {
     Naca4(Naca4),
     Cst(Cst),
+    Arad(Arad),
 }
 
 impl std::fmt::Display for FoilFamily {
@@ -577,6 +583,7 @@ impl std::fmt::Display for FoilFamily {
         match self {
             FoilFamily::Naca4(n) => write!(f, "{}", n),
             FoilFamily::Cst(c) => write!(f, "{}", c),
+            FoilFamily::Arad(a) => write!(f, "{}", a),
         }
     }
 }
@@ -586,80 +593,91 @@ impl FoilLike for FoilFamily {
         match self {
             FoilFamily::Naca4(n) => n.chord(),
             FoilFamily::Cst(c) => c.chord(),
+            FoilFamily::Arad(a) => a.chord(),
         }
     }
     fn thickness(&self) -> f64 {
         match self {
             FoilFamily::Naca4(n) => n.thickness(),
             FoilFamily::Cst(c) => c.thickness(),
+            FoilFamily::Arad(a) => a.thickness(),
         }
     }
     fn modify_chord(&mut self, c: f64) {
         match self {
             FoilFamily::Naca4(n) => n.modify_chord(c),
             FoilFamily::Cst(cst) => cst.modify_chord(c),
+            FoilFamily::Arad(a) => a.modify_chord(c),
         }
     }
     fn set_trailing_edge(&mut self, te: f64) {
         match self {
             FoilFamily::Naca4(n) => n.set_trailing_edge(te),
             FoilFamily::Cst(c) => c.set_trailing_edge(te),
+            FoilFamily::Arad(a) => a.set_trailing_edge(te),
         }
     }
     fn hash(&self) -> String {
         match self {
             FoilFamily::Naca4(n) => n.hash(),
             FoilFamily::Cst(c) => c.hash(),
+            FoilFamily::Arad(a) => a.hash(),
         }
     }
     fn get_shape_points(&self, n: usize) -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
         match self {
             FoilFamily::Naca4(f) => f.get_shape_points(n),
             FoilFamily::Cst(c) => c.get_shape_points(n),
+            FoilFamily::Arad(a) => a.get_shape_points(n),
         }
     }
     fn get_points(&self, n: usize, rotation_angle: f64) -> (Vec<[f64; 2]>, Vec<[f64; 2]>) {
         match self {
             FoilFamily::Naca4(f) => f.get_points(n, rotation_angle),
             FoilFamily::Cst(c) => c.get_points(n, rotation_angle),
+            FoilFamily::Arad(a) => a.get_points(n, rotation_angle),
         }
     }
     fn get_bounding_box(&self, theta: f64) -> (f64, f64, f64, f64) {
         match self {
             FoilFamily::Naca4(f) => f.get_bounding_box(theta),
             FoilFamily::Cst(c) => c.get_bounding_box(theta),
+            FoilFamily::Arad(a) => a.get_bounding_box(theta),
         }
     }
     fn get_max_chord(&self, x_limit: f64, y_limit: f64, theta: f64) -> f64 {
         match self {
             FoilFamily::Naca4(f) => f.get_max_chord(x_limit, y_limit, theta),
             FoilFamily::Cst(c) => c.get_max_chord(x_limit, y_limit, theta),
+            FoilFamily::Arad(a) => a.get_max_chord(x_limit, y_limit, theta),
         }
     }
     fn reynolds(&self, v: f64) -> f64 {
         match self {
             FoilFamily::Naca4(f) => f.reynolds(v),
             FoilFamily::Cst(c) => c.reynolds(v),
+            FoilFamily::Arad(a) => a.reynolds(v),
         }
     }
     fn mach(&self, v: f64) -> f64 {
         match self {
             FoilFamily::Naca4(f) => f.mach(v),
             FoilFamily::Cst(c) => c.mach(v),
+            FoilFamily::Arad(a) => a.mach(v),
         }
     }
 }
 
-fn min(v: &[f64]) -> f64 {
+pub(crate) fn min(v: &[f64]) -> f64 {
     v.iter().copied().fold(f64::INFINITY, f64::min)
 }
 
-fn max(v: &[f64]) -> f64 {
+pub(crate) fn max(v: &[f64]) -> f64 {
     v.iter().copied().fold(f64::NEG_INFINITY, f64::max)
 }
 
 /// Rotate (x, y) by `theta` around (x0, y0) — the Python `Foil.rotate`.
-fn rotate(x: &[f64], y: &[f64], x0: f64, y0: f64, theta: f64) -> Vec<[f64; 2]> {
+pub(crate) fn rotate(x: &[f64], y: &[f64], x0: f64, y0: f64, theta: f64) -> Vec<[f64; 2]> {
     x.iter()
         .zip(y.iter())
         .map(|(xi, yi)| {
@@ -856,11 +874,14 @@ mod tests {
     fn foil_family_dispatches() {
         let n = FoilFamily::Naca4(Naca4::new(0.1, 0.12, 0.02, 0.4));
         let c = FoilFamily::Cst(Cst::default(0.1));
+        let a = FoilFamily::Arad(Arad::new(0.1, 0.12));
         assert!((n.thickness() - 0.12).abs() < 1e-12);
         assert!((c.thickness() - 0.154).abs() < 2.0e-3);
-        // Both produce the (xl, yl, xu, yu) contract.
+        assert!((a.thickness() - 0.12).abs() < 1e-12);
+        // All produce the (xl, yl, xu, yu) contract.
         assert_eq!(n.get_shape_points(10).0.len(), 10);
         assert_eq!(c.get_shape_points(10).0.len(), 10);
+        assert_eq!(a.get_shape_points(10).0.len(), 10);
         // Family switch is chord-independent via modify_chord.
         let mut cc = c.clone();
         cc.modify_chord(0.2);

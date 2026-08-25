@@ -321,6 +321,87 @@ def gen_buhl():
         json.dump(out, f, indent=1)
 
 
+# ---------------------------------------------------------------------------
+# 7. ARA-D family (src/arad.rs, ported from legacy foil_ARA.py ARADFoil)
+# ---------------------------------------------------------------------------
+def arad_load_selig(path):
+    """The Selig parser of src/arad.rs (header line, upper TE->LE, lower
+    LE->TE); returns (xl, yl, xu, yu), both LE->TE."""
+    xs, ys = [], []
+    with open(path) as f:
+        for line in f.read().splitlines()[1:]:
+            parts = line.split()
+            if len(parts) != 2:
+                continue
+            try:
+                x, y = float(parts[0]), float(parts[1])
+            except ValueError:
+                continue
+            xs.append(x)
+            ys.append(y)
+    split = len(xs)
+    for i in range(len(xs) - 1):
+        if xs[i + 1] >= xs[i]:
+            split = i + 1
+            break
+    return xs[split:], ys[split:], xs[:split][::-1], ys[:split][::-1]
+
+
+def arad_section(t, n_stations=60):
+    """The 60-station section at thickness t: degree-12 polyfit smoothing
+    per surface, then the PCHIP thickness blend over the 20 nodes."""
+    dat = os.path.join(OUT, "..", "..", "src", "arad")
+    base_t = [0.06, 0.10, 0.13, 0.20]
+    files = ["ara_d_6.dat", "ara_d_10.dat", "ara_d_13.dat", "ara_d_20.dat"]
+    x = np.array([j / (n_stations - 1) for j in range(n_stations)])
+    base_l, base_u = [], []
+    for fname in files:
+        xl, yl, xu, yu = arad_load_selig(os.path.join(dat, fname))
+        base_l.append(np.poly1d(np.polyfit(xl, yl, 12))(x))
+        base_u.append(np.poly1d(np.polyfit(xu, yu, 12))(x))
+    low = np.linspace(0.0, 0.04, 7)
+    high = np.linspace(0.25, 1.0, 9)
+    t_nodes = np.concatenate([low, base_t, high])
+    rows_l = [base_l[0] * (t / 0.06) for t in low] + list(base_l) \
+        + [base_l[3] * (t / 0.20) for t in high]
+    rows_u = [base_u[0] * (t / 0.06) for t in low] + list(base_u) \
+        + [base_u[3] * (t / 0.20) for t in high]
+    tt = float(np.clip(t, 0.0, 1.0))
+    yl = np.array([float(PchipInterpolator(t_nodes, [r[j] for r in rows_l])(tt))
+                   for j in range(n_stations)])
+    yu = np.array([float(PchipInterpolator(t_nodes, [r[j] for r in rows_u])(tt))
+                   for j in range(n_stations)])
+    return x, yl, yu
+
+
+def arad_shape_points(t, chord, te_m, n=42):
+    """Arad::get_shape_points (the ported ARADFoil.get_shape_points)."""
+    x, yl_st, yu_st = arad_section(t)
+    init_te = yu_st[-1] - yl_st[-1]
+    n5 = n * 5
+    beta = np.linspace(0.0, np.pi, n5)
+    xx = (1.0 - np.cos(beta)) / 2.0
+    off = np.linspace(0.0, (te_m / chord - init_te) / 2.0, n5)
+    lo = PchipInterpolator(x, yl_st)(xx) - off
+    up = PchipInterpolator(x, yu_st)(xx) + off
+    up[0] = lo[0]
+    return xx[::5] * chord, lo[::5] * chord, xx[::5] * chord, up[::5] * chord
+
+
+def gen_arad():
+    out = {}
+    for name, t in {"t06_node": 0.06, "t09_blend": 0.09, "t30_ramp": 0.30}.items():
+        chord, te_m = 0.1, 0.001
+        xl, yl, xu, yu = arad_shape_points(t, chord, te_m)
+        out[name] = {
+            "thickness": t, "chord": chord, "te": te_m,
+            "xl": xl.tolist(), "yl": yl.tolist(),
+            "xu": xu.tolist(), "yu": yu.tolist(),
+        }
+    with open(os.path.join(OUT, "arad.json"), "w") as f:
+        json.dump(out, f, indent=1)
+
+
 if __name__ == "__main__":
     gen_naca4()
     gen_pchip()
@@ -328,4 +409,5 @@ if __name__ == "__main__":
     gen_motor()
     gen_bem()
     gen_buhl()
+    gen_arad()
     print("golden files written to", os.path.abspath(OUT))
