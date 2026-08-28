@@ -69,12 +69,27 @@ fn to_step_surface(s: &NurbsSurface) -> step_io::build::NurbsSurface {
     }
 }
 
+/// The STEP header time stamp.  `None` lets step-io stamp the current UTC
+/// time — but its `SystemTime::now()` panics on wasm32-unknown-unknown, so
+/// there the stamp comes from the JavaScript clock instead.
+#[cfg(target_arch = "wasm32")]
+fn step_timestamp() -> Option<String> {
+    let iso: String = js_sys::Date::new_0().to_iso_string().into(); // "YYYY-MM-DDTHH:MM:SS.mmmZ"
+    Some(format!("{}Z", &iso[..19])) // through whole seconds, like step-io
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn step_timestamp() -> Option<String> {
+    None
+}
+
 /// Build the STEP text for the propeller described by `prop`.
 pub fn write_prop(prop: &mut Prop, n_points: usize) -> Result<String, String> {
     let mut b = step_io::StepBuilder::new().map_err(err)?;
     b.header(&step_io::build::HeaderInput {
         file_name: Some(format!("{}.step", prop.param.name)),
         originating_system: Some("proply-rs".into()),
+        timestamp: step_timestamp(),
         ..Default::default()
     });
 
@@ -494,6 +509,7 @@ pub fn hub_only_step(param: &crate::design_parameters::DesignParameters) -> Resu
     b.header(&step_io::build::HeaderInput {
         file_name: Some("hub.step".into()),
         originating_system: Some("proply-rs".into()),
+        timestamp: step_timestamp(),
         ..Default::default()
     });
     let hub_part = b.part("hub").map_err(err)?;
