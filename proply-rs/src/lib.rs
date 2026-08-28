@@ -17,9 +17,14 @@ pub mod nurbs;
 pub mod optimize;
 pub mod pchip;
 pub mod polyfit;
+pub mod pipeline;
 pub mod prop;
 pub mod simulator;
 pub mod smooth;
 pub mod step_out;
 pub mod units;
 pub mod yaml_out;
+
+/// WebAssembly bindings (compiled only for the wasm32 target).
+#[cfg(target_arch = "wasm32")]
+pub mod wasm;

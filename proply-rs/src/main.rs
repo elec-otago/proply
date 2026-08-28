@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use proply_rs::cache::PolarStore;
 use proply_rs::design_parameters::DesignParameters;
 use proply_rs::optimize;
-use proply_rs::prop::Prop;
+use proply_rs::pipeline;
 use proply_rs::step_out;
 use proply_rs::yaml_out;
 
@@ -247,15 +247,9 @@ fn main() {
         exit(1);
     }
 
-    let resolution_m = (param.radius - param.hub_radius) / param.resolution as f64;
-
     let store: Arc<Mutex<PolarStore>> = Arc::new(Mutex::new(PolarStore::load(
         proply_rs::cache::default_cache_path().as_str(),
     )));
-
-    let mut p = Prop::new(param.clone(), resolution_m, store.clone());
-    p.n_blades = param.blades;
-    p.set_plate_mode(param.plate);
 
     // An explicitly specified operating point (motor_torque + motor_RPM in
     // the design file, e.g. an engine) overrides the electric motor model's
@@ -270,6 +264,7 @@ fn main() {
         "Optimum Motor Torque {:5.3} Nm at {:5.1} RPM, power={:5.1} Watts",
         optimum_torque, optimum_rpm, power
     );
+    let resolution_m = (param.radius - param.hub_radius) / param.resolution as f64;
     println!("Spanwise resolution (mm) {:4.2}", resolution_m * 1000.0);
     println!("{}", param);
     let dv = optimize::dv_from_thrust(param.thrust, param.radius, param.forward_airspeed);
@@ -279,33 +274,31 @@ fn main() {
     );
     println!("\n\n");
 
-    // The design converges onto the motor operating point: the thrust
-    // target is iterated until the blade absorbs the design torque at the
-    // design RPM.  The inner loops maximise efficiency at a matched thrust,
-    // so the converged design is the maximum-efficiency design at that
-    // operating point (`--auto` is implied — the old 1.5 x Qmax ceiling is
-    // subsumed by matching the operating point exactly).
-    let (q, t) = p.design_for_torque(optimum_rpm, optimum_torque, param.thrust, param.ar);
-    println!("Total Thrust: {:5.2}, Torque: {:5.3}", t, q);
+    // The whole design (converged onto the motor operating point, then the
+    // STEP and YAML text) runs in the shared pipeline — the same code the
+    // WebAssembly build runs.
+    let outcome = match pipeline::run_design(&param, store.clone()) {
+        Ok(o) => o,
+        Err(e) => {
+            eprintln!("proply-rs: {}", e);
+            exit(1);
+        }
+    };
+    println!(
+        "Total Thrust: {:5.2}, Torque: {:5.3}",
+        outcome.thrust, outcome.torque
+    );
 
     let step_filename = if param.step_file.is_empty() {
         format!("{}/{}.step", param.dir, param.name)
     } else {
         param.step_file
     };
-    match step_out::write_prop(&mut p, param.n) {
-        Ok(text) => {
-            step_out::write_step_file(&step_filename, &text).unwrap_or_else(|e| {
-                eprintln!("cannot write {}: {}", step_filename, e);
-                exit(1);
-            });
-            println!("Wrote {}", step_filename);
-        }
-        Err(e) => {
-            eprintln!("proply-rs: {}", e);
-            exit(1);
-        }
-    }
+    step_out::write_step_file(&step_filename, &outcome.step).unwrap_or_else(|e| {
+        eprintln!("cannot write {}: {}", step_filename, e);
+        exit(1);
+    });
+    println!("Wrote {}", step_filename);
 
     // YAML summary of the finished design: beside the STEP output (so
     // <propname>.yml in the output directory, or next to an explicit
@@ -314,17 +307,7 @@ fn main() {
         .with_extension("yml")
         .to_string_lossy()
         .into_owned();
-    let motor_info = yaml_out::MotorInfo {
-        kv_rpm_per_volt: param.motor_Kv,
-        voltage_v: param.motor_volts,
-        winding_resistance_ohm: param.motor_winding_resistance,
-        no_load_current_a: param.motor_no_load_current,
-        optimum_rpm,
-        optimum_torque_nm: optimum_torque,
-        max_power_w: power,
-    };
-    let yaml_text = yaml_out::summary(&p, optimum_rpm, t, q, &motor_info);
-    yaml_out::write_yaml_file(&yaml_filename, &yaml_text).unwrap_or_else(|e| {
+    yaml_out::write_yaml_file(&yaml_filename, &outcome.yaml).unwrap_or_else(|e| {
         eprintln!("cannot write {}: {}", yaml_filename, e);
         exit(1);
     });
