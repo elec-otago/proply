@@ -1,5 +1,19 @@
 # CHANGES
 
+## 2026-08-28 — The wasm designer runs in a web worker
+
+### proply-rs web demo
+
+- The browser demo's WebAssembly designer now runs in a dedicated worker
+  (`proply-rs/web/designer.js`) instead of on the page's main thread.
+  This builds on the WebAssembly port (merged today): a cold XFOIL
+  design takes minutes single-threaded, and previously froze the tab for
+  the whole run — now the page stays interactive (verified by reading
+  page state mid-design, which used to time out).
+- The worker owns the wasm module, the `PropSession` polar cache and its
+  IndexedDB persistence; the page (`proply-rs/web/main.js`) only posts
+  design requests and renders the results that come back.
+
 ## 2026-08-21 — Specified motor operating point
 
 ### proply-rs

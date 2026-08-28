@@ -1,14 +1,9 @@
 // proply-rs browser demo: design a propeller entirely in the browser.
 //
-// The WebAssembly module (built by `make wasm` into ../pkg/) exposes a
-// long-lived PropSession: its polar cache is hydrated from IndexedDB at
-// startup, designs run against it, and freshly simulated polars are
-// written back after each run.  The design call is synchronous and can
-// block the tab for a while (longer without "plate polars": real XFOIL
-// polars are computed in-wasm).
-
-import init, { PropSession } from './pkg/proply_rs.js';
-import { loadAllPolars, putPolars, clearPolars } from './idb.js';
+// The WebAssembly designer runs in a dedicated worker (designer.js) —
+// this file only sends design requests and renders the results, so the
+// page stays responsive while a design runs (longer without "plate
+// polars": real XFOIL polars are computed in-wasm).
 
 const $ = (id) => document.getElementById(id);
 
@@ -35,32 +30,49 @@ const DEFAULT_PARAMS = {
   n: 12,
 };
 
-let session = null;
+let worker = null;
 
 function setStatus(text) {
   $('status').textContent = text;
 }
 
-async function boot() {
-  setStatus('loading WebAssembly…');
-  await init();
-  session = new PropSession();
-
-  let hydrated = 0;
-  try {
-    for (const [key, polar] of await loadAllPolars()) {
-      session.hydrate_entry(
-        key,
-        Float64Array.from(polar.alpha),
-        Float64Array.from(polar.cl),
-        Float64Array.from(polar.cd),
-      );
-      hydrated++;
+function boot() {
+  setStatus('loading WebAssembly (worker)…');
+  worker = new Worker('designer.js', { type: 'module' });
+  worker.onmessage = (ev) => {
+    const msg = ev.data;
+    if (msg.type === 'ready') {
+      setStatus(`ready — cache: ${msg.hydrated} polars hydrated`);
+      $('design').disabled = false;
+    } else if (msg.type === 'design-complete') {
+      render(msg);
+    } else if (msg.type === 'design-error') {
+      setStatus(`design failed: ${msg.message}`);
+      console.error(msg.message);
+      $('design').disabled = false;
+    } else if (msg.type === 'cache-cleared') {
+      setStatus('cache cleared — next design runs cold');
     }
-  } catch (e) {
-    console.warn('polar cache unavailable, starting cold:', e);
-  }
-  setStatus(`ready — cache: ${hydrated} polars hydrated`);
+  };
+  worker.onerror = (e) => {
+    setStatus(`worker failed: ${e.message || e}`);
+    $('design').disabled = true;
+  };
+}
+
+function render(msg) {
+  $('yaml').textContent = msg.yaml;
+  const blob = new Blob([msg.step], { type: 'text/plain' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${msg.name}.step`;
+  a.textContent = `download ${msg.name}.step (${msg.step.length} bytes)`;
+  $('step-link').replaceChildren(a);
+  setStatus(
+    `designed in ${msg.elapsed.toFixed(1)} s — thrust ${msg.thrust.toFixed(2)} N, ` +
+    `torque ${msg.torque.toFixed(3)} N·m at ${msg.rpm.toFixed(0)} rpm; ` +
+    `${msg.newPolars} new polars cached (${msg.totalPolars} total)`,
+  );
   $('design').disabled = false;
 }
 
@@ -77,55 +89,12 @@ function runDesign() {
   $('design').disabled = true;
   $('yaml').textContent = '';
   $('step-link').replaceChildren();
-  setStatus('designing… (the tab is busy while this runs)');
-  // Let the status paint before the synchronous design call blocks.
-  setTimeout(async () => {
-    const t0 = performance.now();
-    try {
-      const out = session.design(JSON.stringify(params));
-      const seconds = (performance.now() - t0) / 1000;
-
-      $('yaml').textContent = out.yaml;
-      const blob = new Blob([out.step], { type: 'text/plain' });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = `${params.name || 'prop'}.step`;
-      a.textContent = `download ${params.name || 'prop'}.step (${out.step.length} bytes)`;
-      $('step-link').replaceChildren(a);
-
-      // Persist the polars this run simulated.
-      let stored = 0;
-      const entries = Object.entries(JSON.parse(session.take_new_json()));
-      if (entries.length > 0) {
-        try {
-          await putPolars(entries);
-          stored = entries.length;
-        } catch (e) {
-          console.warn('could not persist new polars:', e);
-        }
-      }
-      setStatus(
-        `designed in ${seconds.toFixed(1)} s — thrust ${out.thrust.toFixed(2)} N, ` +
-        `torque ${out.torque.toFixed(3)} N·m at ${out.rpm.toFixed(0)} rpm; ` +
-        `${stored} new polars cached (${session.polar_count()} total)`,
-      );
-    } catch (e) {
-      setStatus(`design failed: ${e}`);
-      console.error(e);
-    } finally {
-      $('design').disabled = false;
-    }
-  }, 50);
+  setStatus('designing… (in a worker — the page stays responsive)');
+  worker.postMessage({ type: 'design', params });
 }
 
-async function clearCache() {
-  try {
-    await clearPolars();
-    session = new PropSession(); // drop the hydrated store too
-    setStatus('cache cleared — next design runs cold');
-  } catch (e) {
-    setStatus(`could not clear cache: ${e}`);
-  }
+function clearCache() {
+  worker.postMessage({ type: 'clear-cache' });
 }
 
 $('params').value = JSON.stringify(DEFAULT_PARAMS, null, 2);

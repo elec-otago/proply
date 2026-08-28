@@ -127,7 +127,8 @@ python3 -m http.server -d proply-rs/web 8000
 The demo page edits the same JSON design parameters as the CLI's
 `--param` file.  "Plate polars" (checked by default) uses the analytic
 flat-plate model for a quick run; unchecking it computes real XFOIL
-polars in-wasm, which is much slower on the single-threaded main thread.
+polars in-wasm — much slower, but the design runs in a dedicated web
+worker (`web/designer.js`), so the page stays responsive throughout.
 
 ### Deploying the demo (GitHub + Vercel)
 
