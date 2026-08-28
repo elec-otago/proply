@@ -1,0 +1,17 @@
+{
+  "name": "proply-rs",
+  "type": "module",
+  "description": "Rust port of proply: propeller design using blade element momentum theory and rust-foil aerodynamics",
+  "version": "0.1.0",
+  "license": "GPL-3.0-or-later",
+  "files": [
+    "proply_rs_bg.wasm",
+    "proply_rs.js",
+    "proply_rs.d.ts"
+  ],
+  "main": "proply_rs.js",
+  "types": "proply_rs.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

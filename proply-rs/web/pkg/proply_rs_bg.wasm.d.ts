@@ -1,0 +1,31 @@
+/* tslint:disable */
+/* eslint-disable */
+export const memory: WebAssembly.Memory;
+export const __wbg_designoutput_free: (a: number, b: number) => void;
+export const __wbg_get_designoutput_power: (a: number) => number;
+export const __wbg_get_designoutput_rpm: (a: number) => number;
+export const __wbg_get_designoutput_step: (a: number) => [number, number];
+export const __wbg_get_designoutput_thrust: (a: number) => number;
+export const __wbg_get_designoutput_torque: (a: number) => number;
+export const __wbg_get_designoutput_yaml: (a: number) => [number, number];
+export const __wbg_propsession_free: (a: number, b: number) => void;
+export const __wbg_set_designoutput_power: (a: number, b: number) => void;
+export const __wbg_set_designoutput_rpm: (a: number, b: number) => void;
+export const __wbg_set_designoutput_step: (a: number, b: number, c: number) => void;
+export const __wbg_set_designoutput_thrust: (a: number, b: number) => void;
+export const __wbg_set_designoutput_torque: (a: number, b: number) => void;
+export const __wbg_set_designoutput_yaml: (a: number, b: number, c: number) => void;
+export const propsession_cache_to_json: (a: number) => [number, number];
+export const propsession_design: (a: number, b: number, c: number) => [number, number, number];
+export const propsession_hydrate_entry: (a: number, b: number, c: number, d: any, e: any, f: any) => void;
+export const propsession_hydrate_json: (a: number, b: number, c: number) => void;
+export const propsession_new: () => number;
+export const propsession_polar_count: (a: number) => number;
+export const propsession_take_new_json: (a: number) => [number, number];
+export const __wbindgen_free: (a: number, b: number, c: number) => void;
+export const __wbindgen_malloc: (a: number, b: number) => number;
+export const __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
+export const __externref_table_alloc: () => number;
+export const __wbindgen_externrefs: WebAssembly.Table;
+export const __externref_table_dealloc: (a: number) => void;
+export const __wbindgen_start: () => void;
