@@ -1,5 +1,16 @@
 # CHANGES
 
+## 2026-08-28 — Design spinner with progress and completion info
+
+### proply-rs web demo
+
+- While a design runs, the status line shows an animated spinner and a
+  live elapsed-time ticker (`designing… — 4.2 s elapsed`); the page
+  stays interactive because the designer runs in its worker.  When the
+  design completes, the spinner stops and the line reports the result:
+  wall time, thrust, torque and power at the operating point, and how
+  many polars were simulated and cached.
+
 ## 2026-08-28 — Attribution on the demo page
 
 ### proply-rs web demo

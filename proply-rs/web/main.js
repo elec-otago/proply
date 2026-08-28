@@ -31,9 +31,26 @@ const DEFAULT_PARAMS = {
 };
 
 let worker = null;
+let busyTimer = null;
 
 function setStatus(text) {
-  $('status').textContent = text;
+  $('status-text').textContent = text;
+}
+
+/// Show/hide the spinner.  While busy, the status line ticks with the
+/// elapsed time (the design itself runs silently in the worker).
+function setBusy(busy, label = '') {
+  $('spinner').style.visibility = busy ? 'visible' : 'hidden';
+  if (busy) {
+    const t0 = performance.now();
+    setStatus(label);
+    busyTimer = setInterval(() => {
+      setStatus(`${label} — ${((performance.now() - t0) / 1000).toFixed(1)} s elapsed`);
+    }, 100);
+  } else if (busyTimer !== null) {
+    clearInterval(busyTimer);
+    busyTimer = null;
+  }
 }
 
 function boot() {
@@ -47,6 +64,7 @@ function boot() {
     } else if (msg.type === 'design-complete') {
       render(msg);
     } else if (msg.type === 'design-error') {
+      setBusy(false);
       setStatus(`design failed: ${msg.message}`);
       console.error(msg.message);
       $('design').disabled = false;
@@ -55,6 +73,7 @@ function boot() {
     }
   };
   worker.onerror = (e) => {
+    setBusy(false);
     setStatus(`worker failed: ${e.message || e}`);
     $('design').disabled = true;
   };
@@ -68,9 +87,11 @@ function render(msg) {
   a.download = `${msg.name}.step`;
   a.textContent = `download ${msg.name}.step (${msg.step.length} bytes)`;
   $('step-link').replaceChildren(a);
+  setBusy(false);
   setStatus(
-    `designed in ${msg.elapsed.toFixed(1)} s — thrust ${msg.thrust.toFixed(2)} N, ` +
-    `torque ${msg.torque.toFixed(3)} N·m at ${msg.rpm.toFixed(0)} rpm; ` +
+    `done in ${msg.elapsed.toFixed(1)} s — thrust ${msg.thrust.toFixed(2)} N, ` +
+    `torque ${msg.torque.toFixed(3)} N·m at ${msg.rpm.toFixed(0)} rpm, ` +
+    `power at the operating point ${(msg.torque * msg.rpm * 2 * Math.PI / 60).toFixed(1)} W; ` +
     `${msg.newPolars} new polars cached (${msg.totalPolars} total)`,
   );
   $('design').disabled = false;
@@ -89,7 +110,7 @@ function runDesign() {
   $('design').disabled = true;
   $('yaml').textContent = '';
   $('step-link').replaceChildren();
-  setStatus('designing… (in a worker — the page stays responsive)');
+  setBusy(true, 'designing… (worker busy; the page stays responsive)');
   worker.postMessage({ type: 'design', params });
 }
 
