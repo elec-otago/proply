@@ -1,5 +1,31 @@
 # CHANGES
 
+## 2026-08-28 — 3D STEP preview of the finished design
+
+### proply-rs web demo
+
+- A "Show 3D preview" button next to the STEP download link renders the
+  finished design in a 3D window: the STEP text from the design worker
+  is tessellated in the tab by occt-import-js (an OpenCASCADE WASM
+  build, 0.0.23) and displayed with three.js — the same stack as
+  devonkcopeland/step-viewer.  The preview is opt-in and lazy: nothing
+  3D loads until the button is clicked, so a design run no longer pulls
+  three.js and the ~2 MB occt WASM from the CDN on its own.  The
+  window shows a progress note ("tessellating the STEP model…") until
+  the model is actually in the scene, supports orbit/zoom (OrbitControls)
+  with lighting and a ground grid, and keeps its drawing buffer so the
+  rendered model can always be captured or exported.  If tessellation
+  or parsing fails, the window reports the reason and the download link
+  still works.
+- `viewer.js` holds the occt + three pipeline, imported by `main.js` on
+  the first preview click (three.js resolves through the import map in
+  `index.html`; occt-import-js and its .wasm come from the CDN);
+  `index.html` gains the `#viewer` window and the button.  The button
+  is enabled once a design completes and disabled while one runs;
+  starting a new design clears the on-screen model (`clearStep` in
+  viewer.js, disposing geometry and material) so a stale preview never
+  lingers next to a fresh download link.
+
 ## 2026-08-28 — Design spinner with progress and completion info
 
 ### proply-rs web demo

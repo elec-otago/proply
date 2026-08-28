@@ -4,6 +4,10 @@
 // this file only sends design requests and renders the results, so the
 // page stays responsive while a design runs (longer without "plate
 // polars": real XFOIL polars are computed in-wasm).
+//
+// The 3D preview (viewer.js) loads on demand: three.js and
+// occt-import-js only start downloading on the first "Show 3D preview"
+// click, not on every design.
 
 const $ = (id) => document.getElementById(id);
 
@@ -32,6 +36,15 @@ const DEFAULT_PARAMS = {
 
 let worker = null;
 let busyTimer = null;
+let viewer = null; // viewer.js module, imported on the first preview click
+let latestStep = null; // STEP text of the most recent completed design
+
+async function viewerModule() {
+  if (!viewer) {
+    viewer = await import('./viewer.js');
+  }
+  return viewer;
+}
 
 function setStatus(text) {
   $('status-text').textContent = text;
@@ -67,6 +80,11 @@ function boot() {
       setBusy(false);
       setStatus(`design failed: ${msg.message}`);
       console.error(msg.message);
+      const note = $('viewer-note');
+      if (note) {
+        note.textContent = 'Run a design to preview the propeller here.';
+        note.style.display = '';
+      }
       $('design').disabled = false;
     } else if (msg.type === 'cache-cleared') {
       setStatus('cache cleared — next design runs cold');
@@ -87,6 +105,13 @@ function render(msg) {
   a.download = `${msg.name}.step`;
   a.textContent = `download ${msg.name}.step (${msg.step.length} bytes)`;
   $('step-link').replaceChildren(a);
+  latestStep = msg.step;
+  const note = $('viewer-note');
+  if (note) {
+    note.textContent = 'Click "Show 3D preview" to view the propeller in 3D.';
+    note.style.display = '';
+  }
+  $('preview').disabled = false;
   setBusy(false);
   setStatus(
     `done in ${msg.elapsed.toFixed(1)} s — thrust ${msg.thrust.toFixed(2)} N, ` +
@@ -108,8 +133,18 @@ function runDesign() {
   params.plate = $('plate').checked;
 
   $('design').disabled = true;
+  $('preview').disabled = true;
+  latestStep = null;
   $('yaml').textContent = '';
   $('step-link').replaceChildren();
+  if (viewer) {
+    viewer.clearStep(); // the on-screen model no longer matches this run
+  }
+  const note = $('viewer-note');
+  if (note) {
+    note.textContent = 'designing…';
+    note.style.display = '';
+  }
   setBusy(true, 'designing… (worker busy; the page stays responsive)');
   worker.postMessage({ type: 'design', params });
 }
@@ -118,7 +153,25 @@ function clearCache() {
   worker.postMessage({ type: 'clear-cache' });
 }
 
+/// Tessellate and display the most recent design's STEP in the 3D window.
+/// The viewer module (and with it three.js + occt-import-js) is only
+/// loaded on this first explicit request.
+async function showPreview() {
+  const btn = $('preview');
+  btn.disabled = true;
+  const note = $('viewer-note');
+  note.textContent = 'tessellating the STEP model…';
+  note.style.display = '';
+  try {
+    const v = await viewerModule();
+    await v.showStep(latestStep, $('viewer'), note);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 $('params').value = JSON.stringify(DEFAULT_PARAMS, null, 2);
 $('design').addEventListener('click', runDesign);
 $('clear-cache').addEventListener('click', clearCache);
+$('preview').addEventListener('click', showPreview);
 boot();

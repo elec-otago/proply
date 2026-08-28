@@ -85,6 +85,26 @@ function ensureScene(container) {
 }
 
 /**
+ * Remove the on-screen model and grid, leaving the empty scene for the
+ * next design.  The renderer stays alive so re-rendering is cheap.
+ */
+export function clearStep() {
+  if (!contents) {
+    return;
+  }
+  for (const child of [...contents.children]) {
+    child.geometry.dispose();
+    child.material.dispose();
+    contents.remove(child);
+  }
+  if (grid) {
+    grid.geometry.dispose();
+    scene.remove(grid);
+    grid = null;
+  }
+}
+
+/**
  * Render `stepText` (a STEP document) into `container`; `note` is the
  * overlay element shown while empty or on failure.
  */

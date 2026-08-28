@@ -4,6 +4,17 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>proply-rs — propeller design in the browser</title>
+  <!-- 3D preview: three.js resolves through this import map; viewer.js is
+       imported on the first preview click and occt-import-js is loaded
+       from the CDN by the viewer itself. -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+      }
+    }
+  </script>
   <style>
     :root { color-scheme: light dark; }
     body {
@@ -53,6 +64,25 @@
     button { padding: 0.4rem 1rem; font-size: 1rem; }
     button:disabled { opacity: 0.5; }
     label { user-select: none; }
+    #viewer {
+      position: relative;
+      height: 28rem;
+      border-radius: 4px;
+      background: #111318;
+      overflow: hidden;
+    }
+    #viewer canvas { display: block; }
+    #viewer-note {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0;
+      color: #9aa3b2;
+      text-align: center;
+      padding: 0 2rem;
+    }
   </style>
 </head>
 <body>
@@ -83,6 +113,13 @@
 
   <h2>Propeller (STEP)</h2>
   <p id="step-link"></p>
+  <div class="row">
+    <button id="preview" disabled>Show 3D preview</button>
+  </div>
+  <div id="viewer">
+    <p id="viewer-note">Run a design, then click "Show 3D preview" to view
+    the propeller here.</p>
+  </div>
 
   <script>
     // ES modules and the WebAssembly fetch cannot load over file:// — the
