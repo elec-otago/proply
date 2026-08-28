@@ -44,6 +44,20 @@ const CH_FLOOR: f64 = 0.002;
 const DA_MIN: f64 = -0.45;
 const DA_MAX: f64 = 0.12;
 
+/// Worker threads available to the design's scoped-thread pools.
+/// WebAssembly has no threads (`thread::scope`'s spawn panics there), and a
+/// single-core host gains nothing from spawning: both fall back to running
+/// the work lists inline.
+fn worker_count() -> usize {
+    if cfg!(target_arch = "wasm32") {
+        1
+    } else {
+        thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1)
+    }
+}
+
 /// Allowed chord as a function of radius (m): `tip_chord*R^2/r^2`, capped by
 /// the blade-count spacing (and the local twist).  The parameter form shared
 /// by the design passes (worker threads cannot borrow `Prop`).
@@ -623,34 +637,41 @@ impl Prop {
         pb.set_message(what.to_string());
         let n_tasks = tasks.len();
         let queue = Mutex::new(tasks);
-        let n_workers = thread::available_parallelism()
-            .map(|n| n.get())
-            .unwrap_or(1)
-            .min(n_tasks);
+        let n_workers = worker_count().min(n_tasks);
         let store = self.store.clone();
-        thread::scope(|s| {
-            for _ in 0..n_workers {
-                let queue = &queue;
-                let store = store.clone();
-                let pb = pb.clone();
-                s.spawn(move || {
-                    // pop through a `match` (not `while let`): the guard of
-                    // `while let ... = queue.lock().unwrap().pop()` lives to
-                    // the end of the loop body, so the first worker would
-                    // hold the queue lock for its whole simulation and
-                    // serialize the entire pool.
-                    loop {
-                        let (foil, re, mach) = match queue.lock().unwrap().pop() {
-                            Some(task) => task,
-                            None => break,
-                        };
-                        let fs = FoilSimulator::new(Rc::new(RefCell::new(foil)), store.clone());
-                        fs.warm_bucket(re, mach);
-                        pb.inc(1);
-                    }
-                });
+
+        // One worker's share of the queue.  Pop through a `match` (not
+        // `while let`): the guard of `while let ... = queue.lock().unwrap().pop()`
+        // lives to the end of the loop body, so the first worker would hold
+        // the queue lock for its whole simulation and serialize the entire
+        // pool.
+        fn worker(
+            queue: &Mutex<Vec<(FoilFamily, f64, f64)>>,
+            store: &Arc<Mutex<PolarStore>>,
+            pb: &ProgressBar,
+        ) {
+            loop {
+                let (foil, re, mach) = match queue.lock().unwrap().pop() {
+                    Some(task) => task,
+                    None => break,
+                };
+                let fs = FoilSimulator::new(Rc::new(RefCell::new(foil)), store.clone());
+                fs.warm_bucket(re, mach);
+                pb.inc(1);
             }
-        });
+        }
+
+        if n_workers > 1 {
+            thread::scope(|s| {
+                for _ in 0..n_workers {
+                    let (queue, store, pb) = (&queue, store.clone(), pb.clone());
+                    s.spawn(move || worker(queue, &store, &pb));
+                }
+            });
+        } else {
+            // No thread support (wasm) or a single core: drain inline.
+            worker(&queue, &store, &pb);
+        }
         pb.finish();
     }
 
@@ -1155,43 +1176,75 @@ impl Prop {
             .unwrap(),
         );
         eval_pb.set_message("camber candidate passes");
-        thread::scope(|s| {
-            let handles: Vec<_> = seeds
-                .into_iter()
-                .map(|(label, camber_dist, alpha_base)| {
-                    let (store, rr, ref_r, cap_ctl, infl) = (&store, &rr, &ref_r, &cap_ctl, &infl);
-                    let eval_pb = &eval_pb;
-                    s.spawn(move || {
-                        Self::run_design_pass(
-                            param,
-                            n_blades,
-                            plate_mode,
-                            store,
-                            radial_res,
-                            rr,
-                            ref_r,
-                            cap_ctl,
-                            infl,
-                            rpm,
-                            omega,
-                            u_0,
-                            thrust,
-                            n_ctrl,
-                            s_cap,
-                            &label,
-                            &camber_dist,
-                            &alpha_base,
-                            eval_pb,
-                        )
+        if worker_count() > 1 {
+            thread::scope(|s| {
+                let handles: Vec<_> = seeds
+                    .into_iter()
+                    .map(|(label, camber_dist, alpha_base)| {
+                        let (store, rr, ref_r, cap_ctl, infl) =
+                            (&store, &rr, &ref_r, &cap_ctl, &infl);
+                        let eval_pb = &eval_pb;
+                        s.spawn(move || {
+                            Self::run_design_pass(
+                                param,
+                                n_blades,
+                                plate_mode,
+                                store,
+                                radial_res,
+                                rr,
+                                ref_r,
+                                cap_ctl,
+                                infl,
+                                rpm,
+                                omega,
+                                u_0,
+                                thrust,
+                                n_ctrl,
+                                s_cap,
+                                &label,
+                                &camber_dist,
+                                &alpha_base,
+                                eval_pb,
+                            )
+                        })
                     })
-                })
-                .collect();
-            for h in handles {
-                if let Some(o) = h.join().expect("design pass panicked") {
+                    .collect();
+                for h in handles {
+                    if let Some(o) = h.join().expect("design pass panicked") {
+                        outcomes.push(o);
+                    }
+                }
+            });
+        } else {
+            // No thread support (wasm) or a single core: the candidate
+            // passes run inline, in seed order.  Identical results — the
+            // passes are independent by construction.
+            for (label, camber_dist, alpha_base) in seeds {
+                if let Some(o) = Self::run_design_pass(
+                    param,
+                    n_blades,
+                    plate_mode,
+                    &store,
+                    radial_res,
+                    &rr,
+                    &ref_r,
+                    &cap_ctl,
+                    &infl,
+                    rpm,
+                    omega,
+                    u_0,
+                    thrust,
+                    n_ctrl,
+                    s_cap,
+                    &label,
+                    &camber_dist,
+                    &alpha_base,
+                    &eval_pb,
+                ) {
                     outcomes.push(o);
                 }
             }
-        });
+        }
         eval_pb.finish();
 
         let win = match outcomes
