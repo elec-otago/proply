@@ -80,6 +80,9 @@ build/out/*
 llF/
 proply-rs/.zcode/
 
+# proply-rs WebAssembly build output (wasm-pack; rebuilt with `make wasm`)
+proply-rs/pkg/
+
 # IPython Notebook
 .ipynb_checkpoints
 

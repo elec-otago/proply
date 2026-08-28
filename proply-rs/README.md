@@ -105,6 +105,39 @@ The first run simulates a polar (an 80-point alpha sweep) for each blade
 station; polars are cached in `foil_cache.json` in the working directory,
 so reruns are fast.
 
+## WebAssembly (browser build)
+
+The whole design pipeline — BEM / lifting-line, rust-foil polars, the STEP
+and YAML writers — also compiles to `wasm32-unknown-unknown` and runs
+entirely in a browser tab; nothing is uploaded anywhere.  The wasm-only
+bindings (`src/wasm.rs`, compiled out of native builds) wrap the same
+`pipeline::run_design` the CLI uses.
+
+```sh
+# from the workspace root
+make wasm            # wasm-pack build proply-rs --target web --release
+make check-wasm      # plain cargo check for the wasm32 target
+
+# serve the demo page (the ES-module import needs http://, not file://)
+python3 -m http.server -d proply-rs 8000
+# then open http://localhost:8000/web/index.html
+```
+
+The demo page edits the same JSON design parameters as the CLI's
+`--param` file.  "Plate polars" (checked by default) uses the analytic
+flat-plate model for a quick run; unchecking it computes real XFOIL
+polars in-wasm, which is much slower on the single-threaded main thread.
+
+### Polar cache in the browser
+
+There is no filesystem in the browser, so the polar cache lives in a
+long-lived WASM session (`PropSession`) hydrated from IndexedDB at page
+load; after each design, only the freshly simulated polars are handed
+back to the page and written to IndexedDB.  The cache is a pure
+performance artifact — a blocked or cleared database just means a cold
+run.  (`PropSession::cache_to_json` / `hydrate_json` provide a whole-cache
+export/import escape hatch.)
+
 ## Lifting-line analysis (`--lifting-line`)
 
 The default `--bem` path is an **annular blade-element momentum theory**: each

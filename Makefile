@@ -3,6 +3,8 @@
 #   make gallery            design all props and render each to images/
 #   make steps              design all props (STEP files in build/out/)
 #   make summaries          design all props (YAML summaries in build/out/)
+#   make wasm               build the WebAssembly package (proply-rs/pkg/)
+#   make check-wasm         type-check the lib for wasm32 without wasm-pack
 #   make clean              remove generated STEP, YAML and PNG files
 #
 # Designs use the coupled lifting-line solver by default.  Switch design
@@ -53,5 +55,15 @@ images/%.png: build/out/%.step build/out/%.yml props/renderprop.py
 clean:
 	rm -f $(STEPS) $(YAMLS) $(PNGS) $(STAMP)
 
-.PHONY: all steps summaries gallery clean
+# WebAssembly: build the browser package into proply-rs/pkg/ (imported by
+# proply-rs/web/), or just type-check the lib for the wasm32 target.
+WASM_TARGET := wasm32-unknown-unknown
+
+wasm:
+	wasm-pack build proply-rs --target web --release
+
+check-wasm:
+	cargo check -p proply-rs --target $(WASM_TARGET)
+
+.PHONY: all steps summaries gallery clean wasm check-wasm
 .DELETE_ON_ERROR:
