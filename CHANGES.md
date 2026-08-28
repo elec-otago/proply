@@ -1,5 +1,12 @@
 # CHANGES
 
+## 2026-08-28 — Attribution on the demo page
+
+### proply-rs web demo
+
+- The main screen now carries the author line: *proply by Tim Molteno
+  (tim@elec.ac.nz)*, under the page heading.
+
 ## 2026-08-28 — The wasm designer runs in a web worker
 
 ### proply-rs web demo
