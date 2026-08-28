@@ -67,6 +67,22 @@
   <h2>Propeller (STEP)</h2>
   <p id="step-link"></p>
 
-  <script type="module" src="./main.js"></script>
+  <script>
+    // ES modules and the WebAssembly fetch cannot load over file:// — the
+    // browser blocks them with a CORS error.  Serve the directory over http
+    // instead and load the module only then.
+    if (location.protocol === 'file:') {
+      document.getElementById('status').textContent =
+        'This page needs http:// (a browser blocks ES modules and .wasm ' +
+        'over file://).  Serve it with:  python3 -m http.server -d proply-rs/web 8000  ' +
+        'then open http://localhost:8000/';
+      document.getElementById('design').disabled = true;
+    } else {
+      const s = document.createElement('script');
+      s.type = 'module';
+      s.src = './main.js';
+      document.head.appendChild(s);
+    }
+  </script>
 </body>
 </html>

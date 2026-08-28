@@ -55,12 +55,17 @@ images/%.png: build/out/%.step build/out/%.yml props/renderprop.py
 clean:
 	rm -f $(STEPS) $(YAMLS) $(PNGS) $(STAMP)
 
-# WebAssembly: build the browser package into proply-rs/pkg/ (imported by
-# proply-rs/web/), or just type-check the lib for the wasm32 target.
+# WebAssembly: build the browser package into proply-rs/web/pkg/ (so the
+# web/ directory is a self-contained static site), or just type-check the
+# lib for the wasm32 target.
 WASM_TARGET := wasm32-unknown-unknown
 
 wasm:
 	wasm-pack build proply-rs --target web --release
+	rm -rf proply-rs/web/pkg
+	mv proply-rs/pkg proply-rs/web/pkg
+	rm -f proply-rs/web/pkg/.gitignore  # wasm-pack ignores its own output;
+	                                    # the web/pkg copy is meant to be committed
 
 check-wasm:
 	cargo check -p proply-rs --target $(WASM_TARGET)

@@ -116,17 +116,52 @@ bindings (`src/wasm.rs`, compiled out of native builds) wrap the same
 ```sh
 # from the workspace root
 make wasm            # wasm-pack build proply-rs --target web --release
+                     # (the package lands in proply-rs/web/pkg/)
 make check-wasm      # plain cargo check for the wasm32 target
 
 # serve the demo page (the ES-module import needs http://, not file://)
-python3 -m http.server -d proply-rs 8000
-# then open http://localhost:8000/web/index.html
+python3 -m http.server -d proply-rs/web 8000
+# then open http://localhost:8000/
 ```
 
 The demo page edits the same JSON design parameters as the CLI's
 `--param` file.  "Plate polars" (checked by default) uses the analytic
 flat-plate model for a quick run; unchecking it computes real XFOIL
 polars in-wasm, which is much slower on the single-threaded main thread.
+
+### Deploying the demo (GitHub + Vercel)
+
+`web/` is a self-contained static site once the wasm package is built
+into it, so Vercel can serve it straight from the GitHub repository with
+no build step:
+
+1. Build the package and commit it (the one generated artifact that is
+   meant to be committed):
+
+   ```sh
+   make wasm
+   git add proply-rs/web/pkg
+   git commit -m "Rebuild the browser wasm package"
+   ```
+
+2. Push the repository to GitHub.
+3. In Vercel: *Add New → Project → Import* the repository, then set
+
+   | Setting | Value |
+   |---|---|
+   | Root Directory | `proply-rs/web` |
+   | Framework Preset | Other |
+   | Build Command | *(leave empty)* |
+   | Output Directory | *(default)* |
+
+   and deploy.
+
+Each push deploys whatever `web/pkg` is committed, so publishing a new
+build is just `make wasm` plus a commit.  To keep build artifacts out of
+the branch, move the build into CI instead — a GitHub Actions workflow
+that runs `make wasm` and force-pushes `proply-rs/web/` to a `deploy`
+branch, with the Vercel project pointed at that branch, works the same
+way.
 
 ### Polar cache in the browser
 

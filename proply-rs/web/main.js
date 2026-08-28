@@ -7,7 +7,7 @@
 // block the tab for a while (longer without "plate polars": real XFOIL
 // polars are computed in-wasm).
 
-import init, { PropSession } from '../pkg/proply_rs.js';
+import init, { PropSession } from './pkg/proply_rs.js';
 import { loadAllPolars, putPolars, clearPolars } from './idb.js';
 
 const $ = (id) => document.getElementById(id);

@@ -18,7 +18,7 @@ use crate::pipeline::{self, DesignOutcome};
 
 /// One finished design: the STEP (AP242) document, the YAML summary and
 /// the headline numbers.
-#[wasm_bindgen]
+#[wasm_bindgen(getter_with_clone)]
 pub struct DesignOutput {
     pub step: String,
     pub yaml: String,
@@ -98,7 +98,8 @@ impl PropSession {
     /// Run one full design from JSON design parameters (the same format
     /// and validation as the CLI's `--param` file).
     pub fn design(&self, params_json: String) -> Result<DesignOutput, JsValue> {
-        let param = DesignParameters::from_json(&params_json).map_err(JsValue::from_str)?;
+        let param =
+            DesignParameters::from_json(&params_json).map_err(|e| JsValue::from_str(&e))?;
         if !param.bem && !param.lifting_line {
             return Err(JsValue::from_str(
                 "select a design loop (set `bem` or `lifting_line` in the design JSON)",
@@ -109,7 +110,8 @@ impl PropSession {
                 "choose one foil family (naca, cst or arad)",
             ));
         }
-        let outcome = pipeline::run_design(&param, self.store.clone()).map_err(JsValue::from_str)?;
+        let outcome =
+            pipeline::run_design(&param, self.store.clone()).map_err(|e| JsValue::from_str(&e))?;
         Ok(outcome.into())
     }
 

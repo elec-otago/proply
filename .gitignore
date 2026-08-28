@@ -80,7 +80,9 @@ build/out/*
 llF/
 proply-rs/.zcode/
 
-# proply-rs WebAssembly build output (wasm-pack; rebuilt with `make wasm`)
+# proply-rs WebAssembly: the raw wasm-pack output is transient (moved into
+# web/pkg by `make wasm`); the web/pkg copy is the deployable one and is
+# meant to be committed for the Vercel static site
 proply-rs/pkg/
 
 # IPython Notebook

@@ -12,16 +12,16 @@
 
     "motor_torque": 334.8,
     "motor_RPM": 1950.0,
-    "blades": 2,
-    "thrust": 1500.0,
+    "blades": 3,
+    "thrust": "150kg",
 
-    "radius": 0.5,
-    "tip_chord": 0.07,
+    "radius": "60cm",
+    "tip_chord": "7cm",
     "scimitar_percent": 0.0,
-    "trailing_edge": 2.0,
-    "hub_radius": 0.05,
-    "center_hole": 0.01,
-    "hub_depth": 0.05,
+    "trailing_edge": "2.0mm",
+    "hub_radius": "6cm",
+    "center_hole": "12.5mm",
+    "hub_depth": "10cm",
 
     "exclude_zone": [
         {"x":0.005, "z":0.005},
