@@ -1,5 +1,14 @@
 # CHANGES
 
+## 2026-08-29 — Link to the live web demo from the README
+
+### README
+
+- The root README now links the deployed browser demo
+  (<https://proply-zeta.vercel.app/>) right after the intro, so the web
+  version is reachable from the project page without cloning the repo
+  or running a local server.
+
 ## 2026-08-29 — Tabbed editors for the design JSON
 
 ### proply-rs web demo

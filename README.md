@@ -11,6 +11,10 @@ Contact the Author (Tim Molteno) if you have any questions.
 written out as a single STEP (AP242) file with true NURBS surfaces — no
 OpenSCAD, no STL.
 
+Try the web version (the same pipeline compiled to WebAssembly, running
+entirely in your browser tab):
+<https://proply-zeta.vercel.app/>
+
 ## Repository layout
 
 - `proply-rs/` — the propeller design tool (BEM design loop, STEP output)
