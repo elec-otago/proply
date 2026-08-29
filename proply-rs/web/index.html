@@ -64,6 +64,36 @@
     button { padding: 0.4rem 1rem; font-size: 1rem; }
     button:disabled { opacity: 0.5; }
     label { user-select: none; }
+    .tabs { display: flex; gap: 0.4rem; flex-wrap: wrap; margin: 0.6rem 0 0.4rem; }
+    .tab-btn {
+      padding: 0.35rem 0.9rem;
+      font-size: 0.95rem;
+      border: 1px solid rgba(127, 127, 127, 0.35);
+      background: rgba(127, 127, 127, 0.12);
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .tab-btn.active {
+      background: rgba(127, 127, 127, 0.3);
+      border-color: rgba(127, 127, 127, 0.6);
+    }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+    .field-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr));
+      gap: 0.5rem 1rem;
+      margin-bottom: 0.8rem;
+    }
+    .field { display: flex; flex-direction: column; gap: 0.15rem; font-size: 0.85rem; }
+    .field input {
+      font-size: 0.9rem;
+      padding: 0.25rem 0.4rem;
+      border: 1px solid rgba(127, 127, 127, 0.4);
+      border-radius: 4px;
+      background: transparent;
+      color: inherit;
+    }
     #viewer {
       position: relative;
       height: 28rem;
@@ -104,6 +134,8 @@
     uncheck to compute real airfoil polars in your browser)</label>
     <button id="clear-cache">Clear polar cache</button>
   </div>
+
+  <div id="design-forms"></div>
 
   <h2>Design parameters (JSON)</h2>
   <textarea id="params" spellcheck="false"></textarea>

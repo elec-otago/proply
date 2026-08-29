@@ -9,6 +9,10 @@
 // occt-import-js only start downloading on the first "Show 3D preview"
 // click, not on every design.
 
+// The tabbed editors for the design JSON (forms.js): pure compose/sync
+// logic plus the localStorage persistence of the design parameters.
+import { buildForm, composeDesign, readForm, syncForm, loadStored, saveStored } from './forms.js';
+
 const $ = (id) => document.getElementById(id);
 
 const DEFAULT_PARAMS = {
@@ -38,6 +42,8 @@ let worker = null;
 let busyTimer = null;
 let viewer = null; // viewer.js module, imported on the first preview click
 let latestStep = null; // STEP text of the most recent completed design
+let designParams = null; // current design JSON (parsed); the forms compose it
+let paramsDebounce = null;
 
 async function viewerModule() {
   if (!viewer) {
@@ -170,7 +176,37 @@ async function showPreview() {
   }
 }
 
-$('params').value = JSON.stringify(DEFAULT_PARAMS, null, 2);
+/// The textarea is the source of truth for running a design; the tabs
+/// edit it, and hand-edits re-sync the tabs.  Every change is persisted
+/// to localStorage so a design survives reloads.
+function writeParams(params) {
+  designParams = params;
+  $('params').value = JSON.stringify(params, null, 2);
+  saveStored(params);
+}
+
+function onFormInput() {
+  writeParams(composeDesign(designParams, readForm(formInputs)));
+}
+
+function onParamsInput() {
+  clearTimeout(paramsDebounce);
+  paramsDebounce = setTimeout(() => {
+    try {
+      writeParams(JSON.parse($('params').value));
+      syncForm(formInputs, designParams);
+    } catch {
+      // invalid JSON in the textarea: leave the tabs and storage alone
+      // (runDesign reports the parse error on Design)
+    }
+  }, 300);
+}
+
+const formInputs = buildForm($('design-forms'));
+writeParams(loadStored() ?? DEFAULT_PARAMS);
+syncForm(formInputs, designParams);
+$('design-forms').addEventListener('input', onFormInput);
+$('params').addEventListener('input', onParamsInput);
 $('design').addEventListener('click', runDesign);
 $('clear-cache').addEventListener('click', clearCache);
 $('preview').addEventListener('click', showPreview);

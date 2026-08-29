@@ -1,5 +1,33 @@
 # CHANGES
 
+## 2026-08-29 — Tabbed editors for the design JSON
+
+### proply-rs web demo
+
+- The design parameters can now be edited from three tabs above the
+  JSON textarea — **Propeller Specifications** (name, blades, radius,
+  thrust, tip/ hub geometry, trailing edge, scimitar, airspeed,
+  altitude), **Electric Motor** (Kv, volts, no-load current, winding
+  resistance) and **Other Motor** (torque and RPM, the direct operating
+  point).  Each tab holds a field per JSON descriptor, in the same
+  unit style as the defaults (`68 mm`, `3 N`); suffixed strings pass
+  through to the wasm unchanged, and bare numbers stored in the JSON
+  (SI) are converted into the display unit when the forms sync.
+- The tabs compose into the design JSON shown in the textarea and
+  persist it in localStorage (`proply-design-params`), so a design
+  survives page reloads.  Blank fields drop their key from the JSON so
+  the Rust defaults apply; the **Other Motor** pair only takes effect
+  when both torque and RPM are filled — the wasm ignores one without
+  the other and uses the electric motor model instead.  Hand-written
+  run options (`bem`, `resolution`, `plate`, ...) are preserved by the
+  merge, and hand edits in the textarea re-sync the tabs.
+- New `web/forms.js` holds the per-tab field definitions and the
+  compose/sync logic (pure functions, testable without a browser);
+  `main.js` wires the tab and textarea changes to it; `index.html`
+  gains the tabs container and its styles.  The textarea remains the
+  source of truth for running a design — no changes to the design
+  worker or the wasm.
+
 ## 2026-08-28 — 3D STEP preview of the finished design
 
 ### proply-rs web demo
