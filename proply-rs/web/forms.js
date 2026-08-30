@@ -54,6 +54,14 @@ export const TABS = [
         label: 'Mechanical thickness (beam sizing)',
         type: 'boolean',
       },
+      {
+        key: 'modulus',
+        label: 'Elastic modulus (GPa)',
+        hint: 'Mechanical-law material stiffness: stiffer material → thinner foils.  nylon/ABS ≈ 3 GPa, aluminium ≈ 70 GPa, carbon fibre ≈ 100 GPa',
+        type: 'quantity',
+        unit: 'GPa',
+        bareToDisplay: 1.0e-9,
+      },
       { key: 'radius', label: 'Radius', type: 'quantity', unit: 'mm', bareToDisplay: 1000 },
       { key: 'thrust', label: 'Thrust', type: 'quantity', unit: 'N', bareToDisplay: 1 },
       { key: 'tip_chord', label: 'Tip chord', type: 'quantity', unit: 'mm', bareToDisplay: 1000 },
@@ -196,6 +204,9 @@ export function buildForm(container) {
       label.className = 'field';
       const span = document.createElement('span');
       span.textContent = field.label;
+      if (field.hint) {
+        span.title = field.hint;
+      }
       let input;
       if (field.type === 'select') {
         input = document.createElement('select');

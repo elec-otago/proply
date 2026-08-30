@@ -156,7 +156,12 @@ In the design JSON:
 or on the command line: `--mech-thickness`, `--modulus <P>`,
 `--deflection-fraction <F>`, `--thickness-floor <F>`, and in the web
 demo via the **Mechanical thickness (beam sizing)** checkbox in the
-Propeller Specifications tab.
+Propeller Specifications tab.  The **Elastic modulus (GPa)** field on
+the same tab sets `modulus` — raise it for a stronger material and the
+mechanical law sizes much thinner foils (the thickness goes as
+`E^(−1/3)`): on the example below, root `t/c` drops from 0.28 at the
+nylon/ABS default (3 GPa) to 0.09 with carbon fibre (100 GPa), with the
+mid- and outer sections landing on the `thickness_floor`.
 
 | key | meaning | unit | default |
 | --- | --- | --- | --- |

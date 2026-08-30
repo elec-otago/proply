@@ -1,5 +1,19 @@
 # CHANGES
 
+## 2026-08-30 — Expose the mechanical-law modulus on the web demo
+
+### proply-rs web demo
+
+The mechanical thickness law's `modulus` (material stiffness) is now
+editable in the browser: the **Propeller Specifications** tab gains an
+**Elastic modulus (GPa)** field (with a hover hint — nylon/ABS ≈ 3,
+aluminium ≈ 70, carbon fibre ≈ 100 GPa), and the default design carries
+`"modulus": "3 GPa"` so the key is visible in the JSON.  A stiffer
+material sizes much thinner foils — the thickness goes as `E^(−1/3)`:
+on the web-default design the root `t/c` drops from 0.28 at 3 GPa to
+0.09 at 100 GPa (the outer sections then ride the `thickness_floor`).
+JS-only change; the committed wasm already parses `modulus`.
+
 ## 2026-08-30 — Document the mechanical thickness law
 
 ### docs

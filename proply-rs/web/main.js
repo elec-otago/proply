@@ -33,6 +33,7 @@ const DEFAULT_PARAMS = {
   hub_radius: '6 mm',
   hub_depth: '6 mm',
   chord_spline_n: 3,
+  modulus: '3 GPa', // mechanical-law material stiffness (stiffer -> thinner foils)
   bem: true,
   resolution: 10,
   n: 12,
