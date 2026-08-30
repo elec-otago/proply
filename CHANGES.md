@@ -1,5 +1,18 @@
 # CHANGES
 
+## 2026-08-30 — Document the mechanical thickness law
+
+### docs
+
+- New [MECHANICAL.md](MECHANICAL.md) explains the mechanical strength
+  calculation behind `mech_thickness`: the cantilever-beam model (thrust
+  per unit span, bending moment, `I = c t³/12` stiffness, constant-
+  curvature sizing `t = (6 M L² / (E c δ))^(1/3)`, the chord/twist and
+  floor effects), the JSON/CLI parameters, a worked example with the
+  sized sections, and the model's assumptions and limitations.
+- The root [README.md](README.md) links the document from the repository
+  layout and the usage section.
+
 ## 2026-08-30 — Mechanical airfoil-thickness law (beam deflection)
 
 ### proply-rs design loop

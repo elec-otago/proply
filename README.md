@@ -22,6 +22,8 @@ entirely in your browser tab):
 - `props/` — JSON propeller parameter files (motor, geometry, thrust target)
 - `images/` — rendered PNG of each prop (see [GALLERY.md](GALLERY.md))
 - `legacy/` — the original Python implementation, kept for reference
+- [MECHANICAL.md](MECHANICAL.md) — how the mechanical strength calculation
+  sizes the airfoil thickness (the `--mech-thickness` design option)
 
 ## Building
 
@@ -78,6 +80,13 @@ per-station section list).
   (spanwise-induced losses from the trailed wake instead of the empirical
   tip-loss factor; `--ar` targets a minimum blade aspect ratio). Technique
   described in detail in [proply-rs/README.md](proply-rs/README.md).
+- `--mech-thickness` sizes the airfoil thickness mechanically instead of
+  with the geometric power law: the blade is treated as a cantilever beam
+  anchored at the hub, and the thickness is chosen so the tip deflection
+  caused by the blade's own thrust stays within `--deflection-fraction`
+  (default 5%) of the radius.  How the strength calculation picks the
+  section thickness — loads, bending moment, the `E·c·t³` beam model and
+  its parameters — is documented in [MECHANICAL.md](MECHANICAL.md).
 - The first run simulates an 80-point alpha sweep per blade station; polars
   are cached in `foil_cache.json` in the working directory, so reruns are
   fast.
