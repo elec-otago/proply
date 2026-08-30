@@ -1,5 +1,33 @@
 # CHANGES
 
+## 2026-08-30 — Camber in the mechanical thickness law (real section inertia)
+
+### proply-rs design loop
+
+The mechanical thickness law now sizes with each section's **real
+bending inertia** instead of the enclosing rectangle: `i_flat` and
+`i_edge` are the foil's actual second moments about the chord line and
+the thickness axis (relative to `c t³/12` and `t c³/12`), computed from
+the shape points of every family (NACA 4-series, CST, ARA-D) via
+polygon mass moments (new `FoilLike::section_shape_factors`, `foil.rs`).
+The twisted-section inertia becomes
+`I = i_flat·c t³/12·cos²θ + i_edge·c³ t/12·sin²θ` and the sizing cubic
+`i_flat·cos²θ·t³ + i_edge·c²·sin²θ·t = 6ML²/(Ecδ)`.
+
+- **A cambered (curved) section is stiffer than a flat one** (the user's
+  point): the chord-line moment contains the camber — `i_flat ≈ 0.47`
+  symmetric, ≈ 0.62 at 2% camber, ≈ 1.35 at 6% camber (12–15%
+  thickness), so cambered sections size ≈ 10–30% thinner.  A real
+  symmetric section, however, is only ≈ 0.47× as stiff as its
+  rectangle, so the absolute sections also thicken ≈ 29% versus the
+  rectangle model.
+- On the web-default design (BEM, plate, 3 GPa): root `t/c ≈ 0.17` at
+  zero camber (0.71 geometric, 0.08 rectangle-mechanical); with 6%
+  camber the inboard sections drop to the `thickness_floor` (root
+  `t/c = 0.06`, predicted deflection 2.77 mm of the 3.4 mm allowed).
+- Docs (`MECHANICAL.md`, `README.md`) describe the real-section model,
+  numbers and caveats; the wasm package is rebuilt.
+
 ## 2026-08-30 — Twist-aware mechanical thickness law
 
 ### proply-rs design loop

@@ -148,6 +148,37 @@ impl std::fmt::Display for Foil {
     }
 }
 
+/// Bending-inertia shape factors of a section relative to its enclosing
+/// rectangle, used by the mechanical-thickness law ([`crate::thickness`]).
+///
+/// `i_flat` is the section's second moment of area about the **chord
+/// line** (the standard airfoil property — a cambered, curved section is
+/// stiffer than a flat one because the mean line carries material away
+/// from the bending axis), divided by the rectangle `c·t³/12`.  `i_edge`
+/// is the moment about the thickness axis through the area centroid,
+/// divided by `t·c³/12` (camber leaves this one almost unchanged).  Real
+/// sections are roughly half as stiff as their enclosing rectangle even
+/// symmetric (`i ≈ 0.45–0.55` for the NACA 4-series), and camber raises
+/// the flatwise factor (≈ 0.62 at 2% camber, ≈ 1.3 at 6% camber of
+/// chord).
+#[derive(Debug, Clone, Copy)]
+pub struct SectionShape {
+    /// I about the chord line, relative to `c·t³/12`.
+    pub i_flat: f64,
+    /// I about the thickness axis, relative to `t·c³/12`.
+    pub i_edge: f64,
+}
+
+impl Default for SectionShape {
+    /// The enclosing rectangle: `I = c t³/12` and `t c³/12`.
+    fn default() -> Self {
+        Self {
+            i_flat: 1.0,
+            i_edge: 1.0,
+        }
+    }
+}
+
 /// Common interface over the foil classes, mirroring the Python duck typing
 /// (the simulator and blade element only ever touch these methods).
 pub trait FoilLike {
@@ -164,6 +195,58 @@ pub trait FoilLike {
     fn get_max_chord(&self, x_limit: f64, y_limit: f64, theta: f64) -> f64;
     fn reynolds(&self, v: f64) -> f64;
     fn mach(&self, v: f64) -> f64;
+
+    /// Bending-inertia shape factors about the chord line and the
+    /// thickness axis, relative to the enclosing rectangle (see
+    /// [`SectionShape`]).  Computed from the shape points, so every family
+    /// (NACA 4-series, CST, ARA-D) gets its own numbers — and a cambered
+    /// (curved) section is genuinely stiffer than a flat one, because the
+    /// mean line carries area away from the chord line.
+    fn section_shape_factors(&self, n: usize) -> SectionShape {
+        let (xl, yl, xu, yu) = self.get_shape_points(n);
+        if n < 2 {
+            return SectionShape::default();
+        }
+        // The section outline: upper surface LE -> TE, then the lower
+        // surface back TE -> LE.  Polygon mass moments (shoelace): the
+        // signed per-edge cross products carry the winding, so the
+        // results are consistent and only need an absolute value at the
+        // end.  `i_chord` is the moment about the chord line (y = 0, the
+        // flatwise/stiffness property — camber raises it); `i_thick` is
+        // the moment about the thickness axis through the area centroid
+        // (edgewise bending, unaffected by camber).
+        let m = 2 * n;
+        let vert = |k: usize| -> (f64, f64) {
+            if k < n {
+                (xu[k], yu[k])
+            } else {
+                (xl[m - 1 - k], yl[m - 1 - k])
+            }
+        };
+        let mut area = 0.0;
+        let mut cx_sum = 0.0;
+        let mut i_chord = 0.0;
+        let mut i_thick = 0.0;
+        for k in 0..m {
+            let (x1, y1) = vert(k);
+            let (x2, y2) = vert((k + 1) % m);
+            let cross = x1 * y2 - x2 * y1;
+            area += 0.5 * cross;
+            cx_sum += (x1 + x2) * cross;
+            i_chord += (y1 * y1 + y1 * y2 + y2 * y2) * cross / 12.0;
+            i_thick += (x1 * x1 + x1 * x2 + x2 * x2) * cross / 12.0;
+        }
+        let (c, t) = (self.chord().abs(), self.chord().abs() * self.thickness().abs());
+        if c <= 1.0e-12 || t <= 1.0e-12 || area.abs() <= 1.0e-18 || !area.is_finite() {
+            return SectionShape::default();
+        }
+        let cx = (cx_sum / (6.0 * area)).clamp(0.0, c);
+        let i_thick_c = (i_thick - area * cx * cx).abs();
+        SectionShape {
+            i_flat: (12.0 * i_chord.abs() / (c * t * t * t)).max(1.0e-6),
+            i_edge: (12.0 * i_thick_c / (t * c * c * c)).max(1.0e-6),
+        }
+    }
 }
 
 impl FoilLike for Foil {
@@ -751,6 +834,73 @@ mod tests {
         let idx = argmax(&mean);
         let camber = mean[idx];
         assert!((camber - 0.06).abs() < 0.01, "max camber {}", camber);
+    }
+
+    #[test]
+    fn shape_factors_match_the_airfoil_integrals() {
+        // NACA 0012 (symmetric, unit chord): I about the chord line is
+        // 0.473x the rectangle c t^3/12; about the thickness axis 0.454x
+        // t c^3/12 (independent numeric integration reference).
+        let f = Naca4::new(1.0, 0.12, 0.0, 0.4);
+        let s = f.section_shape_factors(1000);
+        assert!((s.i_flat - 0.4706).abs() < 5.0e-3, "flat {}", s.i_flat);
+        assert!((s.i_edge - 0.4442).abs() < 5.0e-3, "edge {}", s.i_edge);
+    }
+
+    #[test]
+    fn camber_raises_the_flatwise_factor() {
+        // A curved section is stiffer than a flat one: camber raises I
+        // about the chord line (the mean line carries area away from the
+        // bending axis), while the edgewise factor is essentially
+        // unchanged.
+        let flat = Naca4::new(1.0, 0.12, 0.0, 0.4).section_shape_factors(1000);
+        let cambered = Naca4::new(1.0, 0.12, 0.02, 0.4).section_shape_factors(1000);
+        assert!(
+            cambered.i_flat > 1.2 * flat.i_flat,
+            "cambered {} vs flat {}",
+            cambered.i_flat,
+            flat.i_flat
+        );
+        // 6% camber at 15% thickness: I about the chord line approaches
+        // and exceeds the rectangle's.
+        let curved = Naca4::new(1.0, 0.15, 0.06, 0.4).section_shape_factors(1000);
+        assert!(
+            curved.i_flat > 1.0,
+            "6%-camber flat factor {}",
+            curved.i_flat
+        );
+        // The edgewise factor barely moves with camber (the mean line
+        // stays along the chord; normal-offset construction shifts it by
+        // ~1% here).
+        assert!(
+            (curved.i_edge - flat.i_edge).abs() < 2.0e-2,
+            "edge {} vs {}",
+            curved.i_edge,
+            flat.i_edge
+        );
+    }
+
+    #[test]
+    fn shape_factors_are_chord_and_thickness_scale_independent() {
+        // The factor is a shape property: it must not depend on the chord
+        // scale, nor (for self-similar thickness shapes like the NACA
+        // 4-series) on t/c.
+        let a = Naca4::new(0.10, 0.12, 0.0, 0.4).section_shape_factors(1000);
+        let b = Naca4::new(1.0, 0.12, 0.0, 0.4).section_shape_factors(1000);
+        assert!((a.i_flat - b.i_flat).abs() < 1.0e-9);
+        assert!((a.i_edge - b.i_edge).abs() < 1.0e-9);
+        let thin = Naca4::new(1.0, 0.06, 0.0, 0.4).section_shape_factors(1000);
+        assert!((thin.i_flat - b.i_flat).abs() < 5.0e-3, "t/c scaling {}", thin.i_flat);
+    }
+
+    #[test]
+    fn degenerate_section_falls_back_to_the_rectangle() {
+        // Zero thickness: no shape to measure; the rectangle factor keeps
+        // the sizing well defined.
+        let f = Naca4::new(1.0, 0.0, 0.0, 0.4);
+        let s = f.section_shape_factors(100);
+        assert_eq!(s.i_flat, 1.0);
+        assert_eq!(s.i_edge, 1.0);
     }
 
     fn argmax(v: &[f64]) -> usize {

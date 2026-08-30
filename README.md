@@ -84,14 +84,17 @@ per-station section list).
   with the geometric power law: the blade is treated as a cantilever beam
   anchored at the hub, and the thickness is chosen so the tip deflection
   caused by the blade's own thrust stays within `--deflection-fraction`
-  (default 5%) of the radius.  The sizing accounts for the local twist —
-  a pitched section presents the z-projection of its chord to the load,
-  so twisted sections need less thickness — and for the material
-  stiffness via `--modulus` (raise it, e.g. `--modulus=100GPa` for
-  carbon, to thin the foils).  How the strength calculation picks the
-  section thickness — loads, bending moment, the twist-aware
-  `E·(c³t·sin²θ + ct³·cos²θ)/12` beam model and its parameters — is
-  documented in [MECHANICAL.md](MECHANICAL.md).
+  (default 5%) of the radius.  The sizing uses each section's *real*
+  bending inertia: the local twist (a pitched section presents the
+  z-projection of its chord to the load, so twisted sections need less
+  thickness), the actual airfoil shape (a real section is ≈ half as stiff
+  as its rectangle), and **camber** (a curved section is stiffer than a
+  flat one: 2% camber ≈ 10% thinner sections, 6% ≈ 30%), plus the
+  material stiffness via `--modulus` (raise it, e.g. `--modulus=100GPa`
+  for carbon, to thin the foils).  How the strength calculation picks the
+  section thickness — loads, bending moment, the
+  `E·(i_edge·c³t·sin²θ + i_flat·ct³·cos²θ)/12` beam model and its
+  parameters — is documented in [MECHANICAL.md](MECHANICAL.md).
 - The first run simulates an 80-point alpha sweep per blade station; polars
   are cached in `foil_cache.json` in the working directory, so reruns are
   fast.

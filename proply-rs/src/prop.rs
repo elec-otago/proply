@@ -309,13 +309,18 @@ impl Prop {
         if self.blade_elements.len() < 2 {
             return false;
         }
-        let mut rows: Vec<(f64, f64, f64, f64)> = self
+        let mut rows: Vec<(f64, f64, f64, crate::foil::SectionShape, f64)> = self
             .blade_elements
             .iter()
             .map(|be| {
-                let c = be.foil.borrow().chord();
+                let f = be.foil.borrow();
+                let c = f.chord();
                 let t = be.thrust_n.unwrap_or_else(|| be.d_t());
-                (be.r, c, be.get_twist(), t)
+                // The real section's bending inertia relative to its
+                // enclosing rectangle (camber raises the flatwise factor —
+                // a curved section is stiffer than a flat one).
+                let shape = f.section_shape_factors(100);
+                (be.r, c, be.get_twist(), shape, t)
             })
             .collect();
         // The elements are hub → tip, but sort defensively anyway.
@@ -323,11 +328,13 @@ impl Prop {
         let rr: Vec<f64> = rows.iter().map(|r| r.0).collect();
         let chords: Vec<f64> = rows.iter().map(|r| r.1).collect();
         let twist: Vec<f64> = rows.iter().map(|r| r.2).collect();
-        let thrust: Vec<f64> = rows.iter().map(|r| r.3).collect();
+        let shape: Vec<crate::foil::SectionShape> = rows.iter().map(|r| r.3).collect();
+        let thrust: Vec<f64> = rows.iter().map(|r| r.4).collect();
         let Some(law) = crate::thickness::size_mechanical_thickness(
             &rr,
             &chords,
             &twist,
+            &shape,
             &thrust,
             self.n_blades,
             self.param.modulus,

@@ -42,31 +42,43 @@ carries everything):
 M(r) = ∫_r^R q(s) (s − r) ds        [N·m]
 ```
 
-### 3. The beam: deflection from the moment — the twist
+### 3. The beam: deflection from the moment — the real section, the twist and the camber
 
-The blade bends as an Euler–Bernoulli beam fixed at the hub.  The
-cross-section is approximated as a solid rectangle of chord `c` and
-thickness `t`, and it is **twisted by the local twist `θ(r)`** (the
-section's pitch about the spanwise axis).  The deflection is in the
-z direction, so the stiffness is the section's second moment about the
-rotor-disk chord axis — for the rotated rectangle:
+The blade bends as an Euler–Bernoulli beam fixed at the hub, with the
+section's **real** bending inertia (not the enclosing rectangle) about
+the rotor-disk chord axis.  The section of chord `c` and thickness `t`
+is twisted by the local twist `θ(r)` (its pitch about the spanwise
+axis), so the z-bending inertia of the *rotated* section is its two
+principal moments, each weighted by the twist — the z-projections of the
+section's two dimensions:
 
 ```text
-I(r) = c³(r)·t(r)/12 · sin²θ  +  c(r)·t³(r)/12 · cos²θ        [m⁴]
-     = c(r)·t(r)/12 · ( (t·cos θ)² + (c·sin θ)² )
+I(r) = i_flat(r)·c(r)·t³(r)/12 · cos²θ  +  i_edge(r)·c³(r)·t(r)/12 · sin²θ
 ```
 
-The two terms are the z-projections of the section's two dimensions,
-squared and summed: `t·cos θ` is the **z-component of the thickness**
-(flatwise bending), and `c·sin θ` is the **z-component of the chord**
-(chordwise bending).  Because the chord is typically much longer than the
-thickness, the chord's projection dominates at high twist — the twisted
-section's resistance to the z load "tends to the chord", i.e. to its
-total z-extent `c·sin θ + t·cos θ`.  This is the "take the twist into
-account, as the chord can make the beam stiffer" part of the TODO, and it
-is why the untwisted `I = c t³/12` overestimates the thickness a pitched
-blade needs.  The curvature follows from the moment and the material's
-elastic modulus `E`:
+`t·cos θ` is the **z-component of the thickness** (flatwise bending) and
+`c·sin θ` the **z-component of the chord** (chordwise bending); the
+shape factors `i_flat` and `i_edge` scale the two moments from the
+rectangle to the **actual foil shape** ([`foil::SectionShape`], computed
+from the section's shape points):
+
+- a real section is roughly *half* as stiff as its rectangle even
+  symmetric (`i ≈ 0.47` flatwise, `≈ 0.44` edgewise for the NACA
+  4-series), so the law sizes ~29% thicker sections than the rectangle
+  model;
+- **camber raises `i_flat`** — a curved (cambered) section is stiffer
+  than a flat one, because its mean line carries area away from the
+  bending axis (`i_flat ≈ 0.62` at 2% camber, `≈ 1.35` at 6% camber, at
+  12–15% thickness), while `i_edge` barely moves.  This is the "a curved
+  blade is stiffer than a flat one" part of the question, quantified.
+
+Because the chord is typically much longer than the thickness, the
+chord's projection dominates at high twist — the twisted section's
+resistance to the z load "tends to the chord", i.e. to its total
+z-extent `c·sin θ + t·cos θ`.  This is the "take the twist into
+account, as the chord can make the beam stiffer" part of the TODO.  The
+curvature follows from the moment and the material's elastic modulus
+`E`:
 
 ```text
 w''(r) = M(r) / (E · I(r)),     w(r_hub) = 0,  w'(r_hub) = 0
@@ -79,11 +91,11 @@ curvature** — a smooth arc with no curvature concentration anywhere.
 Fixing `w'' = κ` and closing the tip deflection at the allowed value
 `δ` over the beam length `L = R − r_hub` (an arc of curvature `κ` over
 length `L` drops `δ = κ L² / 2`, so `κ = 2δ / L²`), and substituting
-`w''` and the twist-aware `I` into the curvature equation, the section
-thickness satisfies the cubic
+`w''` and the twist- and shape-aware `I` into the curvature equation,
+the section thickness satisfies the cubic
 
 ```text
-t(r)³·cos²θ  +  t(r)·c(r)²·sin²θ  =  6·M(r)·L² / (E·c(r)·δ)   (=: K)
+i_flat·cos²θ·t(r)³  +  i_edge·sin²θ·c(r)²·t(r)  =  6·M(r)·L² / (E·c(r)·δ)   (=: K)
 ```
 
 with
@@ -94,13 +106,15 @@ L = R − r_hub         (the beam length)
 ```
 
 For an untwisted section this collapses to the closed form
-`t = (K)^(1/3)`; at high twist the linear (chord-projection) term takes
-over, `t ≈ K / (c²·sin²θ)`, and the thickness is governed by the chord,
+`t = (K / (i_flat·cos²θ))^(1/3)` (the shape factor included); at high
+twist the linear (chord-projection) term takes over,
+`t ≈ K / (i_edge·c²·sin²θ)`, and the thickness is governed by the chord,
 not the foil thickness.  This is what the "deflection caused by the
 thrust integrated along the blade" buys you: the moment distribution
 picks the *shape* (thickest where the moment peaks, tapering toward the
-tip), the deflection limit picks the *scale*, and the twist decides how
-much of the section's stiff chord lies in the load direction.
+tip), the deflection limit picks the *scale*, the twist decides how much
+of the section's stiff chord lies in the load direction, and the camber
+decides how stiff the section itself is.
 
 ### 5. The floor
 
@@ -123,25 +137,30 @@ requires, so the realized deflection is *at most* the allowed one.
   a looser deflection limit (`δ` doubled, e.g. 5% → 10% of R) also gives
   `0.79`×.  The blade does not chase every load change.
 - **Chords stiffen the blade — and twist aims them at the load.**  The
-  flatwise term `c t³ cos²θ / 12` means a wide-chord section needs less
-  thickness (`c` doubled → absolute thickness × `2^(−1/3)`).  The
-  twist-aware term `c³ t sin²θ / 12` goes further: wherever the section
-  is pitched, its *chord* projects onto the load direction and carries
-  the bending.  On the example below the strongly twisted root sections
-  are sized to the floor — the wide, pitched root is already stiff in z,
-  so the calculation leaves it at the minimum `t/c`.  (A section's total
-  z-extent is `c·sin θ + t·cos θ`; at high twist it tends to the chord.)
+  flatwise term means a wide-chord section needs less thickness (`c`
+  doubled → absolute thickness × `2^(−1/3)`), and wherever the section
+  is pitched its *chord* projects onto the load direction and carries
+  the bending (`i_edge·c³ t·sin²θ / 12` — a section's total z-extent is
+  `c·sin θ + t·cos θ`; at high twist it tends to the chord).
+- **Cambered (curved) sections are stiffer than flat ones.**  The law
+  sizes with the real section's inertia about the chord line
+  (`i_flat`), and camber raises it: 2% camber at 12% thickness gives
+  `i_flat ≈ 0.62` (≈ 10% thinner than the symmetric section), 6% camber
+  at 15% gives `≈ 1.35` (≈ 30% thinner).  On the example below, adding
+  6% camber drops the whole inboard section to the `thickness_floor`.
 - **The tip section is a floor decision.**  The tip carries almost no
   moment, so its thickness is whatever the floor is — the law never
   sizes a useful tip from the load alone.  Raise `thickness_floor` for a
   chunkier tip.
 - **It replaces the power law's numbers.**  On the web-default design
-  (68 mm radius, three blades, 3 GPa modulus, 5% of R allowed): with the
-  twist included, root `t/c ≈ 0.08` (versus 0.71 by the geometric law
-  and 0.28 by the untwisted mechanical law), most outboard sections ride
-  the `thickness_floor`, and the sized blade is predicted to deflect
-  3.00 mm — inside the 3.4 mm allowed — where a blade built to the
-  geometric law is predicted to deflect 4.9 mm.
+  (68 mm radius, three blades, 3 GPa modulus, 5% of R allowed), sized
+  with the real NACA sections (zero camber): root `t/c ≈ 0.17` (versus
+  0.71 by the geometric law and 0.08 by the rectangle-based mechanical
+  law — a real symmetric section is only ≈ 0.47× as stiff as its
+  rectangle), tapering to `≈ 0.09–0.23` outboard and the floor at the
+  tip; the sized blade is predicted to deflect 3.38 mm — inside the
+  3.4 mm allowed — where a blade built to the geometric law is predicted
+  to deflect 4.9 mm.
 - **The section `t/c` flows into the aerodynamics.**  The sized absolute
   thickness is divided by the design's own chord (the law is stored as a
   radius → `t/c` curve, so the sized section scales exactly with the
@@ -170,9 +189,9 @@ demo via the **Mechanical thickness (beam sizing)** checkbox in the
 Propeller Specifications tab.  The **Elastic modulus (GPa)** field on
 the same tab sets `modulus` — raise it for a stronger material and the
 mechanical law sizes much thinner foils (the thickness goes as
-`E^(−1/3)`): on the example below, root `t/c` drops from ≈ 0.08 at the
-nylon/ABS default (3 GPa) to the `thickness_floor` (0.06) everywhere
-with carbon fibre (100 GPa).
+`E^(−1/3)`): on the example below, root `t/c` drops from ≈ 0.17 at the
+nylon/ABS default (3 GPa) to ≈ 0.08 with carbon fibre (100 GPa), and
+further to the `thickness_floor` with a stiffer laminate.
 
 | key | meaning | unit | default |
 | --- | --- | --- | --- |
@@ -189,7 +208,7 @@ mechanically sized blade.  The design summary records what happened:
 ```yaml
 design:
   thickness_law: mechanical
-  tip_deflection_mm: 3.002042
+  tip_deflection_mm: 3.379012
 ```
 
 ## Example: the web-default design
@@ -200,38 +219,40 @@ the local twist that enters the sizing:
 
 ```text
   r (m)    chord (mm)   twist (°)   t (mm)    t/c
- 0.0060      8.0         25.4       0.65     0.081
- 0.0129      7.9         18.8       0.47     0.060  (floor)
- 0.0198      6.9         15.8       0.42     0.060  (floor)
- 0.0267      5.4         15.2       0.32     0.060  (floor)
- 0.0336      3.7         15.7       0.22     0.060  (floor)
- 0.0404      2.4         16.2       0.20     0.084
- 0.0473      1.8         15.9       0.23     0.129
- 0.0542      1.7         14.3       0.27     0.165
- 0.0611      1.7         10.7       0.21     0.123
- 0.0680      1.8          5.0       0.11     0.060  (floor)
+ 0.0060     11.5         26.6       1.97     0.171
+ 0.0129     13.6         15.3       1.61     0.118
+ 0.0198     14.3         11.4       1.35     0.095
+ 0.0267     13.5         11.1       1.23     0.092
+ 0.0336     11.3         11.6       1.21     0.107
+ 0.0404      8.6         11.2       1.22     0.142
+ 0.0473      6.3          9.3       1.20     0.191
+ 0.0542      4.9          6.4       1.12     0.229
+ 0.0611      4.4          3.8       0.76     0.172
+ 0.0680      4.4          4.3       0.26     0.060  (floor)
 ```
 
-The root is the thickest section (highest moment), but the twist does
-most of the work there: at 25° pitch a 8.0 mm chord presents ≈ 3.4 mm of
-itself to the z load (its z-extent is `c·sin θ + t·cos θ ≈ 3.5 mm`,
-versus `t·cos θ ≈ 0.6 mm` of thickness projection alone), so the sizing
-needs only a thin section.  The strongly twisted inboard part of the
-blade rides the `thickness_floor`; the mild-twist outboard section
-thickens towards mid-span where the chord tapers.  Predicted tip
-deflection: 3.00 mm of the 3.40 mm allowed.  A lifting-line design of
-the same prop (thinner, more lightly twisted sections) sizes on the same
-law, with the floor binding across most of the blade.
+Sized with the **real NACA sections** (`i_flat ≈ 0.47`, camber 0): the
+sections are ≈ 29% thicker than the rectangle model everywhere, the root
+— the highest moment, still carrying the twist and camber geometry — is
+`t/c ≈ 0.17` (versus 0.71 by the geometric law and 0.08 by the
+rectangle-based law), and the deflection closes at 3.38 mm of the
+3.40 mm allowed.  Adding 6% camber (`--camber 0.06`) shows the stiffness
+of the curved section: `i_flat` jumps to ≈ 1.35 and the whole inboard
+blade sizes down onto the `thickness_floor` (root `t/c` 0.06, predicted
+deflection 2.77 mm).  A lifting-line design of the same prop sizes on
+the same law.
 
 ## Assumptions and limitations
 
-- **Rectangular section approximation.**  The inertia
-  `I = c³t/12·sin²θ + ct³/12·cos²θ` treats the section as a solid
-  rectangle twisted by the local pitch; real airfoil sections are
-  cambered, tapered in thickness and carry the twist in their geometry,
-  so the stiffness estimate is approximate (the TODO asks for an
-  *approximated* deflection).  The `t³` and `sin²θ` terms dominate, which
-  is what the sizing is sensitive to.
+- **Section model.**  The inertia uses the real section shape from the
+  foil's shape points — the actual airfoil (camber included) scaled by
+  the twist — with `i_flat`/`i_edge` relative to the enclosing
+  rectangle, so the camber-stiffness is captured (a curved section is
+  genuinely stiffer in the model).  The beam itself is still the
+  Euler–Bernoulli approximation the TODO asks for: no shear deflection,
+  no bending/twist coupling of the slender pre-twisted beam, and the
+  section is treated as solid (its internal web-like distribution is
+  not modelled).
 - **Static, single-material beam.**  No fatigue, no centrifugal or
   torsional coupling, no shear deflection; `E` is a single number.  The
   twist enters as the pure section rotation about the spanwise axis;

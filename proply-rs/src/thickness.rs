@@ -14,23 +14,31 @@
 //! M(r) = ∫_r^R q(s) (s - r) ds .
 //! ```
 //!
-//! The blade bends as an Euler–Bernoulli beam with a rectangular-section
-//! approximation.  The section is twisted by the local twist `θ(r)` about
-//! the spanwise axis, so its resistance to z-bending is the second moment
-//! about the rotor-disk chord axis of the *rotated* section:
+//! The blade bends as an Euler–Bernoulli beam with the section's *real*
+//! bending inertia about the rotor-disk chord axis, not the enclosing
+//! rectangle.  The section is twisted by the local twist `θ(r)` about the
+//! spanwise axis, so the z-bending inertia of the *rotated* section is
+//! the sum of its two principal moments, each weighted by the twist (the
+//! z-projections of the section's dimensions):
 //!
 //! ```text
-//! I(r) = c³(r)·t(r)/12 · sin²θ + c(r)·t³(r)/12 · cos²θ
-//!      = c(r)·t(r)/12 · ( (t·cos θ)² + (c·sin θ)² ),      [m⁴]
+//! I(r) = i_flat(r)·c(r)·t³(r)/12 · cos²θ  +  i_edge(r)·c³(r)·t(r)/12 · sin²θ ,
 //! ```
 //!
-//! the summed squares of the z-projections of the section's two
-//! dimensions.  The z-component of the *thickness* is `t·cos θ` (the
-//! flatwise term), but the twisted section also presents the z-component
-//! of its *chord*, `c·sin θ` (the chordwise term).  Since the chord is
-//! typically much longer than the thickness, at high twist the chord's
-//! projection dominates — the stiffness tends to the chord, exactly as one
-//! would expect from the section's total z-extent `c·sin θ + t·cos θ`:
+//! where `i_flat` and `i_edge` are the section's actual second moments
+//! about the chord line and the thickness axis relative to the rectangle
+//! ([`crate::foil::SectionShape`], computed from the foil's shape
+//! points).  The chord-line moment contains the **camber**: a curved
+//! (cambered) section is stiffer than a flat one because its mean line
+//! carries area away from the bending axis (`i_flat ≈ 0.47` for a
+//! symmetric NACA section, ≈ 0.62 at 2% camber, ≈ 1.3 at 6% camber);
+//! even symmetric, a real section is roughly half as stiff as its
+//! rectangle.  The flatwise term is the z-projection of the *thickness*
+//! (`t·cos θ`); the chordwise term is the z-projection of the *chord*
+//! (`c·sin θ`) — since the chord is much longer than the thickness, at
+//! high twist the chord's projection dominates and the needed thickness
+//! tends to the chord (the section's total z-extent
+//! `c·sin θ + t·cos θ`):
 //!
 //! ```text
 //! w''(r) = M(r) / (E I(r)),    w(r_hub) = 0,  w'(r_hub) = 0 .
@@ -42,16 +50,17 @@
 //! the cubic
 //!
 //! ```text
-//! t³·cos²θ + t·c²·sin²θ = 6 M(r) L² / (E c(r) δ)   (=: K) ,
+//! i_flat·cos²θ·t³ + i_edge·c²·sin²θ·t = 6 M(r) L² / (E c(r) δ)   (=: K) ,
 //! ```
 //!
-//! which reduces to the closed form `t = (K)^(1/3)` for an untwisted
-//! section.  A uniform-curvature bend has no curvature concentration —
-//! the blade bends as a smooth arc — and the cubic keeps the sizing
-//! stable against the load (a blade with double the thrust needs only
-//! 2^(1/3) more thickness).  The result is floored at a minimum fraction
-//! of the local chord (the tip, where `M → 0`, would otherwise taper to a
-//! knife edge; the default floor is the thinnest ARA-D table, 6%).
+//! which reduces to the closed form `t = (K/(i_flat))^(1/3)` for an
+//! untwisted section.  A uniform-curvature bend has no curvature
+//! concentration — the blade bends as a smooth arc — and the cubic keeps
+//! the sizing stable against the load (a blade with double the thrust
+//! needs only 2^(1/3) more thickness).  The result is floored at a
+//! minimum fraction of the local chord (the tip, where `M → 0`, would
+//! otherwise taper to a knife edge; the default floor is the thinnest
+//! ARA-D table, 6%).
 //!
 //! The hub thickness (`hub_depth`) is deliberately not part of this: it
 //! describes the hub mounting, and the blade's airfoil thickness is a
@@ -60,6 +69,7 @@
 //! chord is the design's own output, so the sized absolute thickness
 //! scales with the final chord exactly.
 
+use crate::foil::SectionShape;
 use crate::pchip::Pchip;
 
 /// The sized thickness law: station radii (hub → tip, m) and the
@@ -75,26 +85,26 @@ pub struct ThicknessLaw {
     pub deflection_limit: f64,
 }
 
-/// Solve the twist-aware sizing cubic for the positive thickness:
-/// `cos²θ·t³ + c²·sin²θ·t − K = 0`.  The left side is strictly increasing
-/// in `t ≥ 0`, so the root is unique; Newton from a bracketed start (the
-/// θ=0 solution is an upper bound) converges monotonically.
-fn solve_twisted_cubic(cos2: f64, sin2: f64, c2: f64, k: f64) -> f64 {
-    let b = c2 * sin2;
-    if cos2 <= 1.0e-12 {
+/// Solve the shape-and-twist-aware sizing cubic for the positive
+/// thickness: `a·t³ + b·t − K = 0` with `a = i_flat·cos²θ` and
+/// `b = i_edge·c²·sin²θ`.  The left side is strictly increasing in
+/// `t ≥ 0`, so the root is unique; Newton from a bracketed start (the
+/// b = 0 solution is an upper bound) converges monotonically.
+fn solve_sized_cubic(a: f64, b: f64, k: f64) -> f64 {
+    if a <= 1.0e-12 {
         // Nearly edge-on: the linear (chord-projection) term carries the
-        // load — t ≈ K / (c²·sin²θ).
+        // load — t ≈ K / (i_edge·c²·sin²θ).
         return k / b.max(1.0e-30);
     }
     if b <= 1.0e-30 {
-        // Untwisted section: back to the closed form.
-        return (k / cos2).cbrt();
+        // Untwisted section: t = (K/(i_flat·cos²θ))^(1/3).
+        return (k / a).cbrt();
     }
-    let upper = (k / cos2.max(1.0e-30)).cbrt(); // root < upper (b·t > 0)
+    let upper = (k / a.max(1.0e-30)).cbrt(); // root < upper (b·t > 0)
     let mut t = 0.5 * upper;
     for _ in 0..40 {
-        let f = cos2 * t * t * t + b * t - k;
-        let fp = 3.0 * cos2 * t * t + b;
+        let f = a * t * t * t + b * t - k;
+        let fp = 3.0 * a * t * t + b;
         let dt = f / fp;
         t -= dt;
         if dt.abs() <= 1.0e-14 * t.max(upper) {
@@ -111,6 +121,11 @@ fn solve_twisted_cubic(cos2: f64, sin2: f64, c2: f64, k: f64) -> f64 {
 /// * `twist` — the section twist at each station (rad): the rotation of
 ///   the foil about the spanwise axis that enters the z-bending inertia
 ///   (the z-projections of the thickness and of the chord).
+/// * `shape` — each station's bending-inertia shape factors relative to
+///   the enclosing rectangle ([`crate::foil::SectionShape`]): the real
+///   section is roughly half as stiff as its rectangle, and camber raises
+///   the flatwise factor — a curved (cambered) section is stiffer than a
+///   flat one and sizes thinner.
 /// * `thrust` — the *annular* element thrust at each station (N, all
 ///   blades; it is divided by `n_blades` to get one blade's load).
 /// * `n_blades` — blade count.
@@ -121,13 +136,15 @@ fn solve_twisted_cubic(cos2: f64, sin2: f64, c2: f64, k: f64) -> f64 {
 ///   chord.
 ///
 /// Returns `None` when there is nothing to size (fewer than two stations,
-/// ragged input, a non-positive modulus/deflection, or zero/negative total
-/// thrust — a design that produced no load cannot be sized).
+/// ragged input, a non-positive modulus/deflection, a non-positive shape
+/// factor, or zero/negative total thrust — a design that produced no load
+/// cannot be sized).
 #[allow(clippy::too_many_arguments)]
 pub fn size_mechanical_thickness(
     rr: &[f64],
     chords: &[f64],
     twist: &[f64],
+    shape: &[SectionShape],
     thrust: &[f64],
     n_blades: usize,
     modulus: f64,
@@ -138,6 +155,7 @@ pub fn size_mechanical_thickness(
     if n < 2
         || rr.len() != chords.len()
         || rr.len() != twist.len()
+        || rr.len() != shape.len()
         || rr.len() != thrust.len()
         || n_blades == 0
         || !modulus.is_finite()
@@ -147,6 +165,9 @@ pub fn size_mechanical_thickness(
         || !thickness_floor.is_finite()
         || !(0.0..1.0).contains(&thickness_floor)
         || twist.iter().any(|x| !x.is_finite())
+        || shape
+            .iter()
+            .any(|s| !s.i_flat.is_finite() || !s.i_edge.is_finite() || s.i_flat <= 0.0 || s.i_edge <= 0.0)
     {
         return None;
     }
@@ -185,12 +206,13 @@ pub fn size_mechanical_thickness(
         m[i] = acc;
     }
 
-    // Constant-curvature sizing with the twist-aware inertia, floored at a
-    // minimum fraction of the local chord (the tip moment vanishes, so
-    // without the floor the tip would taper to a knife edge).  The
-    // untwisted closed form `t = (K)^(1/3)` overestimates the needed
-    // thickness wherever the twist presents the chord to the z load; the
-    // cubic `t³ cos²θ + t c² sin²θ = K` accounts for that z-projection.
+    // Constant-curvature sizing with the shape-and-twist-aware inertia,
+    // floored at a minimum fraction of the local chord (the tip moment
+    // vanishes, so without the floor the tip would taper to a knife
+    // edge).  The cubic `i_flat·cos²θ·t³ + i_edge·c²·sin²θ·t = K`
+    // accounts for the real section (a cambered section's higher
+    // `i_flat` sizes a thinner foil) and for the twist presenting the
+    // chord to the z load.
     let l = rr[n - 1] - rr[0];
     let delta = deflection_fraction * rr[n - 1];
     let mut t = vec![0.0; n];
@@ -200,7 +222,11 @@ pub fn size_mechanical_thickness(
         let sized = if m[i] > 0.0 {
             let k = 6.0 * m[i] * l * l / (modulus * c * delta);
             let (cos2, sin2) = (twist[i].cos().powi(2), twist[i].sin().powi(2));
-            solve_twisted_cubic(cos2, sin2, c * c, k)
+            solve_sized_cubic(
+                shape[i].i_flat * cos2,
+                shape[i].i_edge * c * c * sin2,
+                k,
+            )
         } else {
             0.0
         };
@@ -215,7 +241,8 @@ pub fn size_mechanical_thickness(
     for i in 0..n {
         let c = chords[i].abs().max(1.0e-9);
         let (cos2, sin2) = (twist[i].cos().powi(2), twist[i].sin().powi(2));
-        let i_sec = c.powi(3) * t[i] / 12.0 * sin2 + c * t[i].powi(3) / 12.0 * cos2;
+        let i_sec = shape[i].i_edge * c.powi(3) * t[i] / 12.0 * sin2
+            + shape[i].i_flat * c * t[i].powi(3) / 12.0 * cos2;
         wpp[i] = m[i] / (modulus * i_sec.max(1.0e-30));
     }
     let mut wp = vec![0.0; n];
@@ -253,6 +280,11 @@ mod tests {
         vec![0.0; n]
     }
 
+    /// Rectangle-section shape factors: the model's historical section.
+    fn rect(n: usize) -> Vec<SectionShape> {
+        vec![SectionShape::default(); n]
+    }
+
     /// A small uniform load over a tapered chord, mirroring a converged
     /// design's station data (hub → tip).
     fn web_default_like() -> (Vec<f64>, Vec<f64>, Vec<f64>) {
@@ -284,6 +316,7 @@ mod tests {
             &rr,
             &chords,
             &zero_twist(n),
+            &rect(n),
             &thrust,
             3,
             3.0e9,
@@ -304,7 +337,7 @@ mod tests {
     fn floor_pins_the_tip() {
         let (rr, c, d) = web_default_like();
         let law =
-            size_mechanical_thickness(&rr, &c, &zero_twist(rr.len()), &d, 3, 3.0e9, 0.05, 0.06)
+            size_mechanical_thickness(&rr, &c, &zero_twist(rr.len()), &rect(rr.len()), &d, 3, 3.0e9, 0.05, 0.06)
                 .unwrap();
         // Every station respects the floor, and the tip (zero moment)
         // sits exactly on it.
@@ -329,8 +362,8 @@ mod tests {
     fn stiffness_scaling_is_cubic() {
         let (rr, c, d) = web_default_like();
         let tw = zero_twist(rr.len());
-        let soft = size_mechanical_thickness(&rr, &c, &tw, &d, 3, 2.0e9, 0.05, 0.0).unwrap();
-        let stiff = size_mechanical_thickness(&rr, &c, &tw, &d, 3, 4.0e9, 0.05, 0.0).unwrap();
+        let soft = size_mechanical_thickness(&rr, &c, &tw, &rect(rr.len()), &d, 3, 2.0e9, 0.05, 0.0).unwrap();
+        let stiff = size_mechanical_thickness(&rr, &c, &tw, &rect(rr.len()), &d, 3, 4.0e9, 0.05, 0.0).unwrap();
         // t ∝ E^(-1/3): doubling E shrinks every loaded section by 2^(-1/3).
         // (The tip station has no moment — the closed form sizes it to
         // zero, a knife edge absorbed by the real law's floor — so compare
@@ -345,8 +378,8 @@ mod tests {
             );
         }
         // t ∝ δ^(-1/3) at fixed E: a looser deflection limit thins the blade.
-        let loose = size_mechanical_thickness(&rr, &c, &tw, &d, 3, 3.0e9, 0.10, 0.0).unwrap();
-        let base = size_mechanical_thickness(&rr, &c, &tw, &d, 3, 3.0e9, 0.05, 0.0).unwrap();
+        let loose = size_mechanical_thickness(&rr, &c, &tw, &rect(rr.len()), &d, 3, 3.0e9, 0.10, 0.0).unwrap();
+        let base = size_mechanical_thickness(&rr, &c, &tw, &rect(rr.len()), &d, 3, 3.0e9, 0.05, 0.0).unwrap();
         for (a, b) in base.t_over_c[..n].iter().zip(loose.t_over_c[..n].iter()) {
             assert!(
                 (a / b - 2.0f64.powf(1.0 / 3.0)).abs() < 1.0e-9,
@@ -363,8 +396,8 @@ mod tests {
         // 2^(1/3) thicker.
         let (rr, c, d) = web_default_like();
         let tw = zero_twist(rr.len());
-        let three = size_mechanical_thickness(&rr, &c, &tw, &d, 3, 3.0e9, 0.05, 0.0).unwrap();
-        let six = size_mechanical_thickness(&rr, &c, &tw, &d, 6, 3.0e9, 0.05, 0.0).unwrap();
+        let three = size_mechanical_thickness(&rr, &c, &tw, &rect(rr.len()), &d, 3, 3.0e9, 0.05, 0.0).unwrap();
+        let six = size_mechanical_thickness(&rr, &c, &tw, &rect(rr.len()), &d, 6, 3.0e9, 0.05, 0.0).unwrap();
         let n = three.t_over_c.len() - 1; // skip the zero-moment tip
         for (a, b) in three.t_over_c[..n].iter().zip(six.t_over_c[..n].iter()) {
             assert!((a / b - 2.0f64.powf(1.0 / 3.0)).abs() < 1.0e-9, "{} vs {}", a, b);
@@ -380,8 +413,8 @@ mod tests {
         let tw = zero_twist(rr.len());
         let c1: Vec<f64> = web_default_like().1;
         let c2: Vec<f64> = c1.iter().map(|c| 2.0 * c).collect();
-        let narrow = size_mechanical_thickness(&rr, &c1, &tw, &d, 3, 3.0e9, 0.05, 0.0).unwrap();
-        let wide = size_mechanical_thickness(&rr, &c2, &tw, &d, 3, 3.0e9, 0.05, 0.0).unwrap();
+        let narrow = size_mechanical_thickness(&rr, &c1, &tw, &rect(rr.len()), &d, 3, 3.0e9, 0.05, 0.0).unwrap();
+        let wide = size_mechanical_thickness(&rr, &c2, &tw, &rect(rr.len()), &d, 3, 3.0e9, 0.05, 0.0).unwrap();
         let n = narrow.t_over_c.len() - 1; // skip the zero-moment tip
         for (a, b) in narrow.t_over_c[..n].iter().zip(wide.t_over_c[..n].iter()) {
             assert!(
@@ -419,9 +452,9 @@ mod tests {
             .map(|i| 0.55 - (0.55 - 0.08) * i as f64 / (rr.len() - 1) as f64)
             .collect();
         let flat =
-            size_mechanical_thickness(&rr, &c, &zero_twist(rr.len()), &d, 3, 3.0e9, 0.05, 0.0)
+            size_mechanical_thickness(&rr, &c, &zero_twist(rr.len()), &rect(rr.len()), &d, 3, 3.0e9, 0.05, 0.0)
                 .unwrap();
-        let twisted = size_mechanical_thickness(&rr, &c, &tw, &d, 3, 3.0e9, 0.05, 0.0).unwrap();
+        let twisted = size_mechanical_thickness(&rr, &c, &tw, &rect(rr.len()), &d, 3, 3.0e9, 0.05, 0.0).unwrap();
         let n = flat.t_over_c.len() - 1; // skip the zero-moment tip
         for i in 0..n {
             assert!(
@@ -453,7 +486,7 @@ mod tests {
         let mut prev = vec![f64::INFINITY; rr.len()];
         for deg in [0.0_f64, 5.0, 15.0, 30.0, 60.0, 85.0] {
             let tw = vec![deg.to_radians(); rr.len()];
-            let law = size_mechanical_thickness(&rr, &c, &tw, &d, 3, 3.0e9, 0.05, 0.0).unwrap();
+            let law = size_mechanical_thickness(&rr, &c, &tw, &rect(rr.len()), &d, 3, 3.0e9, 0.05, 0.0).unwrap();
             for (i, tc) in law.t_over_c.iter().enumerate().take(law.t_over_c.len() - 1) {
                 assert!(
                     *tc <= prev[i] + 1.0e-12,
@@ -478,8 +511,8 @@ mod tests {
         let c1: Vec<f64> = web_default_like().1;
         let c2: Vec<f64> = c1.iter().map(|c| 2.0 * c).collect();
         let tw = vec![85.0_f64.to_radians(); rr.len()];
-        let n1 = size_mechanical_thickness(&rr, &c1, &tw, &d, 3, 3.0e9, 0.05, 0.0).unwrap();
-        let n2 = size_mechanical_thickness(&rr, &c2, &tw, &d, 3, 3.0e9, 0.05, 0.0).unwrap();
+        let n1 = size_mechanical_thickness(&rr, &c1, &tw, &rect(rr.len()), &d, 3, 3.0e9, 0.05, 0.0).unwrap();
+        let n2 = size_mechanical_thickness(&rr, &c2, &tw, &rect(rr.len()), &d, 3, 3.0e9, 0.05, 0.0).unwrap();
         let n = n1.t_over_c.len() - 1; // skip the zero-moment tip
         for i in 0..n {
             // The cos²θ term never vanishes exactly, so the ratio is close
@@ -498,11 +531,115 @@ mod tests {
         // closed form exactly.
         let (rr, c, d) = web_default_like();
         let tw0 = zero_twist(rr.len());
-        let base = size_mechanical_thickness(&rr, &c, &tw0, &d, 3, 3.0e9, 0.05, 0.0).unwrap();
+        let base = size_mechanical_thickness(&rr, &c, &tw0, &rect(rr.len()), &d, 3, 3.0e9, 0.05, 0.0).unwrap();
         let tw_full = vec![2.0 * std::f64::consts::PI; rr.len()];
-        let full = size_mechanical_thickness(&rr, &c, &tw_full, &d, 3, 3.0e9, 0.05, 0.0).unwrap();
+        let full = size_mechanical_thickness(&rr, &c, &tw_full, &rect(rr.len()), &d, 3, 3.0e9, 0.05, 0.0).unwrap();
         for (a, b) in base.t_over_c.iter().zip(full.t_over_c.iter()) {
             assert!((a - b).abs() < 1.0e-12, "{} vs {}", a, b);
+        }
+    }
+
+    #[test]
+    fn real_section_factors_thicken_the_untwisted_blade() {
+        // A real symmetric section is ≈ 0.47x as stiff as its enclosing
+        // rectangle, so the untwisted sizing is t = (K/i_flat)^(1/3):
+        // 29% thicker than the rectangle model at i_flat = 0.473.
+        let (rr, c, d) = web_default_like();
+        let tw = zero_twist(rr.len());
+        let rect_shape = rect(rr.len());
+        let real_shape: Vec<SectionShape> = (0..rr.len())
+            .map(|_| SectionShape {
+                i_flat: 0.473,
+                i_edge: 0.454,
+            })
+            .collect();
+        let rect_law =
+            size_mechanical_thickness(&rr, &c, &tw, &rect_shape, &d, 3, 3.0e9, 0.05, 0.0)
+                .unwrap();
+        let real_law =
+            size_mechanical_thickness(&rr, &c, &tw, &real_shape, &d, 3, 3.0e9, 0.05, 0.0)
+                .unwrap();
+        let n = rect_law.t_over_c.len() - 1; // skip the zero-moment tip
+        for i in 0..n {
+            assert!(
+                (real_law.t_over_c[i] / rect_law.t_over_c[i] - 0.473f64.powf(-1.0 / 3.0)).abs()
+                    < 1.0e-9,
+                "station {}: {} vs {}",
+                i,
+                real_law.t_over_c[i],
+                rect_law.t_over_c[i]
+            );
+        }
+    }
+
+    #[test]
+    fn cambered_sections_size_thinner_than_flat() {
+        // A cambered (curved) section is stiffer than a flat one: its
+        // higher i_flat (0.622 vs 0.473 for a 2%-cambered vs symmetric
+        // NACA at 12% t/c) sizes it t ∝ i_flat^(-1/3) thinner.
+        let (rr, c, d) = web_default_like();
+        let tw = zero_twist(rr.len());
+        let flat: Vec<SectionShape> = (0..rr.len())
+            .map(|_| SectionShape {
+                i_flat: 0.473,
+                i_edge: 0.454,
+            })
+            .collect();
+        let curved: Vec<SectionShape> = (0..rr.len())
+            .map(|_| SectionShape {
+                i_flat: 0.622,
+                i_edge: 0.454,
+            })
+            .collect();
+        let flat_law =
+            size_mechanical_thickness(&rr, &c, &tw, &flat, &d, 3, 3.0e9, 0.05, 0.0).unwrap();
+        let curved_law =
+            size_mechanical_thickness(&rr, &c, &tw, &curved, &d, 3, 3.0e9, 0.05, 0.0).unwrap();
+        let n = flat_law.t_over_c.len() - 1;
+        for i in 0..n {
+            let want = (0.473_f64 / 0.622).powf(1.0 / 3.0);
+            assert!(
+                (curved_law.t_over_c[i] / flat_law.t_over_c[i] - want).abs() < 1.0e-9,
+                "station {}: {} vs {}",
+                i,
+                curved_law.t_over_c[i],
+                flat_law.t_over_c[i]
+            );
+        }
+    }
+
+    #[test]
+    fn edge_factor_scales_the_chord_projection() {
+        // The edgewise shape factor only matters where the twist exposes
+        // the chord to the load: at 85° the sizing is nearly the linear
+        // term t ≈ K/(i_edge·c²·sin²θ), so i_edge 0.454 vs 1.0 almost
+        // exactly doubles the sized thickness.
+        let (rr, c, d) = web_default_like();
+        let tw = vec![85.0_f64.to_radians(); rr.len()];
+        let s1: Vec<SectionShape> = (0..rr.len())
+            .map(|_| SectionShape {
+                i_flat: 0.473,
+                i_edge: 1.0,
+            })
+            .collect();
+        let s2: Vec<SectionShape> = (0..rr.len())
+            .map(|_| SectionShape {
+                i_flat: 0.473,
+                i_edge: 0.454,
+            })
+            .collect();
+        let stiff =
+            size_mechanical_thickness(&rr, &c, &tw, &s1, &d, 3, 3.0e9, 0.05, 0.0).unwrap();
+        let soft = size_mechanical_thickness(&rr, &c, &tw, &s2, &d, 3, 3.0e9, 0.05, 0.0).unwrap();
+        let n = stiff.t_over_c.len() - 1;
+        for i in 0..n {
+            assert!(
+                (soft.t_over_c[i] / stiff.t_over_c[i] - 1.0 / 0.454).abs() < 1.0e-3,
+                "station {}: {} vs {}",
+                i,
+                soft.t_over_c[i],
+                stiff.t_over_c[i]
+            );
         }
     }
 
@@ -511,13 +648,13 @@ mod tests {
         let (rr, c, _) = web_default_like();
         let tw = zero_twist(rr.len());
         let d = vec![0.0; rr.len()]; // zero load
-        assert!(size_mechanical_thickness(&rr, &c, &tw, &d, 3, 3.0e9, 0.05, 0.06).is_none());
+        assert!(size_mechanical_thickness(&rr, &c, &tw, &rect(rr.len()), &d, 3, 3.0e9, 0.05, 0.06).is_none());
         assert!(
-            size_mechanical_thickness(&rr[..1], &c[..1], &tw[..1], &[1.0], 3, 3.0e9, 0.05, 0.06)
+            size_mechanical_thickness(&rr[..1], &c[..1], &tw[..1], &rect(1), &[1.0], 3, 3.0e9, 0.05, 0.06)
                 .is_none()
         );
         assert!(
-            size_mechanical_thickness(&rr, &c, &tw, &web_default_like().2, 0, 3.0e9, 0.05, 0.06)
+            size_mechanical_thickness(&rr, &c, &tw, &rect(rr.len()), &web_default_like().2, 0, 3.0e9, 0.05, 0.06)
                 .is_none()
         );
         assert!(
@@ -525,6 +662,7 @@ mod tests {
                 &rr,
                 &c,
                 &tw,
+                &rect(rr.len()),
                 &web_default_like().2,
                 3,
                 -3.0e9,
@@ -534,22 +672,22 @@ mod tests {
             .is_none()
         );
         assert!(
-            size_mechanical_thickness(&rr, &c, &tw, &web_default_like().2, 3, 3.0e9, 0.0, 0.06)
+            size_mechanical_thickness(&rr, &c, &tw, &rect(rr.len()), &web_default_like().2, 3, 3.0e9, 0.0, 0.06)
                 .is_none()
         );
         assert!(
-            size_mechanical_thickness(&rr, &c, &tw, &web_default_like().2, 3, 3.0e9, 0.05, 1.5)
+            size_mechanical_thickness(&rr, &c, &tw, &rect(rr.len()), &web_default_like().2, 3, 3.0e9, 0.05, 1.5)
                 .is_none()
         );
         // Ragged input: a twist array of the wrong length.
         assert!(
-            size_mechanical_thickness(&rr, &c[..5], &tw, &web_default_like().2, 3, 3.0e9, 0.05, 0.06)
+            size_mechanical_thickness(&rr, &c[..5], &tw, &rect(rr.len()), &web_default_like().2, 3, 3.0e9, 0.05, 0.06)
                 .is_none()
         );
         // Non-finite twist.
         let bad_tw = vec![f64::NAN; rr.len()];
         assert!(
-            size_mechanical_thickness(&rr, &c, &bad_tw, &web_default_like().2, 3, 3.0e9, 0.05, 0.06)
+            size_mechanical_thickness(&rr, &c, &bad_tw, &rect(rr.len()), &web_default_like().2, 3, 3.0e9, 0.05, 0.06)
                 .is_none()
         );
     }
@@ -558,7 +696,7 @@ mod tests {
     fn interp_reproduces_the_law() {
         let (rr, c, d) = web_default_like();
         let law =
-            size_mechanical_thickness(&rr, &c, &zero_twist(rr.len()), &d, 3, 3.0e9, 0.05, 0.06)
+            size_mechanical_thickness(&rr, &c, &zero_twist(rr.len()), &rect(rr.len()), &d, 3, 3.0e9, 0.05, 0.06)
                 .unwrap();
         let interp = law_interpolant(&law);
         for (r, tc) in law.rr.iter().zip(law.t_over_c.iter()) {
