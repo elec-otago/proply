@@ -1,5 +1,57 @@
 # CHANGES
 
+## 2026-08-30 — Mechanical airfoil-thickness law (beam deflection)
+
+### proply-rs design loop
+
+The TODO's second item: a mechanical mechanism for airfoil thickness —
+"treating the blade as a beam and approximating deflection … the
+thickness should be chosen to keep the blade shape from deforming too
+much … the hub thickness should not be involved".  Opt-in via
+`mech_thickness: true` in the design JSON (or `--mech-thickness`); the
+geometric power law stays the default.
+
+- **Beam model** (new `thickness.rs`): the blade is a cantilever beam
+  anchored at the hub; the converged design's station loads (annular
+  element thrusts, divided by panel width and blade count) form the load
+  per unit span `q(r)` in the z direction, and the bending moment
+  `M(r) = ∫ q(s)(s − r) ds` is integrated from the tip inwards.  The
+  thickness is laid out for a constant-curvature bend with the tip
+  deflection closed at the allowed value — closed form
+  `t(r) = (6 M(r) L² / (E c(r) δ))^(1/3)` (`L = R − r_hub`,
+  `δ = deflection_fraction · R`, rectangular section `I = c t³/12`) —
+  floored at a minimum fraction of the local chord (default 0.06, the
+  thinnest ARA-D table: the tip, where `M → 0`, would otherwise taper to
+  a knife edge).  The chord enters the stiffness (`I ∝ c t³`, so a wider
+  blade is stiffer), and the twist enters through the design's chord
+  distribution.  The **hub thickness (`hub_depth`) is deliberately not
+  involved** — the airfoil thickness follows the load, not the hub
+  geometry.
+- **Wiring** (`prop.rs`, `design_parameters.rs`, `pipeline.rs`,
+  `main.rs`): `DesignParameters` gains `mech_thickness`, `modulus`
+  (elastic modulus, Pa, unit-suffixed strings `"3 GPa"`; default
+  3 GPa = moulded nylon/ABS), `deflection_fraction` (allowed tip
+  deflection as a fraction of R, default 0.05) and `thickness_floor`
+  (fraction of local chord, default 0.06).  The pipeline runs the design
+  once for loads, sizes the thickness law (radius → t/c, so the sized
+  section scales exactly with the final chord), and re-runs the design
+  on that law so the reported operating point matches the mechanically
+  sized blade.  The law is passed read-only into the worker threads' foil
+  construction; lifting-line designs take their station loads from one
+  extra circulation solve of the final geometry.  The YAML summary names
+  the law (`thickness_law: geometric|mechanical`) and reports the
+  predicted tip deflection (`tip_deflection_mm`).
+- **Web demo** (`forms.js`, `index.html`): the Propeller Specifications
+  tab gains a **Mechanical thickness (beam sizing)** checkbox; boolean
+  fields are a new form type, composing `mech_thickness: true` into the
+  JSON (unchecked drops the key, so the Rust default applies).
+
+On the web-default design (68 mm, 3 blades, plate polars) the mechanical
+law sizes root t/c ≈ 0.28 (vs 0.71 by the power law — by the beam model
+the old law is over-thick at the root), holding the predicted tip
+deflection at 3.38 mm of the 3.40 mm allowed (5% of R), versus 4.9 mm a
+blade built to the geometric law is predicted to deflect.
+
 ## 2026-08-30 — ARA-D foils selectable in the web demo
 
 ### proply-rs web demo

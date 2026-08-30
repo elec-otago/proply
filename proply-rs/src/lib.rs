@@ -22,6 +22,7 @@ pub mod prop;
 pub mod simulator;
 pub mod smooth;
 pub mod step_out;
+pub mod thickness;
 pub mod units;
 pub mod yaml_out;
 

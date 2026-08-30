@@ -58,3 +58,30 @@ fn pipeline_produces_step_and_yaml() {
     // A feasible design converges onto the operating point without warning.
     assert!(outcome.warning.is_none(), "warning: {:?}", outcome.warning);
 }
+
+#[test]
+fn pipeline_mechanical_thickness_design() {
+    // The mechanical thickness law: the design runs once for loads, sizes
+    // the thickness from them, then re-runs on the sized law.  With plate
+    // polars the geometry does not feed back into the loads, so the
+    // operating point is unchanged, but the sections carry the mechanical
+    // (not the geometric power-law) thickness.
+    let mut param = fast_params();
+    param.mech_thickness = true;
+    let store: Arc<Mutex<PolarStore>> =
+        Arc::new(Mutex::new(PolarStore::in_memory()));
+    let outcome = pipeline::run_design(&param, store).expect("design converges");
+    assert!(outcome.thrust.is_finite() && outcome.thrust > 0.0, "thrust");
+    assert!(outcome.torque.is_finite() && outcome.torque > 0.0, "torque");
+    assert!(outcome.warning.is_none(), "warning: {:?}", outcome.warning);
+    assert!(
+        outcome.yaml.contains("thickness_law: mechanical"),
+        "summary does not report the mechanical law:\n{}",
+        outcome.yaml
+    );
+    assert!(
+        outcome.yaml.contains("tip_deflection_mm:"),
+        "summary does not report the predicted tip deflection:\n{}",
+        outcome.yaml
+    );
+}

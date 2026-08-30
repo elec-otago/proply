@@ -3,15 +3,17 @@
 //!
 //! A quantity field accepts a bare JSON number — meaning exactly what it
 //! has always meant (metres for lengths, newtons for thrust, millimetres
-//! for `trailing_edge`) — or a quoted string carrying a unit suffix:
-//! `"5mm"`, `"6 mm"`, `"6.8cm"`, `"500g"`, `"0.5kg"`, `"3.2N"`.  JSON has
-//! no unquoted `5mm` scalar, so suffixed values must be strings.
+//! for `trailing_edge`, pascals for `modulus`) — or a quoted string
+//! carrying a unit suffix: `"5mm"`, `"6 mm"`, `"6.8cm"`, `"500g"`,
+//! `"0.5kg"`, `"3.2N"`, `"3 GPa"`.  JSON has no unquoted `5mm` scalar, so
+//! suffixed values must be strings.
 //!
 //! Length units: `m`, `cm`, `mm`.  Force units: `N`, `kg` (kilogram-force,
-//! g0 = 9.80665 N), `g` (gram-force).  Units match case-insensitively and
-//! may be separated from the number by whitespace.  A string without a
-//! unit uses the field's bare-number unit, and a unit from the wrong kind
-//! (`"tip_chord": "500g"`) is an error.
+//! g0 = 9.80665 N), `g` (gram-force).  Pressure units: `Pa`, `kPa`, `MPa`,
+//! `GPa`.  Units match case-insensitively and may be separated from the
+//! number by whitespace.  A string without a unit uses the field's
+//! bare-number unit, and a unit from the wrong kind (`"tip_chord":
+//! "500g"`) is an error.
 
 use serde::Deserialize;
 use serde::Deserializer;
@@ -63,6 +65,17 @@ fn force_scale(unit: &str) -> Option<f64> {
     }
 }
 
+/// Scale factor of a pressure unit to pascals.
+fn pressure_scale(unit: &str) -> Option<f64> {
+    match unit.to_ascii_lowercase().as_str() {
+        "pa" => Some(1.0),
+        "kpa" => Some(1.0e3),
+        "mpa" => Some(1.0e6),
+        "gpa" => Some(1.0e9),
+        _ => None,
+    }
+}
+
 /// Parse a length for a field whose storage unit is `storage_m` metres
 /// (1.0 for metre fields, 1e-3 for the millimetre `trailing_edge`).  A
 /// bare number or unitless string is already in the storage unit and
@@ -104,6 +117,27 @@ fn force(value: &serde_json::Value) -> Result<f64, String> {
     }
 }
 
+/// Parse a pressure whose bare unit is pascals (the `modulus` field).
+fn pressure(value: &serde_json::Value) -> Result<f64, String> {
+    match value {
+        serde_json::Value::Number(n) => Ok(n.as_f64().unwrap_or(f64::NAN)),
+        serde_json::Value::String(s) => {
+            let (v, unit) = split_quantity(s)?;
+            match unit {
+                None => Ok(v),
+                Some(u) => pressure_scale(u)
+                    .map(|scale| v * scale)
+                    .ok_or_else(|| {
+                        format!("invalid quantity '{s}' for a pressure (expected Pa, kPa, MPa, GPa)")
+                    }),
+            }
+        }
+        other => Err(format!(
+            "invalid quantity '{other}' (expected a number or a unit-suffixed string)"
+        )),
+    }
+}
+
 /// `deserialize_with` helper: a length in metres (bare number = metres).
 pub fn de_length_m<'de, D>(d: D) -> Result<f64, D::Error>
 where
@@ -130,6 +164,27 @@ where
 {
     let v = serde_json::Value::deserialize(d)?;
     force(&v).map_err(serde::de::Error::custom)
+}
+
+/// `deserialize_with` helper: a pressure in pascals (bare number = Pa).
+pub fn de_pressure_pa<'de, D>(d: D) -> Result<f64, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let v = serde_json::Value::deserialize(d)?;
+    pressure(&v).map_err(serde::de::Error::custom)
+}
+
+/// Parse a pressure value from a CLI argument (number or unit-suffixed
+/// string), for options like `--modulus`.
+pub fn parse_pressure(text: &str) -> Result<f64, String> {
+    let (v, unit) = split_quantity(text)?;
+    match unit {
+        None => Ok(v),
+        Some(u) => pressure_scale(u)
+            .map(|scale| v * scale)
+            .ok_or_else(|| format!("invalid quantity '{text}' for a pressure (expected Pa, kPa, MPa, GPa)")),
+    }
 }
 
 /// `deserialize_with` helper: an optional length in metres (missing or
@@ -178,6 +233,24 @@ mod tests {
         assert!((force(&serde_json::json!("0.5kg")).unwrap() - 0.5 * G0).abs() < 1e-12);
         assert!((force(&serde_json::json!("500g")).unwrap() - 0.5 * G0).abs() < 1e-9);
         assert!((force(&serde_json::json!("2KG")).unwrap() - 2.0 * G0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn pressures_in_pascals() {
+        assert_eq!(pressure(&serde_json::json!(3.0e9)).unwrap(), 3.0e9);
+        assert_eq!(pressure(&serde_json::json!("3e9")).unwrap(), 3.0e9);
+        assert_eq!(pressure(&serde_json::json!("3GPa")).unwrap(), 3.0e9);
+        assert_eq!(pressure(&serde_json::json!("3 GPa")).unwrap(), 3.0e9);
+        assert_eq!(pressure(&serde_json::json!("3000 MPa")).unwrap(), 3.0e9);
+        assert_eq!(pressure(&serde_json::json!("2.5kpa")).unwrap(), 2500.0);
+        assert_eq!(pressure(&serde_json::json!("1Pa")).unwrap(), 1.0);
+        // A force unit is not a pressure.
+        let err = pressure(&serde_json::json!("500g")).unwrap_err();
+        assert!(err.contains("Pa, kPa, MPa, GPa"), "{}", err);
+        // The CLI parser follows the same rules.
+        assert_eq!(parse_pressure("3 GPa").unwrap(), 3.0e9);
+        assert_eq!(parse_pressure("3e9").unwrap(), 3.0e9);
+        assert!(parse_pressure("5 furlongs").is_err());
     }
 
     #[test]

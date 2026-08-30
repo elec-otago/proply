@@ -58,7 +58,15 @@ pub fn run_design(
     // so the converged design is the maximum-efficiency design at that
     // operating point.  When the geometry cannot absorb the demanded torque,
     // the result carries a warning describing the closest design.
-    let res = p.design_for_torque(optimum_rpm, optimum_torque, param.thrust, param.ar);
+    let mut res = p.design_for_torque(optimum_rpm, optimum_torque, param.thrust, param.ar);
+
+    // The mechanical thickness law is sized on the converged design's
+    // station loads (the blade as a cantilever beam under its own thrust),
+    // and the design then re-runs on that law so the reported operating
+    // point and geometry match the mechanically sized blade.
+    if param.mech_thickness && p.size_mechanical_thickness() {
+        res = p.design_for_torque(optimum_rpm, optimum_torque, param.thrust, param.ar);
+    }
     let (q, t) = (res.torque, res.thrust);
 
     let step = step_out::write_prop(&mut p, param.n)?;

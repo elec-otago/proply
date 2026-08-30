@@ -89,28 +89,34 @@ fn foil_thickness(param: &DesignParameters, r: f64) -> f64 {
     s + k * r.powf(p)
 }
 
-/// The foil of one station: the thickness law at radius `r`, chord `c`,
-/// camber fraction `camber` and the parameter trailing edge.  The family is
+/// The foil of one station: the thickness law at radius `r` (the geometric
+/// power law by default, or the mechanical [`crate::thickness`] law when
+/// `law` is given — it carries thickness/chord directly, so the chord
+/// scaling never distorts the sized section), chord `c`, camber fraction
+/// `camber` and the parameter trailing edge.  The family is
 /// [`DesignParameters::arad`] / [`DesignParameters::cst`]: the default NACA
 /// 4-series, a CST (Kulfan) section — the default 18-parameter shape
 /// re-thicknessed and cambered to the same laws — or the table-driven
 /// ARA-D family, which carries its own camber (the `camber` argument does
 /// not apply, as in the Python `ARADProp`).  Plain data (clonable,
 /// sendable) so worker threads can build their own.
-fn station_foil(param: &DesignParameters, r: f64, c: f64, camber: f64) -> FoilFamily {
-    let thickness = foil_thickness(param, r);
+fn station_foil(param: &DesignParameters, law: Option<&Pchip>, r: f64, c: f64, camber: f64) -> FoilFamily {
+    let t_frac = match law {
+        Some(s) => s.eval(r).clamp(0.0, 1.0),
+        None => foil_thickness(param, r) / c,
+    };
     if param.arad {
-        let mut f = Arad::new(c, thickness / c);
+        let mut f = Arad::new(c, t_frac);
         f.base.set_trailing_edge(param.trailing_edge / 1000.0);
         FoilFamily::Arad(f)
     } else if param.cst {
         let mut f = Cst::default(c);
-        f.set_thickness(thickness / c);
+        f.set_thickness(t_frac);
         f.set_camber(camber);
         f.set_trailing_edge(param.trailing_edge / 1000.0);
         FoilFamily::Cst(f)
     } else {
-        let mut f = Naca4::new(c, thickness / c, camber, 0.4);
+        let mut f = Naca4::new(c, t_frac, camber, 0.4);
         f.base.set_trailing_edge(param.trailing_edge / 1000.0);
         FoilFamily::Naca4(f)
     }
@@ -155,6 +161,13 @@ pub struct Prop {
     scimitar_interpolator: Option<Pchip>,
     max_depth_interpolator: Option<(Vec<f64>, Vec<f64>)>,
     plate_mode: bool,
+    /// The mechanical thickness law (radius → thickness/chord) installed by
+    /// [`Prop::size_mechanical_thickness`]; `None` keeps the geometric
+    /// power law ([`foil_thickness`]).
+    pub mech_thickness_law: Option<Pchip>,
+    /// Predicted tip deflection of the sized mechanical law (m),
+    /// reported in the design summary.
+    pub mech_tip_deflection: Option<f64>,
 }
 
 impl Prop {
@@ -170,6 +183,8 @@ impl Prop {
             scimitar_interpolator: None,
             max_depth_interpolator: None,
             plate_mode: false,
+            mech_thickness_law: None,
+            mech_tip_deflection: None,
         }
     }
 
@@ -187,6 +202,7 @@ impl Prop {
 
         let foil = Rc::new(RefCell::new(station_foil(
             &self.param,
+            self.mech_thickness_law.as_ref(),
             r,
             x_limit,
             self.param.camber.unwrap_or(0.0),
@@ -226,7 +242,13 @@ impl Prop {
         c: f64,
         camber: f64,
     ) -> BladeElement<FoilFamily> {
-        let foil = Rc::new(RefCell::new(station_foil(&self.param, r, c, camber)));
+        let foil = Rc::new(RefCell::new(station_foil(
+            &self.param,
+            self.mech_thickness_law.as_ref(),
+            r,
+            c,
+            camber,
+        )));
 
         let mut be = BladeElement::new(
             r,
@@ -263,11 +285,64 @@ impl Prop {
         self.scimitar_interpolator.as_ref().unwrap().eval(r)
     }
 
-    /// Allowed foil thickness (m) as a function of radius: a p = 0.3 power
-    /// law between the hub depth and a tenth of it at the tip.  See
-    /// [`foil_thickness`] (the parameter form the design passes use).
+    /// The *geometric* thickness law's foil thickness (m) as a function of
+    /// radius: a p = 0.3 power law between the hub depth and a tenth of it
+    /// at the tip.  See [`foil_thickness`] (the parameter form the design
+    /// passes use).  This is the fallback law; when the mechanical law is
+    /// active the design loop instead evaluates
+    /// [`Prop::mech_thickness_law`] (a radius → thickness/chord curve).
     pub fn get_foil_thickness(&self, r: f64) -> f64 {
         foil_thickness(&self.param, r)
+    }
+
+    /// Size the blade thickness from the converged design's station loads
+    /// ([`crate::thickness::size_mechanical_thickness`]) and install the
+    /// resulting radius → thickness/chord curve as the design's thickness
+    /// law.  The hub thickness is deliberately not involved — the airfoil
+    /// thickness follows the beam-deflection sizing, not the hub geometry.
+    /// Returns `false` (and leaves the geometric law active) when the
+    /// design has nothing to size: no stations, or no load on the blade.
+    pub fn size_mechanical_thickness(&mut self) -> bool {
+        if self.blade_elements.len() < 2 {
+            return false;
+        }
+        let mut rows: Vec<(f64, f64, f64)> = self
+            .blade_elements
+            .iter()
+            .map(|be| {
+                let c = be.foil.borrow().chord();
+                let t = be.thrust_n.unwrap_or_else(|| be.d_t());
+                (be.r, c, t)
+            })
+            .collect();
+        // The elements are hub → tip, but sort defensively anyway.
+        rows.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        let rr: Vec<f64> = rows.iter().map(|r| r.0).collect();
+        let chords: Vec<f64> = rows.iter().map(|r| r.1).collect();
+        let thrust: Vec<f64> = rows.iter().map(|r| r.2).collect();
+        let Some(law) = crate::thickness::size_mechanical_thickness(
+            &rr,
+            &chords,
+            &thrust,
+            self.n_blades,
+            self.param.modulus,
+            self.param.deflection_fraction,
+            self.param.thickness_floor,
+        ) else {
+            eprintln!(
+                "proply: mechanical thickness could not be sized (no station loads) — keeping the geometric law"
+            );
+            return false;
+        };
+        println!(
+            "Mechanical thickness: sized from the station loads — predicted tip deflection {:.3} mm (allowed {:.3} mm, E = {} Pa)",
+            law.tip_deflection * 1000.0,
+            law.deflection_limit * 1000.0,
+            self.param.modulus
+        );
+        self.mech_thickness_law = Some(crate::thickness::law_interpolant(&law));
+        self.mech_tip_deflection = Some(law.tip_deflection);
+        true
     }
 
     /// Allowed depth of the prop as a function of radius (m), from the
@@ -768,10 +843,13 @@ impl Prop {
     /// warm-chained Nelder-Mead starts.  Self-contained (own elements and
     /// warm state, parameter-only geometry laws) so the camber candidates can
     /// run in parallel on scoped threads; returns the measured geometry, or
-    /// `None` when no thrust match was found.
+    /// `None` when no thrust match was found.  `law` is the active thickness
+    /// law (the mechanical radius → t/c curve, or `None` for the geometric
+    /// power law); it is shared read-only, so the passes stay independent.
     #[allow(clippy::too_many_arguments)]
     fn run_design_pass(
         param: &DesignParameters,
+        law: Option<&Pchip>,
         n_blades: usize,
         plate_mode: bool,
         store: &Arc<Mutex<PolarStore>>,
@@ -799,7 +877,8 @@ impl Prop {
         for (i, &r) in rr.iter().enumerate() {
             let phi0 = u_0.atan2(omega * r).max(1.0e-3);
             let c = chord_law(param, n_blades, r, 0.0, s_cap);
-            let foil = Rc::new(RefCell::new(station_foil(param, r, c, camber_dist[i])));
+            let foil =
+                Rc::new(RefCell::new(station_foil(param, law, r, c, camber_dist[i])));
             let mut be =
                 BladeElement::new(r, radial_res, foil, phi0 + 0.12, rpm, u_0, store.clone());
             if plate_mode {
@@ -1149,7 +1228,7 @@ impl Prop {
                 .map(|&r| {
                     let vv = ((u_0 * u_0) + (omega * r).powi(2)).sqrt();
                     let c = chord_law(&self.param, n_blades, r, 0.0, s_cap);
-                    (station_foil(&self.param, r, c, m_c), vv)
+                    (station_foil(&self.param, self.mech_thickness_law.as_ref(), r, c, m_c), vv)
                 })
                 .collect();
             for (f, vv) in &row {
@@ -1217,7 +1296,7 @@ impl Prop {
             for (i, &r) in rr.iter().enumerate() {
                 let vv = ((u_0 * u_0) + (omega * r).powi(2)).sqrt();
                 let c = chord_law(&self.param, n_blades, r, 0.0, s_cap);
-                let f = station_foil(&self.param, r, c, m_dist[i]);
+                let f = station_foil(&self.param, self.mech_thickness_law.as_ref(), r, c, m_dist[i]);
                 let key = (f.hash(), f.reynolds(vv).to_bits());
                 if seen.insert(key) {
                     work.push((f, vv));
@@ -1244,6 +1323,7 @@ impl Prop {
         // (`q + 50*err` — the same one the optimizer minimises) wins, so
         // camber competes with chord shape on equal terms.
         let param = &self.param;
+        let law = self.mech_thickness_law.as_ref();
         let store = self.store.clone();
         let radial_res = self.radial_resolution;
         let plate_mode = self.plate_mode;
@@ -1273,6 +1353,7 @@ impl Prop {
                         s.spawn(move || {
                             Self::run_design_pass(
                                 param,
+                                law,
                                 n_blades,
                                 plate_mode,
                                 store,
@@ -1308,6 +1389,7 @@ impl Prop {
             for (label, camber_dist, alpha_base) in seeds {
                 if let Some(o) = Self::run_design_pass(
                     param,
+                    law,
                     n_blades,
                     plate_mode,
                     &store,
@@ -1358,6 +1440,7 @@ impl Prop {
             let c = chord_law(&self.param, n_blades, ri, 0.0, s_cap);
             let foil = Rc::new(RefCell::new(station_foil(
                 &self.param,
+                self.mech_thickness_law.as_ref(),
                 ri,
                 c,
                 win.camber_dist[i],
@@ -1387,6 +1470,36 @@ impl Prop {
                 win.chords[i]
             );
             elements.push(be);
+        }
+        // The mechanical-thickness sizing needs the station loads, and the
+        // lifting-line elements carry no induction (their loads come from
+        // the circulation solve, not a BEM state).  For a mechanical-law
+        // design take the annular element thrusts from one converged solve
+        // of the final geometry and store them on the elements.
+        if self.param.mech_thickness {
+            let stations: Vec<lift_line::Station> = (0..m)
+                .map(|i| lift_line::Station {
+                    r: rr[i],
+                    c: win.chords[i],
+                    alpha: (win.alpha_base[i] + win.da)
+                        .clamp(-lift_line::ALPHA_MAX, lift_line::ALPHA_MAX),
+                })
+                .collect();
+            let fs_refs: Vec<&FoilSimulator<FoilFamily>> =
+                elements.iter().map(|be| &be.fs).collect();
+            let seed = vec![0.0; m];
+            let res = lift_line::solve_with_influence(
+                &stations,
+                self.n_blades,
+                omega,
+                u_0,
+                &fs_refs,
+                &seed,
+                &infl,
+            );
+            for (i, be) in elements.iter_mut().enumerate() {
+                be.thrust_n = Some(res.d_thrust[i]);
+            }
         }
         self.blade_elements = elements;
         (win.q, win.t)
@@ -1500,6 +1613,86 @@ mod tests {
             "tip {}",
             t_tip
         );
+    }
+
+    #[test]
+    fn mechanical_thickness_law_is_sized_from_the_loads() {
+        // A synthetic converged blade (fixed induction, as a BEM design
+        // leaves behind): the sizing installs a radius -> t/c law, and the
+        // hub depth does not influence it — the load, chord and stiffness
+        // decide, not the hub geometry (the TODO's requirement).
+        let make = |hub_depth: f64| -> Prop {
+            let param = DesignParameters {
+                hub_depth,
+                ..Default::default()
+            };
+            let store = Arc::new(Mutex::new(PolarStore::load("/nonexistent/cache.json")));
+            let mut p = Prop::new(param, 0.002, store);
+            p.n_blades = 2;
+            p.set_plate_mode(true);
+            for r in [0.006, 0.02, 0.04, 0.06, 0.0625] {
+                let foil = Rc::new(RefCell::new(FoilFamily::Naca4(crate::foil::Naca4::new(
+                    0.012, 0.12, 0.06, 0.4,
+                ))));
+                let mut be = BladeElement::new(r, 0.002, foil, 0.4, 10000.0, 1.0, p.store.clone());
+                // A believable induction profile: dv falling toward the tip.
+                be.set_bem(6.0 * (1.0 - r / 0.0625) + 1.0, 0.05);
+                p.blade_elements.push(be);
+            }
+            p
+        };
+        let mut p1 = make(0.006);
+        assert!(p1.size_mechanical_thickness());
+        assert!(p1.mech_thickness_law.is_some());
+        let tip_def = p1.mech_tip_deflection.unwrap();
+        // The sizing closes on the allowed deflection (5% of R by default),
+        // so the predicted deflection is at most the limit.
+        assert!(tip_def <= 0.05 * p1.param.radius * (1.0 + 1.0e-9), "tip {tip_def}");
+
+        // The mechanical law is installed for the design loop: the stations
+        // whose elements are rebuilt with it carry exactly the sized t/c.
+        let law = p1.mech_thickness_law.as_ref().unwrap();
+        for r in [0.006, 0.02, 0.04, 0.06, 0.0625] {
+            let tc = law.eval(r);
+            assert!((0.06 - 1.0e-12..=1.0).contains(&tc), "t/c {tc} outside law range");
+        }
+
+        // hub_depth is not involved: a different hub depth sizes the same
+        // (radius, chord, load) blade identically.
+        let mut p2 = make(0.012);
+        assert!(p2.size_mechanical_thickness());
+        let law2 = p2.mech_thickness_law.unwrap();
+        for r in [0.006, 0.02, 0.04, 0.06, 0.0625] {
+            assert!(
+                (law.eval(r) - law2.eval(r)).abs() < 1.0e-12,
+                "hub_depth leaked: {} vs {} at {}",
+                law.eval(r),
+                law2.eval(r),
+                r
+            );
+        }
+    }
+
+    #[test]
+    fn mechanical_thickness_nothing_to_size_keeps_geometric_law() {
+        let mut p = test_prop();
+        p.set_plate_mode(true);
+        // No blade elements at all: sizing is a no-op, the geometric law
+        // stays active.
+        assert!(!p.size_mechanical_thickness());
+        assert!(p.mech_thickness_law.is_none());
+
+        // Elements with zero induction (lifting-line geometry before its
+        // loads are stored): zero thrust, nothing to size.
+        for r in [0.02, 0.04, 0.06] {
+            let foil = Rc::new(RefCell::new(FoilFamily::Naca4(crate::foil::Naca4::new(
+                0.012, 0.12, 0.06, 0.4,
+            ))));
+            let be = BladeElement::new(r, 0.002, foil, 0.4, 10000.0, 1.0, p.store.clone());
+            p.blade_elements.push(be);
+        }
+        assert!(!p.size_mechanical_thickness());
+        assert!(p.mech_thickness_law.is_none());
     }
 
     #[test]

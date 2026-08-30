@@ -29,6 +29,9 @@ export const STORAGE_KEY = 'proply-design-params';
 // JSON key of the same name.  The foil-family select composes into the
 // `cst` / `arad` booleans (and drops them for the NACA default), and
 // syncForm derives its position from those keys.
+//
+// type "boolean" is a checkbox editing a JSON boolean: checked composes
+// `true`, unchecked drops the key so the Rust default applies.
 export const TABS = [
   {
     id: 'prop',
@@ -45,6 +48,11 @@ export const TABS = [
           { value: 'cst', label: 'CST (Kulfan)' },
           { value: 'arad', label: 'ARA-D' },
         ],
+      },
+      {
+        key: 'mech_thickness',
+        label: 'Mechanical thickness (beam sizing)',
+        type: 'boolean',
       },
       { key: 'radius', label: 'Radius', type: 'quantity', unit: 'mm', bareToDisplay: 1000 },
       { key: 'thrust', label: 'Thrust', type: 'quantity', unit: 'N', bareToDisplay: 1 },
@@ -92,6 +100,12 @@ export function composeDesign(current, values) {
   const out = { ...current };
   for (const field of allFields()) {
     if (field.type === 'select') continue; // composed below
+    if (field.type === 'boolean') {
+      // Checked writes true; unchecked drops the key (Rust default).
+      if (values[field.key]) out[field.key] = true;
+      else delete out[field.key];
+      continue;
+    }
     const v = values[field.key];
     if (v === '' || v === null || v === undefined) {
       delete out[field.key];
@@ -123,13 +137,17 @@ function fmt(n) {
 /// stored as bare numbers (SI) are converted into the display unit;
 /// suffixed strings are shown exactly as stored.  The foil-family
 /// select is derived from the `cst` / `arad` booleans (neither set
-/// means the NACA 4-series default).
+/// means the NACA 4-series default), and checkboxes from their key.
 export function syncForm(inputs, json) {
   for (const field of allFields()) {
     const el = inputs[field.key];
     if (!el) continue;
     if (field.type === 'select') {
       el.value = json.cst ? 'cst' : json.arad ? 'arad' : 'naca';
+      continue;
+    }
+    if (field.type === 'boolean') {
+      el.checked = !!json[field.key];
       continue;
     }
     const v = json[field.key];
@@ -143,13 +161,15 @@ export function syncForm(inputs, json) {
   }
 }
 
-/// Read every input as {key: value}; number inputs give the raw string
-/// (composeDesign converts), so an empty field stays distinguishable.
+/// Read every input as {key: value}: number/text inputs give the raw
+/// string (composeDesign converts), checkboxes give their checked state,
+/// so an empty/off field stays distinguishable.
 export function readForm(inputs) {
   const out = {};
   for (const field of allFields()) {
     const el = inputs[field.key];
-    if (el) out[field.key] = el.value;
+    if (!el) continue;
+    out[field.key] = field.type === 'boolean' ? el.checked : el.value;
   }
   return out;
 }
@@ -185,6 +205,9 @@ export function buildForm(container) {
           o.textContent = opt.label;
           input.append(o);
         }
+      } else if (field.type === 'boolean') {
+        input = document.createElement('input');
+        input.type = 'checkbox';
       } else {
         input = document.createElement('input');
         input.type = field.type === 'number' ? 'number' : 'text';

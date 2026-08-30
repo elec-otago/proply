@@ -29,6 +29,12 @@ pub struct BladeElement<F: FoilLike> {
     /// keeps its last induction state and is reported (and counted
     /// separately) instead of being silently dropped.
     pub converged: bool,
+    /// This station's annular thrust (N, all blades) from the design loop.
+    /// BEM elements compute it from the converged induction (`d_t()`); the
+    /// lifting-line loop leaves no induction on its elements, so
+    /// [`Prop::lift_line_design`] stores the circulation solve's element
+    /// thrust here for the mechanical-thickness sizing.
+    pub thrust_n: Option<f64>,
     twist: f64,
 }
 
@@ -57,6 +63,7 @@ impl<F: FoilLike> BladeElement<F> {
             omega: 2.0 * std::f64::consts::PI * rpm / 60.0,
             u_0,
             converged: true,
+            thrust_n: None,
             twist,
         }
     }

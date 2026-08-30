@@ -33,6 +33,10 @@ struct Args {
     camber: Option<f64>,
     cst: Option<bool>,
     arad: Option<bool>,
+    mech_thickness: Option<bool>,
+    modulus: Option<f64>,
+    deflection_fraction: Option<f64>,
+    thickness_floor: Option<f64>,
     help: bool,
 }
 
@@ -63,6 +67,20 @@ DESIGN OPTIONS:
     --arad                 ARA-D airfoil family: the table-driven propeller
                            sections from the legacy proply, blended over the
                            design's radial thickness law (inherent camber).
+    --mech-thickness       Mechanical blade-thickness law: treat the blade as
+                           a cantilever beam and size the section thickness
+                           from the deflection its own thrust causes (the
+                           load, chord and stiffness along the blade; the hub
+                           thickness is not involved).  Sized on the
+                           converged design, then the design re-runs on it.
+    --modulus <P>          Blade material elastic modulus for the mechanical
+                           law (pascals; \"3 GPa\", \"3000 MPa\", 3e9;
+                           default 3 GPa).
+    --deflection-fraction <F>
+                           Allowed tip deflection as a fraction of the prop
+                           radius (default 0.05 = 5% of R).
+    --thickness-floor <F>  Minimum section thickness as a fraction of the
+                           local chord (default 0.06).
     --auto                 Implied (accepted for compatibility): every
                            design converges onto the motor operating point,
                            absorbing the design torque at the design RPM.
@@ -85,11 +103,12 @@ OUTPUT OPTIONS:
 ALL OPTIONS IN JSON:
     Every design/run option above can instead be set in the --param JSON
     file (keys: bem, lifting_line, auto, resolution, n, ar, plate, cst,
-    arad, dir, step_file, chord_spline_n, camber).  An explicit CLI flag
+    arad, mech_thickness, modulus, deflection_fraction, thickness_floor,
+    dir, step_file, chord_spline_n, camber).  An explicit CLI flag
     overrides the JSON value, which overrides the built-in default.
     Quantities may carry unit suffixes as quoted strings (\"6 mm\", \"6.8cm\",
-    \"500g\", \"0.5kg\"); a bare number keeps its historical unit (metres,
-    newtons, millimetres for trailing_edge).
+    \"500g\", \"0.5kg\", \"3 GPa\"); a bare number keeps its historical unit
+    (metres, newtons, pascals, millimetres for trailing_edge).
     A motor_torque + motor_RPM pair in the JSON sets the design's
     operating point directly (e.g. an engine), overriding the electric
     motor model derived from motor_Kv/motor_volts & co.
@@ -116,6 +135,10 @@ fn parse_args() -> Result<Args, String> {
         camber: None,
         cst: None,
         arad: None,
+        mech_thickness: None,
+        modulus: None,
+        deflection_fraction: None,
+        thickness_floor: None,
         help: false,
     };
     let mut it = std::env::args().skip(1);
@@ -140,6 +163,27 @@ fn parse_args() -> Result<Args, String> {
             "--naca" => {}                 // NACA 4-series family (the default)
             "--cst" => a.cst = Some(true), // CST (Kulfan) foil family
             "--arad" => a.arad = Some(true), // ARA-D table-driven foil family
+            "--mech-thickness" => a.mech_thickness = Some(true), // beam-deflection thickness law
+            "--modulus" => {
+                a.modulus = Some(
+                    proply_rs::units::parse_pressure(&value()?)
+                        .map_err(|_| "bad --modulus".to_string())?,
+                )
+            }
+            "--deflection-fraction" => {
+                a.deflection_fraction = Some(
+                    value()?
+                        .parse()
+                        .map_err(|_| "bad --deflection-fraction".to_string())?,
+                )
+            }
+            "--thickness-floor" => {
+                a.thickness_floor = Some(
+                    value()?
+                        .parse()
+                        .map_err(|_| "bad --thickness-floor".to_string())?,
+                )
+            }
             "--resolution" => {
                 a.resolution = Some(
                     value()?
@@ -223,6 +267,18 @@ fn main() {
     }
     if let Some(v) = args.arad {
         param.arad = v;
+    }
+    if let Some(v) = args.mech_thickness {
+        param.mech_thickness = v;
+    }
+    if let Some(v) = args.modulus {
+        param.modulus = v;
+    }
+    if let Some(v) = args.deflection_fraction {
+        param.deflection_fraction = v;
+    }
+    if let Some(v) = args.thickness_floor {
+        param.thickness_floor = v;
     }
     if let Some(v) = args.plate {
         param.plate = v;

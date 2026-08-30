@@ -75,6 +75,33 @@ pub struct DesignParameters {
     /// `camber` setting/scan does not apply.  Mutually exclusive with `cst`.
     #[serde(default)]
     pub arad: bool,
+    /// Use the mechanical blade-thickness law ([`crate::thickness`]):
+    /// treat the blade as a cantilever beam anchored at the hub and size
+    /// the section thickness from the deflection the thrust load causes,
+    /// instead of the geometric power law.  The hub thickness
+    /// (`hub_depth`) is deliberately not involved — it describes the hub
+    /// mounting, not the blade's airfoil sections.  The law is sized on
+    /// the converged design's station loads before the final design run.
+    #[serde(default)]
+    pub mech_thickness: bool,
+    /// Elastic modulus of the blade material (Pa), the `E` of the
+    /// mechanical-thickness beam model.  Bare number in pascals, or a
+    /// unit-suffixed string (`"3 GPa"`, `"3000 MPa"`).  Defaults to
+    /// 3 GPa, typical of a moulded nylon/ABS propeller.
+    #[serde(
+        default = "default_modulus",
+        deserialize_with = "crate::units::de_pressure_pa"
+    )]
+    pub modulus: f64,
+    /// Allowed tip deflection of the mechanical-thickness law as a
+    /// fraction of the prop radius `R` (default 0.05 = 5% of R).
+    #[serde(default = "default_deflection_fraction")]
+    pub deflection_fraction: f64,
+    /// Minimum section thickness of the mechanical-thickness law as a
+    /// fraction of the local chord (default 0.06, the thinnest ARA-D
+    /// table): the sized thickness never goes below this.
+    #[serde(default = "default_thickness_floor")]
+    pub thickness_floor: f64,
     // ---- run / design options (mirror the CLI flags so a JSON file can
     // carry the whole design) ----
     pub bem: bool,
@@ -95,6 +122,18 @@ pub struct DesignParameters {
 
 fn default_chord_spline_n() -> usize {
     3
+}
+
+fn default_modulus() -> f64 {
+    3.0e9
+}
+
+fn default_deflection_fraction() -> f64 {
+    0.05
+}
+
+fn default_thickness_floor() -> f64 {
+    0.06
 }
 
 impl Default for DesignParameters {
@@ -124,6 +163,10 @@ impl Default for DesignParameters {
             motor_RPM: None,
             cst: false,
             arad: false,
+            mech_thickness: false,
+            modulus: 3.0e9,
+            deflection_fraction: 0.05,
+            thickness_floor: 0.06,
             bem: true,
             lifting_line: false,
             auto: false,
@@ -326,6 +369,47 @@ mod tests {
         let (q, rpm, _) = p.motor_operating_point();
         assert!((q - 0.016006).abs() < 1.0e-3, "q = {}", q);
         assert!((rpm - 18064.6).abs() < 5.0, "rpm = {}", rpm);
+    }
+
+    #[test]
+    fn mechanical_thickness_parameters_parse_and_default() {
+        // Set everything explicitly, with modulus as a unit-suffixed string.
+        let json = r#"{
+            "name": "x", "radius": 0.05, "thrust": 1.0, "blades": 2,
+            "mech_thickness": true,
+            "modulus": "4 GPa",
+            "deflection_fraction": 0.02,
+            "thickness_floor": 0.10
+        }"#;
+        let p = DesignParameters::from_json(json).unwrap();
+        assert!(p.mech_thickness);
+        assert!((p.modulus - 4.0e9).abs() < 1e-6, "modulus {}", p.modulus);
+        assert!((p.deflection_fraction - 0.02).abs() < 1e-12);
+        assert!((p.thickness_floor - 0.10).abs() < 1e-12);
+
+        // A bare number for modulus means pascals.
+        let json2 = r#"{
+            "name": "x", "radius": 0.05, "thrust": 1.0, "blades": 2,
+            "modulus": 3.0e9
+        }"#;
+        let p2 = DesignParameters::from_json(json2).unwrap();
+        assert!(!p2.mech_thickness);
+        assert!((p2.modulus - 3.0e9).abs() < 1e-6);
+
+        // Absent keys fall back to the defaults.
+        let p3 = DesignParameters::default();
+        assert!(!p3.mech_thickness);
+        assert!((p3.modulus - 3.0e9).abs() < 1e-6);
+        assert!((p3.deflection_fraction - 0.05).abs() < 1e-12);
+        assert!((p3.thickness_floor - 0.06).abs() < 1e-12);
+
+        // A force unit is not a modulus.
+        let err = DesignParameters::from_json(
+            r#"{"name": "x", "radius": 0.05, "thrust": 1.0, "blades": 2,
+                "modulus": "500g"}"#,
+        )
+        .unwrap_err();
+        assert!(err.contains("Pa, kPa, MPa, GPa"), "{}", err);
     }
 
     #[test]

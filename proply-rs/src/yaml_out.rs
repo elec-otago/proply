@@ -72,6 +72,13 @@ struct DesignInfo {
     spanwise_resolution: usize,
     loft_points: usize,
     foil_family: &'static str,
+    /// "geometric" (the p = 0.3 power law on the hub depth) or "mechanical"
+    /// (the beam-deflection sizing — see [`crate::thickness`]).
+    thickness_law: &'static str,
+    /// Predicted tip deflection of the mechanical thickness law (mm),
+    /// present only for mechanical-law designs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tip_deflection_mm: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     camber: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -204,6 +211,12 @@ pub fn summary(
             } else {
                 "naca4"
             },
+            thickness_law: if p.mech_thickness_law.is_some() {
+                "mechanical"
+            } else {
+                "geometric"
+            },
+            tip_deflection_mm: p.mech_tip_deflection.map(|d| r6(d * 1000.0)),
             camber: param.camber.map(r6),
             min_aspect_ratio: param.ar,
             chord_spline_n: param.chord_spline_n,
@@ -347,8 +360,28 @@ mod tests {
     }
 
     #[test]
-    fn lifting_line_sections_omit_induction_fields() {
+    fn mechanical_thickness_law_is_reported_in_the_summary() {
+        // The summary names the active thickness law and, for the mechanical
+        // law, the predicted tip deflection it was sized to close on.
         let mut p = synthetic_prop();
+        let text = summary(&p, 5000.0, 2.25, 0.05, &motor_info(), None);
+        let y: serde_yaml::Value = serde_yaml::from_str(&text).expect("valid yaml");
+        assert_eq!(y["design"]["thickness_law"], "geometric");
+        assert!(y["design"].get("tip_deflection_mm").is_none());
+
+        p.mech_thickness_law = Some(crate::pchip::Pchip::new(
+            &[0.006, 0.06],
+            &[0.28, 0.06],
+        ));
+        p.mech_tip_deflection = Some(0.0034);
+        let text = summary(&p, 5000.0, 2.25, 0.05, &motor_info(), None);
+        let y: serde_yaml::Value = serde_yaml::from_str(&text).expect("valid yaml");
+        assert_eq!(y["design"]["thickness_law"], "mechanical");
+        assert_eq!(y["design"]["tip_deflection_mm"], r6(3.4));
+    }
+
+    #[test]
+    fn lifting_line_sections_omit_induction_fields() {        let mut p = synthetic_prop();
         p.param.lifting_line = true;
         let text = summary(&p, 5000.0, 2.25, 0.05, &motor_info(), None);
         let y: serde_yaml::Value = serde_yaml::from_str(&text).expect("valid yaml");
