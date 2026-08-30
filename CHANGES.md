@@ -1,5 +1,29 @@
 # CHANGES
 
+## 2026-08-30 — Mechanical tab in the web demo; accuracy pass on MECHANICAL.md
+
+### proply-rs web demo
+
+- The web demo gains a **Mechanical** tab holding *all four* mechanical
+  parameters — the **Mechanical thickness (beam sizing)** checkbox
+  (`mech_thickness`), **Elastic modulus (GPa)** (`modulus`), **Deflection
+  limit (fraction of R)** (`deflection_fraction`) and **Minimum thickness
+  (fraction of chord)** (`thickness_floor`) — replacing the two fields
+  that used to live in Propeller Specifications.  The default design now
+  carries all four keys so the tab is populated.  JS-only change (the
+  committed wasm already parses the keys).
+
+### docs
+
+- [MECHANICAL.md](MECHANICAL.md) accuracy pass against the current code:
+  the geometric-law comparison is corrected (a blade built to the power
+  law deflects ≈ 2.5 mm under the same twist/shape-aware beam model —
+  its root `t/c ≈ 0.71` overshoots the deflection budget at roughly four
+  times the mechanical design's root thickness — not 4.9 mm from the
+  early rectangle model), the 100 GPa modulus example is corrected to
+  land on the `thickness_floor`, and the web-demo instructions describe
+  the new Mechanical tab.
+
 ## 2026-08-30 — Camber in the mechanical thickness law (real section inertia)
 
 ### proply-rs design loop

@@ -33,7 +33,11 @@ const DEFAULT_PARAMS = {
   hub_radius: '6 mm',
   hub_depth: '6 mm',
   chord_spline_n: 3,
-  modulus: '3 GPa', // mechanical-law material stiffness (stiffer -> thinner foils)
+  // Mechanical-thickness law parameters (the Mechanical tab).
+  mech_thickness: false,
+  modulus: '3 GPa',
+  deflection_fraction: 0.05,
+  thickness_floor: 0.06,
   bem: true,
   resolution: 10,
   n: 12,

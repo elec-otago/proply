@@ -49,19 +49,6 @@ export const TABS = [
           { value: 'arad', label: 'ARA-D' },
         ],
       },
-      {
-        key: 'mech_thickness',
-        label: 'Mechanical thickness (beam sizing)',
-        type: 'boolean',
-      },
-      {
-        key: 'modulus',
-        label: 'Elastic modulus (GPa)',
-        hint: 'Mechanical-law material stiffness: stiffer material → thinner foils.  nylon/ABS ≈ 3 GPa, aluminium ≈ 70 GPa, carbon fibre ≈ 100 GPa',
-        type: 'quantity',
-        unit: 'GPa',
-        bareToDisplay: 1.0e-9,
-      },
       { key: 'radius', label: 'Radius', type: 'quantity', unit: 'mm', bareToDisplay: 1000 },
       { key: 'thrust', label: 'Thrust', type: 'quantity', unit: 'N', bareToDisplay: 1 },
       { key: 'tip_chord', label: 'Tip chord', type: 'quantity', unit: 'mm', bareToDisplay: 1000 },
@@ -82,6 +69,38 @@ export const TABS = [
       { key: 'motor_volts', label: 'Voltage (V)', type: 'number' },
       { key: 'motor_no_load_current', label: 'No-load current (A)', type: 'number' },
       { key: 'motor_winding_resistance', label: 'Winding resistance (Ω)', type: 'number' },
+    ],
+  },
+  {
+    id: 'mech',
+    label: 'Mechanical',
+    fields: [
+      {
+        key: 'mech_thickness',
+        label: 'Mechanical thickness (beam sizing)',
+        hint: 'Size the airfoil thickness from the blade’s own thrust: a cantilever-beam deflection model.  Off: the geometric power law.',
+        type: 'boolean',
+      },
+      {
+        key: 'modulus',
+        label: 'Elastic modulus (GPa)',
+        hint: 'Mechanical-law material stiffness: stiffer material → thinner foils.  nylon/ABS ≈ 3 GPa, aluminium ≈ 70 GPa, carbon fibre ≈ 100 GPa',
+        type: 'quantity',
+        unit: 'GPa',
+        bareToDisplay: 1.0e-9,
+      },
+      {
+        key: 'deflection_fraction',
+        label: 'Deflection limit (fraction of R)',
+        hint: 'Allowed tip deflection as a fraction of the prop radius R (default 0.05 = 5%).  Looser → thinner foils.',
+        type: 'number',
+      },
+      {
+        key: 'thickness_floor',
+        label: 'Minimum thickness (fraction of chord)',
+        hint: 'The sized section never goes below this fraction of the local chord (default 0.06, the thinnest ARA-D table).',
+        type: 'number',
+      },
     ],
   },
   {

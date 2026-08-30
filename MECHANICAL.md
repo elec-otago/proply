@@ -158,9 +158,11 @@ requires, so the realized deflection is *at most* the allowed one.
   0.71 by the geometric law and 0.08 by the rectangle-based mechanical
   law — a real symmetric section is only ≈ 0.47× as stiff as its
   rectangle), tapering to `≈ 0.09–0.23` outboard and the floor at the
-  tip; the sized blade is predicted to deflect 3.38 mm — inside the
-  3.4 mm allowed — where a blade built to the geometric law is predicted
-  to deflect 4.9 mm.
+  tip; the sized blade closes the tip deflection at 3.38 mm of the
+  3.40 mm allowed.  (A blade built to the geometric power law deflects
+  only ≈ 2.5 mm under the same beam model — its root `t/c ≈ 0.71`
+  overshoots the stiffness budget: it buys far more stiffness than the
+  deflection limit needs, at roughly four times the root thickness.)
 - **The section `t/c` flows into the aerodynamics.**  The sized absolute
   thickness is divided by the design's own chord (the law is stored as a
   radius → `t/c` curve, so the sized section scales exactly with the
@@ -185,13 +187,14 @@ In the design JSON:
 
 or on the command line: `--mech-thickness`, `--modulus <P>`,
 `--deflection-fraction <F>`, `--thickness-floor <F>`, and in the web
-demo via the **Mechanical thickness (beam sizing)** checkbox in the
-Propeller Specifications tab.  The **Elastic modulus (GPa)** field on
-the same tab sets `modulus` — raise it for a stronger material and the
-mechanical law sizes much thinner foils (the thickness goes as
-`E^(−1/3)`): on the example below, root `t/c` drops from ≈ 0.17 at the
-nylon/ABS default (3 GPa) to ≈ 0.08 with carbon fibre (100 GPa), and
-further to the `thickness_floor` with a stiffer laminate.
+demo via the **Mechanical** tab: the **Mechanical thickness (beam
+sizing)** checkbox enables the law, and **Elastic modulus (GPa)**,
+**Deflection limit** and **Minimum thickness** set `modulus`,
+`deflection_fraction` and `thickness_floor`.  Raise the modulus for a
+stronger material and the mechanical law sizes much thinner foils (the
+thickness goes as `E^(−1/3)`): on the example below, root `t/c` drops
+from ≈ 0.17 at the nylon/ABS default (3 GPa) to the `thickness_floor`
+(0.06) with carbon fibre (100 GPa).
 
 | key | meaning | unit | default |
 | --- | --- | --- | --- |
