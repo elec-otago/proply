@@ -84,9 +84,14 @@ per-station section list).
   with the geometric power law: the blade is treated as a cantilever beam
   anchored at the hub, and the thickness is chosen so the tip deflection
   caused by the blade's own thrust stays within `--deflection-fraction`
-  (default 5%) of the radius.  How the strength calculation picks the
-  section thickness — loads, bending moment, the `E·c·t³` beam model and
-  its parameters — is documented in [MECHANICAL.md](MECHANICAL.md).
+  (default 5%) of the radius.  The sizing accounts for the local twist —
+  a pitched section presents the z-projection of its chord to the load,
+  so twisted sections need less thickness — and for the material
+  stiffness via `--modulus` (raise it, e.g. `--modulus=100GPa` for
+  carbon, to thin the foils).  How the strength calculation picks the
+  section thickness — loads, bending moment, the twist-aware
+  `E·(c³t·sin²θ + ct³·cos²θ)/12` beam model and its parameters — is
+  documented in [MECHANICAL.md](MECHANICAL.md).
 - The first run simulates an 80-point alpha sweep per blade station; polars
   are cached in `foil_cache.json` in the working directory, so reruns are
   fast.

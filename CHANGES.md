@@ -1,5 +1,28 @@
 # CHANGES
 
+## 2026-08-30 — Twist-aware mechanical thickness law
+
+### proply-rs design loop
+
+The mechanical thickness law now takes the local twist into account.
+A foil section twisted by `θ` about the spanwise axis resists the
+z-directed thrust with the second moment of the *rotated* rectangle,
+`I = c³t/12·sin²θ + ct³/12·cos²θ` — the summed squares of the
+z-projections of the section's chord (`c·sin θ`) and thickness
+(`t·cos θ`).  Since the chord is much longer than the thickness, the
+chord's projection dominates at high twist: the sized thickness "tends
+to the chord" (the section's z-extent `c·sin θ + t·cos θ`), exactly as
+the TODO's "take the twist into account, as the chord can make the beam
+stiffer" intended.  The sizing becomes the cubic
+`t³·cos²θ + t·c²·sin²θ = 6ML²/(Ecδ)` (closed form `t = (K)^(1/3)` only
+for untwisted sections), solved per station with the element's own
+twist (`thickness.rs`, `prop.rs`).  On the web-default design this
+halves the root requirement again: root `t/c` ≈ 0.08 at 3 GPa (0.28
+untwisted, 0.71 geometric), most inboard sections ride the 0.06 floor,
+and the predicted tip deflection closes at 3.00 mm of the 3.4 mm
+allowed.  Docs (`MECHANICAL.md`, `README.md`) describe the
+twist-aware model; the wasm package is rebuilt.
+
 ## 2026-08-30 — Expose the mechanical-law modulus on the web demo
 
 ### proply-rs web demo

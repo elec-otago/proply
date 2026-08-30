@@ -298,31 +298,36 @@ impl Prop {
     /// Size the blade thickness from the converged design's station loads
     /// ([`crate::thickness::size_mechanical_thickness`]) and install the
     /// resulting radius → thickness/chord curve as the design's thickness
-    /// law.  The hub thickness is deliberately not involved — the airfoil
-    /// thickness follows the beam-deflection sizing, not the hub geometry.
+    /// law.  The sizing uses each station's twist (the section's z-bending
+    /// inertia mixes the z-projections of the thickness and of the chord,
+    /// so a twisted section is stiffer against the thrust).  The hub
+    /// thickness is deliberately not involved — the airfoil thickness
+    /// follows the beam-deflection sizing, not the hub geometry.
     /// Returns `false` (and leaves the geometric law active) when the
     /// design has nothing to size: no stations, or no load on the blade.
     pub fn size_mechanical_thickness(&mut self) -> bool {
         if self.blade_elements.len() < 2 {
             return false;
         }
-        let mut rows: Vec<(f64, f64, f64)> = self
+        let mut rows: Vec<(f64, f64, f64, f64)> = self
             .blade_elements
             .iter()
             .map(|be| {
                 let c = be.foil.borrow().chord();
                 let t = be.thrust_n.unwrap_or_else(|| be.d_t());
-                (be.r, c, t)
+                (be.r, c, be.get_twist(), t)
             })
             .collect();
         // The elements are hub → tip, but sort defensively anyway.
         rows.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
         let rr: Vec<f64> = rows.iter().map(|r| r.0).collect();
         let chords: Vec<f64> = rows.iter().map(|r| r.1).collect();
-        let thrust: Vec<f64> = rows.iter().map(|r| r.2).collect();
+        let twist: Vec<f64> = rows.iter().map(|r| r.2).collect();
+        let thrust: Vec<f64> = rows.iter().map(|r| r.3).collect();
         let Some(law) = crate::thickness::size_mechanical_thickness(
             &rr,
             &chords,
+            &twist,
             &thrust,
             self.n_blades,
             self.param.modulus,
