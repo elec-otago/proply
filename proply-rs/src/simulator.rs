@@ -51,6 +51,38 @@ const RE_FLAT_PLATE: f64 = 10000.0;
 /// with too few converged points.
 const CD_FLOOR: f64 = 0.004;
 
+/// Flat-plate fallback blend window for high attack angles (radians).
+///
+/// The simulated polars are fitted over the ±20° alpha sweep; beyond it the
+/// degree-9 fit extrapolates uncontrollably and XFOIL's viscous solution is
+/// unreliable post-stall, so the legacy code switched to the analytic
+/// flat-plate model at |alpha| > 30°.  That hard switch made cl/cd
+/// discontinuous (a fitted cl of ~1 just below 30° jumping to 2 pi alpha ~
+/// 3.3 just above), and the design optimizers exploited the cliff as a free
+/// lift source — the root stations of the browser_demo design settled on
+/// the flat-plate branch while the outboard stations used the polars,
+/// producing mixed, inconsistent designs.  Instead, blend smoothly from the
+/// fitted polar to the flat-plate model over `[ALPHA_BLEND_LO, ALPHA_BLEND_HI]`
+/// (cubic smoothstep: C1-continuous at both ends), pure polar below the low
+/// end and pure flat plate above the high end.
+const ALPHA_BLEND_LO: f64 = 18.0_f64.to_radians();
+const ALPHA_BLEND_HI: f64 = 33.0_f64.to_radians();
+
+/// Smoothstep (Hermite) blend weight from the fitted polar to the analytic
+/// flat-plate model: 0 for |alpha| <= [`ALPHA_BLEND_LO`], 1 for |alpha| >=
+/// [`ALPHA_BLEND_HI`], smooth (C1) in between.
+fn stall_blend(alpha: f64) -> f64 {
+    let a = alpha.abs();
+    if a <= ALPHA_BLEND_LO {
+        return 0.0;
+    }
+    if a >= ALPHA_BLEND_HI {
+        return 1.0;
+    }
+    let t = (a - ALPHA_BLEND_LO) / (ALPHA_BLEND_HI - ALPHA_BLEND_LO);
+    t * t * (3.0 - 2.0 * t)
+}
+
 /// Reject sweeps whose drag is unphysical (see [`CD_FLOOR`]): the minimum
 /// cd over the |alpha| <= 15 deg working window must clear the floor.
 fn polar_is_physical(p: &StoredPolar) -> bool {
@@ -174,14 +206,16 @@ impl<F: FoilLike> FoilSimulator<F> {
             return 2.0 * std::f64::consts::PI * alpha;
         }
         let ma = self.foil.borrow().mach(v);
-        if ma > 0.97
-            || alpha.abs() > 30.0 * DEG2RAD
-            || self.foil.borrow().reynolds(v) < RE_FLAT_PLATE
-        {
+        if ma > 0.97 || self.foil.borrow().reynolds(v) < RE_FLAT_PLATE {
             return 2.0 * std::f64::consts::PI * alpha;
         }
+        let flat = 2.0 * std::f64::consts::PI * alpha;
+        let w = stall_blend(alpha);
+        if w >= 1.0 {
+            return flat;
+        }
         let (cl_poly, _) = self.get_polars(v);
-        polyval(&cl_poly, alpha)
+        (1.0 - w) * polyval(&cl_poly, alpha) + w * flat
     }
 
     pub fn get_cd(&self, v: f64, alpha: f64) -> f64 {
@@ -189,14 +223,16 @@ impl<F: FoilLike> FoilSimulator<F> {
             return 1.28 * alpha.sin();
         }
         let ma = self.foil.borrow().mach(v);
-        if ma > 0.97
-            || alpha.abs() > 30.0 * DEG2RAD
-            || self.foil.borrow().reynolds(v) < RE_FLAT_PLATE
-        {
+        if ma > 0.97 || self.foil.borrow().reynolds(v) < RE_FLAT_PLATE {
             return 1.28 * alpha.sin();
         }
+        let flat = 1.28 * alpha.sin();
+        let w = stall_blend(alpha);
+        if w >= 1.0 {
+            return flat;
+        }
         let (_, cd_poly) = self.get_polars(v);
-        polyval(&cd_poly, alpha)
+        (1.0 - w) * polyval(&cd_poly, alpha) + w * flat
     }
 
     /// The fitted (cl, cd) polynomials for the velocity `v`, interpolated
@@ -529,12 +565,71 @@ mod tests {
     fn flat_plate_fallback_outside_envelope() {
         let f = Naca4::new(0.05, 0.12, 0.0, 0.4);
         let fs = FoilSimulator::new(Rc::new(RefCell::new(f)), test_store());
-        // |alpha| > 30 deg -> flat plate
+        // |alpha| beyond the stall-blend window (>= 33 deg) is pure flat plate.
         let alpha = 35.0 * DEG2RAD;
         let cl = fs.get_cl(10.0, alpha);
         let cd = fs.get_cd(10.0, alpha);
         assert!((cl - 2.0 * std::f64::consts::PI * alpha).abs() < 1e-12);
         assert!((cd - 1.28 * alpha.sin()).abs() < 1e-12);
+    }
+
+    #[test]
+    fn stall_blend_is_continuous_across_thirty_degrees() {
+        // Regression (browser_demo plate-vs-full-polar discrepancy): the
+        // legacy hard switch at |alpha| > 30° made cl/cd jump (a fitted cl of
+        // ~1 just below 30° vs 2 pi alpha ~ 3.3 just above), and the design
+        // optimizers exploited the cliff as a free lift source.  The blend
+        // must be continuous — and smooth — across the old switch point, so
+        // an optimizer cannot gain a free force jump by crossing it.
+        let chord = 0.05;
+        let v_for = |re: f64| re * 15.11e-6 / (1.225 * chord);
+        let v = 22.0; // Re ~ 89179, between grid points 1 and 2
+        let f = Naca4::new(chord, 0.12, 0.0, 0.4);
+        let store = test_store();
+        let fs = FoilSimulator::new(Rc::new(RefCell::new(f.clone())), store.clone());
+
+        // Distinctive seeded polars (cl = 0.5 * 2 pi alpha, cd quadratic) on
+        // the bracketing buckets: the blend mixes the polar with the
+        // flat-plate model, so the result must move continuously through the
+        // 30° boundary with no step between the two models.
+        let re_raw = f.reynolds(v);
+        let (lo, hi, _) = re_bracket(re_raw);
+        seed_bucket(&f, &store, &fs, re_grid(lo), v_for(re_grid(lo)), 0.5);
+        seed_bucket(&f, &store, &fs, re_grid(hi), v_for(re_grid(hi)), 0.5);
+
+        let eps = 1.0e-9;
+        let a30 = 30.0 * DEG2RAD;
+        let cl_lo = fs.get_cl(v, a30 - eps);
+        let cl_hi = fs.get_cl(v, a30 + eps);
+        let cd_lo = fs.get_cd(v, a30 - eps);
+        let cd_hi = fs.get_cd(v, a30 + eps);
+        // No jump: the 30°-crossing step must be gone entirely (the old code
+        // stepped by most of the difference between the polar and the plate).
+        let scale = (2.0 * std::f64::consts::PI * a30).abs().max(1.0);
+        assert!(
+            (cl_lo - cl_hi).abs() < 1.0e-6 * scale,
+            "cl jump at 30°: {} vs {}",
+            cl_lo,
+            cl_hi
+        );
+        assert!(
+            (cd_lo - cd_hi).abs() < 1.0e-6,
+            "cd jump at 30°: {} vs {}",
+            cd_lo,
+            cd_hi
+        );
+        // The blend lies between the weak polar and the flat plate inside the
+        // window, and the flat plate alone governs beyond it.
+        let a40 = 40.0 * DEG2RAD;
+        assert!(
+            (fs.get_cl(v, a40) - 2.0 * std::f64::consts::PI * a40).abs() < 1e-12,
+            "pure flat plate above the window"
+        );
+        let a10 = 10.0 * DEG2RAD;
+        assert!(
+            (fs.get_cl(v, a10) - 0.5 * 2.0 * std::f64::consts::PI * a10).abs() < 1e-6,
+            "pure polar below the window"
+        );
     }
 
     /// Seed `k`-scaled synthetic polar data (cl = k * 2 pi alpha, exact under

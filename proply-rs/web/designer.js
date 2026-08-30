@@ -50,6 +50,7 @@ async function runDesign(params) {
       yaml: out.yaml,
       step: out.step,
       name: params.name || 'prop',
+      warning: out.warning || '',
       newPolars,
       totalPolars: session.polar_count(),
     });

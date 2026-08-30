@@ -26,6 +26,9 @@ pub struct DesignOutput {
     pub torque: f64,
     pub rpm: f64,
     pub power: f64,
+    /// Empty when the design reached its operating point; otherwise an
+    /// explicit note describing the closest achievable design.
+    pub warning: String,
 }
 
 impl From<DesignOutcome> for DesignOutput {
@@ -37,6 +40,7 @@ impl From<DesignOutcome> for DesignOutput {
             torque: o.torque,
             rpm: o.rpm,
             power: o.power,
+            warning: o.warning.unwrap_or_default(),
         }
     }
 }

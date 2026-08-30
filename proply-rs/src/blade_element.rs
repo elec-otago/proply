@@ -24,6 +24,11 @@ pub struct BladeElement<F: FoilLike> {
     pub rpm: f64,
     pub omega: f64,
     pub u_0: f64,
+    /// Whether the last BEM solve (`bem` / `get_forces`) converged on a
+    /// momentum-equilibrium state.  A station whose solve did not converge
+    /// keeps its last induction state and is reported (and counted
+    /// separately) instead of being silently dropped.
+    pub converged: bool,
     twist: f64,
 }
 
@@ -51,6 +56,7 @@ impl<F: FoilLike> BladeElement<F> {
             rpm,
             omega: 2.0 * std::f64::consts::PI * rpm / 60.0,
             u_0,
+            converged: true,
             twist,
         }
     }

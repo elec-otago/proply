@@ -14,6 +14,11 @@ export class DesignOutput {
     step: string;
     thrust: number;
     torque: number;
+    /**
+     * Empty when the design reached its operating point; otherwise an
+     * explicit note describing the closest achievable design.
+     */
+    warning: string;
     yaml: string;
 }
 
@@ -66,6 +71,7 @@ export interface InitOutput {
     readonly __wbg_get_designoutput_step: (a: number) => [number, number];
     readonly __wbg_get_designoutput_thrust: (a: number) => number;
     readonly __wbg_get_designoutput_torque: (a: number) => number;
+    readonly __wbg_get_designoutput_warning: (a: number) => [number, number];
     readonly __wbg_get_designoutput_yaml: (a: number) => [number, number];
     readonly __wbg_propsession_free: (a: number, b: number) => void;
     readonly __wbg_set_designoutput_power: (a: number, b: number) => void;
@@ -73,6 +79,7 @@ export interface InitOutput {
     readonly __wbg_set_designoutput_step: (a: number, b: number, c: number) => void;
     readonly __wbg_set_designoutput_thrust: (a: number, b: number) => void;
     readonly __wbg_set_designoutput_torque: (a: number, b: number) => void;
+    readonly __wbg_set_designoutput_warning: (a: number, b: number, c: number) => void;
     readonly __wbg_set_designoutput_yaml: (a: number, b: number, c: number) => void;
     readonly propsession_cache_to_json: (a: number) => [number, number];
     readonly propsession_design: (a: number, b: number, c: number) => [number, number, number];

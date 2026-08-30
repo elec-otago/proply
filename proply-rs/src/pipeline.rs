@@ -28,6 +28,10 @@ pub struct DesignOutcome {
     pub rpm: f64,
     /// Power at the motor operating point (W).
     pub power: f64,
+    /// Set when the design could not absorb the demanded torque: an explicit
+    /// note describing the closest design that was reached (CLI, YAML and
+    /// browser demo all surface it).  `None` for a converged operating point.
+    pub warning: Option<String>,
 }
 
 /// Run one full propeller design from parsed parameters against `store`,
@@ -52,8 +56,10 @@ pub fn run_design(
     // target is iterated until the blade absorbs the design torque at the
     // design RPM.  The inner loops maximise efficiency at a matched thrust,
     // so the converged design is the maximum-efficiency design at that
-    // operating point.
-    let (q, t) = p.design_for_torque(optimum_rpm, optimum_torque, param.thrust, param.ar);
+    // operating point.  When the geometry cannot absorb the demanded torque,
+    // the result carries a warning describing the closest design.
+    let res = p.design_for_torque(optimum_rpm, optimum_torque, param.thrust, param.ar);
+    let (q, t) = (res.torque, res.thrust);
 
     let step = step_out::write_prop(&mut p, param.n)?;
     let motor_info = yaml_out::MotorInfo {
@@ -65,7 +71,7 @@ pub fn run_design(
         optimum_torque_nm: optimum_torque,
         max_power_w: power,
     };
-    let yaml = yaml_out::summary(&p, optimum_rpm, t, q, &motor_info);
+    let yaml = yaml_out::summary(&p, optimum_rpm, t, q, &motor_info, res.warning.as_deref());
 
     Ok(DesignOutcome {
         step,
@@ -74,5 +80,6 @@ pub fn run_design(
         thrust: t,
         rpm: optimum_rpm,
         power,
+        warning: res.warning,
     })
 }

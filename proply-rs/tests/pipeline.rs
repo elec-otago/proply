@@ -55,4 +55,6 @@ fn pipeline_produces_step_and_yaml() {
     assert!(outcome.thrust.is_finite() && outcome.thrust > 0.0, "thrust");
     assert!(outcome.torque.is_finite() && outcome.torque > 0.0, "torque");
     assert!(outcome.rpm > 0.0, "rpm");
+    // A feasible design converges onto the operating point without warning.
+    assert!(outcome.warning.is_none(), "warning: {:?}", outcome.warning);
 }

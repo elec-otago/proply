@@ -119,12 +119,18 @@ function render(msg) {
   }
   $('preview').disabled = false;
   setBusy(false);
-  setStatus(
+  let status =
     `done in ${msg.elapsed.toFixed(1)} s — thrust ${msg.thrust.toFixed(2)} N, ` +
     `torque ${msg.torque.toFixed(3)} N·m at ${msg.rpm.toFixed(0)} rpm, ` +
     `power at the operating point ${(msg.torque * msg.rpm * 2 * Math.PI / 60).toFixed(1)} W; ` +
-    `${msg.newPolars} new polars cached (${msg.totalPolars} total)`,
-  );
+    `${msg.newPolars} new polars cached (${msg.totalPolars} total)`;
+  if (msg.warning) {
+    // The design could not absorb the demanded torque; say so up front
+    // instead of presenting an unmatched design as a success.
+    status = `⚠ ${msg.warning} — ${status}`;
+    $('status-text').title = msg.warning;
+  }
+  setStatus(status);
   $('design').disabled = false;
 }
 

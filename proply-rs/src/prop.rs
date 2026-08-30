@@ -116,6 +116,34 @@ fn station_foil(param: &DesignParameters, r: f64, c: f64, camber: f64) -> FoilFa
     }
 }
 
+/// The outcome of a force evaluation over the blade: the totals summed over
+/// the stations whose BEM solve converged, plus the station convergence
+/// coverage — the design loop and the output summary report how much of the
+/// blade actually reached a momentum equilibrium rather than silently
+/// treating failed stations as zeros.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Forces {
+    pub torque: f64,
+    pub thrust: f64,
+    pub converged: usize,
+    pub total: usize,
+}
+
+/// The converged design: the absorbed torque and produced thrust at the
+/// design RPM, the station convergence coverage, and — when the geometry
+/// cannot absorb the design torque — an explicit warning describing the
+/// closest design that was reached.
+#[derive(Debug, Clone)]
+pub struct DesignResult {
+    pub torque: f64,
+    pub thrust: f64,
+    /// Set when the operating point could not be matched: explains the gap
+    /// and the closest design returned.
+    pub warning: Option<String>,
+    pub converged_stations: usize,
+    pub total_stations: usize,
+}
+
 /// A propeller: a collection of blade elements plus the design parameters.
 pub struct Prop {
     pub param: DesignParameters,
@@ -287,17 +315,24 @@ impl Prop {
     }
 
     /// Total torque and thrust at a given RPM, re-running the BEM on each
-    /// element (mirrors `get_forces`).
-    pub fn get_forces(&mut self, rpm: f64) -> (f64, f64) {
+    /// element (mirrors `get_forces`).  Stations whose fixed-point solve
+    /// fails are flagged (`BladeElement::converged` = false) and excluded
+    /// from the totals, but keep their last induction state — previously
+    /// they were silently reset to (dv=1, a_prime=0), which turned a
+    /// struggling design into a zero-torque one without any explanation.
+    pub fn get_forces(&mut self, rpm: f64) -> Forces {
         let mut torque = 0.0;
         let mut thrust = 0.0;
+        let mut converged = 0usize;
         for be in self.blade_elements.iter_mut() {
             be.rpm = rpm;
             be.omega = optimize::rpm2omega(rpm);
             let dv_goal = be.dv;
             let (dv, a_prime, err) = be.bem(self.n_blades);
+            be.converged = err < 0.01;
 
-            if err < 0.01 {
+            if be.converged {
+                converged += 1;
                 let dt = be.d_t();
                 let dm = be.d_m();
                 thrust += dt;
@@ -317,13 +352,14 @@ impl Prop {
                     "r={}: BEM did not converge {} {} {}",
                     be.r, be.dv, dv_goal, a_prime
                 );
-                if err > 0.5 {
-                    be.dv = 1.0;
-                    be.a_prime = 0.0;
-                }
             }
         }
-        (torque, thrust)
+        Forces {
+            torque,
+            thrust,
+            converged,
+            total: self.blade_elements.len(),
+        }
     }
 
     /// Design every blade element for the target thrust at the optimum RPM,
@@ -452,10 +488,13 @@ impl Prop {
             println!("{}", be);
         }
 
-        let (torque, thrust_final) = self.get_forces(optimum_rpm);
-        println!("Total Thrust: {:5.2}, Torque: {:5.3}", thrust_final, torque);
+        let f = self.get_forces(optimum_rpm);
+        println!(
+            "Total Thrust: {:5.2}, Torque: {:5.3} ({} of {} stations converged)",
+            f.thrust, f.torque, f.converged, f.total
+        );
         let _ = (total_thrust, total_torque);
-        (torque, thrust_final)
+        (f.torque, f.thrust)
     }
 
     /// One design pass with the configured loop (lifting line or BEM).
@@ -489,7 +528,7 @@ impl Prop {
         q_target: f64,
         thrust_seed: f64,
         ar: Option<f64>,
-    ) -> (f64, f64) {
+    ) -> DesignResult {
         const MAX_ITERS: usize = 30;
         /// Relative torque tolerance for a converged match.
         const TOL: f64 = 1.0e-2;
@@ -515,7 +554,14 @@ impl Prop {
                 100.0 * err
             );
             if err < TOL {
-                return (q, t);
+                let (converged, total) = self.station_coverage();
+                return DesignResult {
+                    torque: q,
+                    thrust: t,
+                    warning: None,
+                    converged_stations: converged,
+                    total_stations: total,
+                };
             }
             if best.is_none_or(|(e, _)| err < e) {
                 best = Some((err, thrust));
@@ -538,17 +584,57 @@ impl Prop {
             thrust = next;
         }
         // Not converged: re-run the closest design so the blade in place is
-        // the one being reported.
+        // the one being reported, and hand back an explicit warning (a
+        // silently "successful" but unmatched design is how the browser_demo
+        // discrepancy surfaced: the tool reported a broken 10%-thrust design
+        // as if nothing was wrong).
         if let Some((_, t_best)) = best {
             if (t_best - thrust).abs() > 1.0e-9 {
                 eprintln!(
                     "proply: falling back to the closest design (thrust target {:.3} N)",
                     t_best
                 );
-                return self.run_design(rpm, t_best, ar);
+                return self.finish_unconverged(rpm, t_best, q_target, ar);
             }
         }
-        self.run_design(rpm, thrust, ar)
+        self.finish_unconverged(rpm, thrust, q_target, ar)
+    }
+
+    /// Re-run the design at `thrust` (the best match found by
+    /// [`design_for_torque`]) and report it with a warning describing the
+    /// gap to the demanded operating point.
+    fn finish_unconverged(
+        &mut self,
+        rpm: f64,
+        thrust: f64,
+        q_target: f64,
+        ar: Option<f64>,
+    ) -> DesignResult {
+        let (q, t) = self.run_design(rpm, thrust, ar);
+        let (converged, total) = self.station_coverage();
+        let err = (q - q_target).abs() / q_target;
+        let warning = Some(format!(
+            "design torque {:.4} Nm at {:.0} rpm not achievable: the closest design absorbs {:.4} Nm ({:.1}% of the target) at {:.2} N thrust; {}/{} BEM stations converged",
+            q_target, rpm, q, 100.0 * err, t, converged, total
+        ));
+        println!("proply: WARNING {}", warning.as_ref().unwrap());
+        DesignResult {
+            torque: q,
+            thrust: t,
+            warning,
+            converged_stations: converged,
+            total_stations: total,
+        }
+    }
+
+    /// How many of the current blade elements reached a converged BEM state:
+    /// the YAML summary and the warning report the coverage.  Lifting-line
+    /// elements never run `get_forces`, so their flag stays at the default
+    /// (converged) — the count only carries meaning for the BEM loop.
+    fn station_coverage(&self) -> (usize, usize) {
+        let total = self.blade_elements.len();
+        let converged = self.blade_elements.iter().filter(|be| be.converged).count();
+        (converged, total)
     }
 
     /// The maximum CL/CD at speed `v` and the angle of attack (rad) that
@@ -1626,14 +1712,22 @@ mod tests {
         let (q0, _t0) = p.full_optimize(12000.0, 2.0);
         assert!(q0 > 0.0, "reference torque {} not positive", q0);
         let q_target = 0.8 * q0;
-        let (q, t) = p.design_for_torque(12000.0, q_target, 2.0, None);
+        let res = p.design_for_torque(12000.0, q_target, 2.0, None);
         assert!(
-            (q - q_target).abs() / q_target < 0.01,
+            (res.torque - q_target).abs() / q_target < 0.01,
             "Q {} vs target {}",
-            q,
+            res.torque,
             q_target
         );
-        assert!(t.is_finite() && t > 0.0, "thrust {}", t);
+        assert!(
+            res.thrust.is_finite() && res.thrust > 0.0,
+            "thrust {}",
+            res.thrust
+        );
+        // A feasible design converges onto the operating point without a
+        // warning (the unachievable-operating-point warning must stay off).
+        assert!(res.warning.is_none(), "unexpected warning {:?}", res.warning);
+        assert_eq!(res.converged_stations, res.total_stations);
         // The converged geometry stays in place for the STEP/YAML writers.
         assert!(!p.blade_elements.is_empty());
     }
@@ -1648,13 +1742,46 @@ mod tests {
         let (q0, _) = p.lift_line_design(12000.0, 2.0, None);
         assert!(q0 > 0.0, "reference torque {} not positive", q0);
         let q_target = 0.7 * q0;
-        let (q, t) = p.design_for_torque(12000.0, q_target, 2.0, None);
+        let res = p.design_for_torque(12000.0, q_target, 2.0, None);
         assert!(
-            (q - q_target).abs() / q_target < 0.01,
+            (res.torque - q_target).abs() / q_target < 0.01,
             "Q {} vs target {}",
-            q,
+            res.torque,
             q_target
         );
-        assert!(t.is_finite() && t > 0.0, "thrust {}", t);
+        assert!(
+            res.thrust.is_finite() && res.thrust > 0.0,
+            "thrust {}",
+            res.thrust
+        );
+        assert!(res.warning.is_none(), "unexpected warning {:?}", res.warning);
+    }
+
+    #[test]
+    fn unreachable_torque_target_reports_warning() {
+        // Regression (browser_demo plate-vs-full-polar discrepancy): when
+        // the geometry cannot absorb the design torque, `design_for_torque`
+        // must say so — a warning with the closest design and the station
+        // coverage — instead of silently reporting a broken (near-zero
+        // torque) design as if it had converged.  A zero `hub_depth` makes
+        // every station's max chord zero, so no station can carry any load:
+        // the loop stalls at Q = 0 on the first pass.
+        let mut p = test_prop();
+        p.param.hub_depth = 0.0; // degenerate depth law: no chord allowed
+        p.radial_steps = 10;
+        p.set_plate_mode(true);
+        let res = p.design_for_torque(12000.0, 0.05, 2.0, None);
+        assert!(res.torque == 0.0, "torque {}", res.torque);
+        assert!(res.thrust == 0.0, "thrust {}", res.thrust);
+        let w = res
+            .warning
+            .expect("unreachable operating point must carry a warning");
+        assert!(w.contains("not achievable"), "warning: {}", w);
+        assert!(
+            res.converged_stations <= res.total_stations && res.total_stations > 0,
+            "coverage {} / {}",
+            res.converged_stations,
+            res.total_stations
+        );
     }
 }

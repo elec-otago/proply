@@ -52,6 +52,11 @@ struct Section {
     thrust_n: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     torque_nm: Option<f64>,
+    /// Whether this station's BEM solve reached a momentum equilibrium (BEM
+    /// designs only): the design loop and the summary report the coverage
+    /// instead of silently treating failed stations as zeros.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    converged: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -94,6 +99,8 @@ struct Performance {
 struct DesignSummary {
     name: String,
     generated_by: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    warning: Option<String>,
     design: DesignInfo,
     motor: MotorInfo,
     performance: Performance,
@@ -117,7 +124,16 @@ fn r6(x: f64) -> f64 {
 
 /// Build the YAML summary of a finished design: `rpm`/`thrust`/`torque` are
 /// the design operating point and totals (as printed at the end of the run).
-pub fn summary(p: &Prop, rpm: f64, thrust: f64, torque: f64, motor: &MotorInfo) -> String {
+/// `warning`, when set, records that the design could not reach its
+/// operating point (an explicit note instead of a silently unmatched one).
+pub fn summary(
+    p: &Prop,
+    rpm: f64,
+    thrust: f64,
+    torque: f64,
+    motor: &MotorInfo,
+    warning: Option<&str>,
+) -> String {
     let param = &p.param;
     let mode = if param.lifting_line {
         "lifting-line"
@@ -148,6 +164,7 @@ pub fn summary(p: &Prop, rpm: f64, thrust: f64, torque: f64, motor: &MotorInfo) 
                 a_prime: bem_aero.then(|| r6(be.a_prime)),
                 thrust_n: bem_aero.then(|| r6(be.d_t())),
                 torque_nm: bem_aero.then(|| r6(be.d_m())),
+                converged: bem_aero.then_some(be.converged),
             }
         })
         .collect();
@@ -168,6 +185,7 @@ pub fn summary(p: &Prop, rpm: f64, thrust: f64, torque: f64, motor: &MotorInfo) 
     let s = DesignSummary {
         name: param.name.clone(),
         generated_by: format!("proply-rs {}", env!("CARGO_PKG_VERSION")),
+        warning: warning.map(|w| w.to_string()),
         design: DesignInfo {
             mode,
             blades: p.n_blades,
@@ -274,7 +292,7 @@ mod tests {
     #[test]
     fn bem_summary_parses_with_expected_content() {
         let p = synthetic_prop();
-        let text = summary(&p, 5000.0, 2.25, 0.05, &motor_info());
+        let text = summary(&p, 5000.0, 2.25, 0.05, &motor_info(), None);
         let y: serde_yaml::Value = serde_yaml::from_str(&text).expect("valid yaml");
 
         assert_eq!(y["name"], "hello world");
@@ -284,6 +302,8 @@ mod tests {
         assert_eq!(y["design"]["stations"], 4);
         assert_eq!(y["design"]["blades"], 2);
         assert_eq!(y["design"]["camber"], serde_yaml::Value::Null);
+        // No warning on a converged design: the key is absent, not empty.
+        assert!(y.get("warning").is_none(), "unexpected warning field");
 
         assert_eq!(y["motor"]["optimum_rpm"], 5000.0);
         assert_eq!(y["motor"]["voltage_v"], 11.0);
@@ -311,6 +331,8 @@ mod tests {
         assert_eq!(s0["a_prime"], 0.05);
         assert!(s0["thrust_n"].as_f64().unwrap() > 0.0);
         assert!(s0["torque_nm"].as_f64().unwrap() > 0.0);
+        // BEM sections carry the station convergence flag (default: converged).
+        assert_eq!(s0["converged"], true);
 
         // Radii run hub -> tip.
         let rs: Vec<f64> = sections
@@ -328,7 +350,7 @@ mod tests {
     fn lifting_line_sections_omit_induction_fields() {
         let mut p = synthetic_prop();
         p.param.lifting_line = true;
-        let text = summary(&p, 5000.0, 2.25, 0.05, &motor_info());
+        let text = summary(&p, 5000.0, 2.25, 0.05, &motor_info(), None);
         let y: serde_yaml::Value = serde_yaml::from_str(&text).expect("valid yaml");
 
         assert_eq!(y["design"]["mode"], "lifting-line");
@@ -341,7 +363,21 @@ mod tests {
             // Geometry is always present.
             assert!(s.get("chord_m").is_some());
             assert!(s.get("twist_deg").is_some());
+            // Station convergence is BEM-only.
+            assert!(s.get("converged").is_none(), "converged leaked into lifting-line");
         }
+    }
+
+    #[test]
+    fn warning_is_emitted_when_the_operating_point_was_not_reached() {
+        let p = synthetic_prop();
+        let w = "design torque 0.0500 Nm not achievable: the closest design absorbs 0.0000 Nm (100.0% of the target) at 0.00 N thrust; 0/4 BEM stations converged";
+        let text = summary(&p, 5000.0, 0.0, 0.0, &motor_info(), Some(w));
+        let y: serde_yaml::Value = serde_yaml::from_str(&text).expect("valid yaml");
+        assert_eq!(y["warning"], w);
+        // The performance block still reports the closest design's numbers.
+        assert_eq!(y["performance"]["thrust_n"], 0.0);
+        assert_eq!(y["performance"]["torque_nm"], 0.0);
     }
 
     #[test]
@@ -349,7 +385,7 @@ mod tests {
         let mut p = synthetic_prop();
         p.param.forward_airspeed = 0.0;
         // Hover (u_0 = 0): propulsive efficiency is zero, FoM positive.
-        let text = summary(&p, 5000.0, 2.25, 0.05, &motor_info());
+        let text = summary(&p, 5000.0, 2.25, 0.05, &motor_info(), None);
         let y: serde_yaml::Value = serde_yaml::from_str(&text).expect("valid yaml");
         assert_eq!(y["performance"]["propulsive_efficiency"], 0.0);
         assert!(y["performance"]["figure_of_merit"].as_f64().unwrap() > 0.0);
@@ -357,7 +393,7 @@ mod tests {
         // Forward flight: eta = T u_0 / P.
         let mut p2 = synthetic_prop();
         p2.param.forward_airspeed = 10.0;
-        let text = summary(&p2, 5000.0, 2.25, 0.05, &motor_info());
+        let text = summary(&p2, 5000.0, 2.25, 0.05, &motor_info(), None);
         let y: serde_yaml::Value = serde_yaml::from_str(&text).expect("valid yaml");
         let omega = rpm2omega(5000.0);
         let want = r6(2.25 * 10.0 / (0.05 * omega));

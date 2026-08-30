@@ -65,6 +65,23 @@ export class DesignOutput {
         return ret;
     }
     /**
+     * Empty when the design reached its operating point; otherwise an
+     * explicit note describing the closest achievable design.
+     * @returns {string}
+     */
+    get warning() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.__wbg_get_designoutput_warning(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
      * @returns {string}
      */
     get yaml() {
@@ -110,6 +127,16 @@ export class DesignOutput {
      */
     set torque(arg0) {
         wasm.__wbg_set_designoutput_torque(this.__wbg_ptr, arg0);
+    }
+    /**
+     * Empty when the design reached its operating point; otherwise an
+     * explicit note describing the closest achievable design.
+     * @param {string} arg0
+     */
+    set warning(arg0) {
+        const ptr0 = passStringToWasm0(arg0, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.__wbg_set_designoutput_warning(this.__wbg_ptr, ptr0, len0);
     }
     /**
      * @param {string} arg0

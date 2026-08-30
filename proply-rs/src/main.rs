@@ -288,6 +288,9 @@ fn main() {
         "Total Thrust: {:5.2}, Torque: {:5.3}",
         outcome.thrust, outcome.torque
     );
+    if let Some(warning) = &outcome.warning {
+        println!("proply: WARNING {}", warning);
+    }
 
     let step_filename = if param.step_file.is_empty() {
         format!("{}/{}.step", param.dir, param.name)

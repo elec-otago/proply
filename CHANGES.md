@@ -1,5 +1,52 @@
 # CHANGES
 
+## 2026-08-30 — Debug the browser-demo plate/full-polar thrust discrepancy
+
+### proply-rs (design loop)
+
+The TODO's `browser_demo` design (160 mm radius, 30 N target, pinned
+motor_torque 1.6 Nm @ 5500 RPM) converged onto the operating point with
+plate polars (Q = 1.587 Nm, T = 30.2 N) but collapsed to ~10% of the
+thrust with simulated polars (Q = 0.107 Nm, T = 2.48 N).  Debugging showed
+this is specific to infeasible operating points, not a general plate-vs-
+polar bug: the web demo's default design (68 mm, 3 N) converges either way
+(T = 1.19 N plate vs 1.41 N full polars, both at Q ≈ 0.016 Nm).  The
+pinned point demands ~920 W from a 320 mm prop whose NACA sections are
+t/c 0.26–0.59 at Re 30–150k — beyond what the simulated polars can
+deliver (cached sweeps: cl_max ≈ 0.2–1.2).  The no-stall plate model
+"absorbs" the torque in deep stall (alpha 18–38°) and reports ~30 N; with
+real polars the station BEM solves fail, the torque-match loop stalls, and
+the tool silently reported a broken design as if it had converged.
+
+- **Polar continuity across stall** (`simulator.rs`): the flat-plate
+  fallback switched at |alpha| > 30°, so a fitted cl of ~1 just below 30°
+  jumped to 2π·alpha ≈ 3.3 just above — a discontinuity the optimizers
+  exploited as a free lift source.  `get_cl`/`get_cd` now blend smoothly
+  (cubic smoothstep) from the fitted polar to the analytic flat-plate
+  model over |alpha| ∈ [18°, 33°]: pure polar below, pure flat plate
+  above, C1-continuous throughout.  No polar-cache key change (evaluation-
+  time only).
+- **Honest failure reporting** (`prop.rs`, `pipeline.rs`, `yaml_out.rs`,
+  `main.rs`): when the geometry cannot absorb the design torque,
+  `design_for_torque` now returns an explicit `warning` ("design torque
+  1.6000 Nm at 5500 rpm not achievable: the closest design absorbs 0.0977
+  Nm …; 5/11 BEM stations converged") instead of silently proceeding.
+  Non-converged stations keep their last induction state and are flagged
+  (per-element `converged`, reported in the YAML per section and as a
+  station-coverage count), rather than being silently reset to
+  (dv=1, a_prime=0).  The warning travels through the CLI printout, the
+  YAML summary (`warning:` key) and the browser demo status line.
+
+The plate-polar optimum is **not** a good starting point for non-plate
+designs (as the TODO asked): the plate trajectory operates at alpha
+18–38°, deep stall for the real sections, so it is not near any real-
+polar equilibrium; the failure is an infeasibility failure, not an
+optimizer stop.  On the fixed code the browser_demo design reports its
+closest achievable design explicitly (T = 1.66 N, Q = 0.098 Nm, warning
+emitted; 5/11 stations converged), and the achievable web-default design
+is unchanged in kind (T = 1.54 N, Q = 0.016 Nm at the 0.016 Nm target,
+all stations converged, no warning).
+
 ## 2026-08-29 — Link to the live web demo from the README
 
 ### README
