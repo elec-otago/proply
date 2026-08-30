@@ -24,6 +24,11 @@ export const STORAGE_KEY = 'proply-design-params';
 // synced from JSON (radius: 0.068 -> "68 mm"; trailing_edge is already
 // stored in mm, so it converts by 1).  `optional` fields are omitted
 // from the JSON when blank, so the Rust defaults apply.
+//
+// type "select" is a pseudo field: the input's value does not map to a
+// JSON key of the same name.  The foil-family select composes into the
+// `cst` / `arad` booleans (and drops them for the NACA default), and
+// syncForm derives its position from those keys.
 export const TABS = [
   {
     id: 'prop',
@@ -31,6 +36,16 @@ export const TABS = [
     fields: [
       { key: 'name', label: 'Name', type: 'text' },
       { key: 'blades', label: 'Blades', type: 'number', min: 2 },
+      {
+        key: 'foil_family',
+        label: 'Foil family',
+        type: 'select',
+        options: [
+          { value: 'naca', label: 'NACA 4-series' },
+          { value: 'cst', label: 'CST (Kulfan)' },
+          { value: 'arad', label: 'ARA-D' },
+        ],
+      },
       { key: 'radius', label: 'Radius', type: 'quantity', unit: 'mm', bareToDisplay: 1000 },
       { key: 'thrust', label: 'Thrust', type: 'quantity', unit: 'N', bareToDisplay: 1 },
       { key: 'tip_chord', label: 'Tip chord', type: 'quantity', unit: 'mm', bareToDisplay: 1000 },
@@ -70,10 +85,13 @@ function allFields() {
 /// Merge the tab field values into `current` (a parsed design JSON
 /// carrying anything the tabs do not own — run options, camber, ...).
 /// Blank values drop their key so the Rust defaults apply; number
-/// fields are written as JSON numbers.
+/// fields are written as JSON numbers.  Select fields are pseudo fields:
+/// the foil family is written as the `cst` / `arad` booleans, with the
+/// NACA default dropping both keys (the wasm defaults to NACA 4-series).
 export function composeDesign(current, values) {
   const out = { ...current };
   for (const field of allFields()) {
+    if (field.type === 'select') continue; // composed below
     const v = values[field.key];
     if (v === '' || v === null || v === undefined) {
       delete out[field.key];
@@ -87,6 +105,13 @@ export function composeDesign(current, values) {
       out[field.key] = String(v).trim();
     }
   }
+  const fam = values.foil_family;
+  if (fam === 'naca' || fam === 'cst' || fam === 'arad') {
+    delete out.cst;
+    delete out.arad;
+    if (fam === 'cst') out.cst = true;
+    else if (fam === 'arad') out.arad = true;
+  }
   return out;
 }
 
@@ -96,11 +121,17 @@ function fmt(n) {
 
 /// Populate the inputs from a parsed design JSON.  Quantity fields
 /// stored as bare numbers (SI) are converted into the display unit;
-/// suffixed strings are shown exactly as stored.
+/// suffixed strings are shown exactly as stored.  The foil-family
+/// select is derived from the `cst` / `arad` booleans (neither set
+/// means the NACA 4-series default).
 export function syncForm(inputs, json) {
   for (const field of allFields()) {
     const el = inputs[field.key];
     if (!el) continue;
+    if (field.type === 'select') {
+      el.value = json.cst ? 'cst' : json.arad ? 'arad' : 'naca';
+      continue;
+    }
     const v = json[field.key];
     if (v === undefined || v === null) {
       el.value = '';
@@ -145,10 +176,21 @@ export function buildForm(container) {
       label.className = 'field';
       const span = document.createElement('span');
       span.textContent = field.label;
-      const input = document.createElement('input');
-      input.type = field.type === 'number' ? 'number' : 'text';
-      if (field.type === 'number' && field.min !== undefined) {
-        input.min = field.min;
+      let input;
+      if (field.type === 'select') {
+        input = document.createElement('select');
+        for (const opt of field.options) {
+          const o = document.createElement('option');
+          o.value = opt.value;
+          o.textContent = opt.label;
+          input.append(o);
+        }
+      } else {
+        input = document.createElement('input');
+        input.type = field.type === 'number' ? 'number' : 'text';
+        if (field.type === 'number' && field.min !== undefined) {
+          input.min = field.min;
+        }
       }
       inputs[field.key] = input;
       label.append(span, input);

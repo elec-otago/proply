@@ -1,5 +1,30 @@
 # CHANGES
 
+## 2026-08-30 — ARA-D foils selectable in the web demo
+
+### proply-rs web demo
+
+The TODO's first item, "Add the ARA-D foils as an option in the web
+interface. Make sure that foil family choice can be chosen though the
+JSON input file as well".  The ARA-D family itself (and the `cst`/
+`arad` JSON keys and `--cst`/`--arad` CLI flags) were already ported;
+what was missing was any way to pick the family from the page.
+
+- **Foil family select** (`forms.js`, `index.html`): the
+  **Propeller Specifications** tab gains a **Foil family** dropdown —
+  NACA 4-series (the default), CST (Kulfan) or ARA-D.  `forms.js` gains
+  a new "select" pseudo-field type: `composeDesign` writes the choice as
+  the JSON's `cst`/`arad` booleans (dropping both keys for the NACA
+  default, so the Rust default applies), `syncForm` derives the dropdown
+  position from those keys when a design is loaded (boot, localStorage
+  or a hand edit in the textarea), and `buildForm` renders a proper
+  `<select>`.
+- **JSON input file**: the family remains entirely JSON-driven — the
+  dropdown is just an editor for the `cst`/`arad` keys, which the CLI,
+  the wasm and the JSON input files already parse (`arad.json` golden
+  test).  No Rust or wasm changes were needed; the committed wasm
+  package already contains the family.
+
 ## 2026-08-30 — Debug the browser-demo plate/full-polar thrust discrepancy
 
 ### proply-rs (design loop)

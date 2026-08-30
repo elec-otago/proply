@@ -2,6 +2,4 @@
 
 Document each change once done in CHANGES.md. Then remove from TODO.md
 
-* Add the ARA-D foils as an option in the web interface. Make sure that foil family choice can be chosen though the JSON input file as well. 
-
-* Choose a different mechanism for chord choice. The basic idea should be mechanical, treating the blade as a beam and approximating deflection. Then calculating the deflection caused by the thrust integrated along the blade and keeping the blade shape. from deforming too much.
+* Design a mechanism for airfoil thickness. The basic idea should be mechanical, treating the blade as a beam and approximating deflection. Then calculating the deflection caused by the thrust integrated along the blade (in the z direction). The thickness should be chosen to keeping the blade shape from deforming too much. Also take the twist into account as the chord can make the beam stiffer. The hun thickness should not be involved in deciding this.
