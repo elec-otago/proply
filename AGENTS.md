@@ -8,3 +8,7 @@
   unavoidable; running its tests is not. 
 - The webassembly version is deployed using vercel in proply-rs/web. 
 - The webassembly needs to be built before committing to github (see make wasm) in Makefile.
+- The web demo shows a build label ("yyyy-mm-dd.xx", the last commit's
+  date plus its per-day build number) in proply-rs/web/build.js:
+  regenerate it with `make build-date` before committing web changes,
+  so the deployed label matches the deployed sources.

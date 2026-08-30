@@ -1,5 +1,24 @@
 # CHANGES
 
+## 2026-08-30 — Build label on the web demo
+
+### proply-rs web demo
+
+The demo page now shows a build label in the form `yyyy-mm-dd.xx` — the
+date of the last commit and its **per-day build number** (the count of
+commits on that date, so each build on a day increments `xx` and a new
+day starts at `.01`):
+
+- new `make build-date` (Makefile) writes `proply-rs/web/build.js`
+  (`export const BUILD = "2026-08-30.08"`), derived from git
+  (`git log -1 --format=%cs` for the date, the matching commit count for
+  `xx`);
+- `web/index.html` gains a `#build-line` and `web/main.js` imports the
+  stamp and renders `build 2026-08-30.08` under the intro;
+- AGENTS.md notes the stamp must be regenerated (`make build-date`)
+  before committing web changes, so the deployed label matches the
+  deployed sources.  JS/docs only; no Rust or wasm change.
+
 ## 2026-08-30 — Mechanical tab in the web demo; accuracy pass on MECHANICAL.md
 
 ### proply-rs web demo

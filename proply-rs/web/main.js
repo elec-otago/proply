@@ -12,8 +12,13 @@
 // The tabbed editors for the design JSON (forms.js): pure compose/sync
 // logic plus the localStorage persistence of the design parameters.
 import { buildForm, composeDesign, readForm, syncForm, loadStored, saveStored } from './forms.js';
+// The build label "yyyy-mm-dd.xx" (last commit date + per-day build
+// number), regenerated with `make build-date` — see the Makefile.
+import { BUILD } from './build.js';
 
 const $ = (id) => document.getElementById(id);
+
+$('build-line').textContent = `build ${BUILD}`;
 
 const DEFAULT_PARAMS = {
   name: 'browser_demo',

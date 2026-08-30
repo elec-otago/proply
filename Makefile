@@ -4,6 +4,7 @@
 #   make steps              design all props (STEP files in build/out/)
 #   make summaries          design all props (YAML summaries in build/out/)
 #   make wasm               build the WebAssembly package (proply-rs/pkg/)
+#   make build-date         stamp the web build label (web/build.js)
 #   make check-wasm         type-check the lib for wasm32 without wasm-pack
 #   make clean              remove generated STEP, YAML and PNG files
 #
@@ -67,8 +68,23 @@ wasm:
 	rm -f proply-rs/web/pkg/.gitignore  # wasm-pack ignores its own output;
 	                                    # the web/pkg copy is meant to be committed
 
+# Build stamp for the web demo: the deployed page shows "build
+# yyyy-mm-dd.xx" — the last commit's date (`%cs`) and its per-day build
+# number (the count of commits on that date, so each build on a day
+# increments xx and a new day starts at .01).  Written to
+# proply-rs/web/build.js, which main.js renders; regenerate before
+# committing web changes so the label matches the deployed sources.
+build-date:
+	@DATE=$$(git log -1 --format=%cs); \
+	COUNT=$$(git log --format=%cs | grep -cx "$$DATE"); \
+	XX=$$(printf '%02d' "$$COUNT"); \
+	{ printf '// Build stamp: "yyyy-mm-dd.xx" — the last commit date and its per-day\n// build number (commits on that date).  Regenerate with make build-date\n// before committing web changes.\n'; \
+	  printf 'export const BUILD = "%s.%s";\n' "$$DATE" "$$XX"; \
+	} > proply-rs/web/build.js; \
+	echo "web build stamp: $$DATE.$$XX -> proply-rs/web/build.js"
+
 check-wasm:
 	cargo check -p proply-rs --target $(WASM_TARGET)
 
-.PHONY: all steps summaries gallery clean wasm check-wasm
+.PHONY: all steps summaries gallery clean wasm check-wasm build-date
 .DELETE_ON_ERROR:
