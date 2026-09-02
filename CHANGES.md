@@ -1,5 +1,19 @@
 # CHANGES
 
+## 2026-09-02 — Checkpoint the polar cache during a run
+
+### proply-rs
+
+- The polar cache used to be written to disk only once, at process exit —
+  a killed or interrupted run lost every polar it had simulated (which is
+  why interrupted `make` runs re-paid their 10-40 minute discovery cost
+  each time).  `PolarStore::insert` now auto-saves after every 25 freshly
+  simulated polars (`CHECKPOINT_EVERY`); a whole-file JSON write takes
+  milliseconds next to the seconds each rust-foil sweep takes, so the
+  steady-state cost is invisible.  Verified by killing a discovery run
+  mid-design: the on-disk cache kept exactly the checkpointed batches
+  (2500 → 2550 keys, two batches of 25), and a re-run reused them.
+
 ## 2026-09-02 — Rename `resolution` to `element_count`
 
 ### proply-rs CLI / JSON schema
