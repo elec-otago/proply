@@ -37,12 +37,17 @@ pub const CAMBER_CANDIDATES: [f64; 3] = [0.0, 0.02, 0.04];
 const CH_FLOOR: f64 = 0.002;
 /// Bounds on the common attack-angle offset `da` over the best-L/D angles
 /// (rad).  `DA_MAX` sits ~7 deg above best-L/D, below deep stall; `DA_MIN`
-/// may also trim *through* zero lift: thrust is monotone in `da` across the
-/// whole range, so the inner bisection can match a low thrust target at any
-/// chord — without it, a full-chord blade whose thrust already exceeds the
-/// target could never converge, as `da > 0` only adds thrust.
+/// may also trim *through* zero lift: torque is monotone in `da` across the
+/// whole range, so the inner bisection can match a low torque target at any
+/// chord — without it, a full-chord blade whose torque already exceeds the
+/// target could never converge, as `da > 0` only adds torque.
 const DA_MIN: f64 = -0.45;
 const DA_MAX: f64 = 0.12;
+
+/// Relative torque tolerance of the direct lifting-line operating-point
+/// match ([`Prop::lift_line_design`]): above this the geometry could not
+/// absorb the demanded torque and the result carries a warning.
+const TOL_LIFT_LINE: f64 = 1.0e-2;
 
 /// Worker threads available to the design's scoped-thread pools.
 /// WebAssembly has no threads (`thread::scope`'s spawn panics there), and a
@@ -591,37 +596,64 @@ impl Prop {
         (f.torque, f.thrust)
     }
 
-    /// One design pass with the configured loop (lifting line or BEM).
-    fn run_design(&mut self, rpm: f64, thrust: f64, ar: Option<f64>) -> (f64, f64) {
-        if self.param.lifting_line {
-            self.lift_line_design(rpm, thrust, ar)
-        } else {
-            self.full_optimize(rpm, thrust)
-        }
-    }
-
-    /// Converge the design onto the operating point: iterate the thrust
-    /// target until the blade absorbs exactly `q_target` of torque at `rpm`
-    /// (the design RPM), starting from `thrust_seed` (the JSON `thrust`
-    /// key — the achieved thrust becomes an output, not a constraint).
+    /// Converge the design onto the operating point: at `rpm` the blade
+    /// absorbs exactly `q_target` of torque (the motor's torque there), and
+    /// the geometry maximises efficiency — equivalently thrust, since the
+    /// shaft power Q·ω is fixed once (torque, RPM) is.
     ///
-    /// This is the maximum-efficiency design at that operating point.  The
-    /// shaft power is fixed once (torque, RPM) is, and the inner loops
-    /// already maximise efficiency at a matched thrust (per-station
-    /// best-L/D attack angles; the torque-minimising lifting line), so the
-    /// torque-matched member of that family of designs is the one that puts
-    /// all of the available power to work.  Absorbed torque rises
-    /// monotonically with the thrust target, so a damped multiplicative
-    /// secant on the target converges from either side.
+    /// The lifting-line path reaches the operating point *directly*: every
+    /// design evaluation matches a common attack offset `da` so the
+    /// absorbed torque equals `q_target` (torque is monotone in `da` over
+    /// the attached range) and the chord/camber search then maximises the
+    /// resulting thrust in a single pass.  No thrust target is iterated —
+    /// the achieved thrust is an output, not a constraint (`thrust_seed`,
+    /// the JSON `thrust` key, is ignored here).
     ///
-    /// If the geometry cannot reach the target (chord/depth caps limit the
-    /// loading), the closest design is returned with a warning.
+    /// The BEM path sizes each station from momentum theory for a target
+    /// induced velocity and has no equivalent single global offset, so it
+    /// keeps the damped multiplicative iteration over the thrust target
+    /// (torque rises monotonically with it); `thrust_seed` is that
+    /// iteration's starting point.
+    ///
+    /// If no geometry can absorb the demanded torque (chord/depth caps
+    /// limit the loading), the closest design is returned with a warning.
     pub fn design_for_torque(
         &mut self,
         rpm: f64,
         q_target: f64,
         thrust_seed: f64,
         ar: Option<f64>,
+    ) -> DesignResult {
+        if self.param.lifting_line {
+            let (q, t, err) = self.lift_line_design(rpm, q_target, ar);
+            let (converged, total) = self.station_coverage();
+            let warning = (err > TOL_LIFT_LINE).then(|| {
+                let msg = format!(
+                    "design torque {:.4} Nm at {:.0} rpm not achievable: the closest design absorbs {:.4} Nm ({:.1}% of the target) at {:.2} N thrust; {}/{} BEM stations converged",
+                    q_target, rpm, q, 100.0 * err, t, converged, total
+                );
+                crate::dprintln!("proply: WARNING {}", msg);
+                msg
+            });
+            return DesignResult {
+                torque: q,
+                thrust: t,
+                warning,
+                converged_stations: converged,
+                total_stations: total,
+            };
+        }
+        self.bem_design_for_torque(rpm, q_target, thrust_seed)
+    }
+
+    /// The BEM path of [`design_for_torque`]: iterate the thrust target
+    /// until a full BEM design absorbs `q_target` at `rpm` (each iteration
+    /// re-optimises every station for the induced velocity of that target).
+    fn bem_design_for_torque(
+        &mut self,
+        rpm: f64,
+        q_target: f64,
+        thrust_seed: f64,
     ) -> DesignResult {
         const MAX_ITERS: usize = 30;
         /// Relative torque tolerance for a converged match.
@@ -648,7 +680,7 @@ impl Prop {
         // above 1/elasticity is linearly unstable there).
         let mut prev: Option<(f64, f64)> = None;
         for iter in 0..MAX_ITERS {
-            let (q, t) = self.run_design(rpm, thrust, ar);
+            let (q, t) = self.full_optimize(rpm, thrust);
             let err = (q - q_target).abs() / q_target;
             crate::dprintln!(
                 "Operating point match {:2}: thrust target {:6.3} N -> T={:6.3} N, Q={:6.4} Nm (design Q={:6.4}, err {:4.2}%)",
@@ -720,23 +752,17 @@ impl Prop {
                     "proply: falling back to the closest design (thrust target {:.3} N)",
                     t_best
                 );
-                return self.finish_unconverged(rpm, t_best, q_target, ar);
+                return self.finish_unconverged(rpm, t_best, q_target);
             }
         }
-        self.finish_unconverged(rpm, thrust, q_target, ar)
+        self.finish_unconverged(rpm, thrust, q_target)
     }
 
-    /// Re-run the design at `thrust` (the best match found by
-    /// [`design_for_torque`]) and report it with a warning describing the
-    /// gap to the demanded operating point.
-    fn finish_unconverged(
-        &mut self,
-        rpm: f64,
-        thrust: f64,
-        q_target: f64,
-        ar: Option<f64>,
-    ) -> DesignResult {
-        let (q, t) = self.run_design(rpm, thrust, ar);
+    /// Re-run the BEM design at `thrust` (the best match found by
+    /// [`bem_design_for_torque`]) and report it with a warning describing
+    /// the gap to the demanded operating point.
+    fn finish_unconverged(&mut self, rpm: f64, thrust: f64, q_target: f64) -> DesignResult {
+        let (q, t) = self.full_optimize(rpm, thrust);
         let (converged, total) = self.station_coverage();
         let err = (q - q_target).abs() / q_target;
         let warning = Some(format!(
@@ -891,12 +917,15 @@ impl Prop {
 
     /// One camber candidate's design pass: build the station elements from
     /// `camber_dist`, prescribe the attack angles `alpha_base` (plus a common
-    /// offset `da` matched to the thrust target by an inner monotone
-    /// bisection) and optimise the chord-spline controls with three
-    /// warm-chained Nelder-Mead starts.  Self-contained (own elements and
-    /// warm state, parameter-only geometry laws) so the camber candidates can
-    /// run in parallel on scoped threads; returns the measured geometry, or
-    /// `None` when no thrust match was found.  `law` is the active thickness
+    /// offset `da` matched so the blade absorbs exactly `q_target` of torque,
+    /// by an inner monotone bisection) and optimise the chord-spline controls
+    /// with warm-chained Nelder-Mead starts on the resulting thrust.  At a
+    /// fixed (torque, RPM) operating point the shaft power Q·ω is fixed, so
+    /// maximum thrust *is* maximum efficiency.  Self-contained (own elements
+    /// and warm state, parameter-only geometry laws) so the camber candidates
+    /// can run in parallel on scoped threads; returns the measured geometry,
+    /// or `None` when no usable design was found.  `law` is the active
+    /// thickness
     /// law (the mechanical radius → t/c curve, or `None` for the geometric
     /// power law); it is shared read-only, so the passes stay independent.
     #[allow(clippy::too_many_arguments)]
@@ -914,7 +943,7 @@ impl Prop {
         rpm: f64,
         omega: f64,
         u_0: f64,
-        thrust: f64,
+        q_target: f64,
         n_ctrl: usize,
         s_cap: f64,
         label: &str,
@@ -947,8 +976,9 @@ impl Prop {
 
         // Design variables `x ∈ [0,1]^n_ctrl` log-map to the control chords;
         // the common attack offset `da ∈ [DA_MIN, DA_MAX]` over the best-L/D
-        // angles is matched to the thrust target by an inner monotone
-        // bisection (`meet_thrust` below), not optimized.  `alpha_i =
+        // angles is matched so the absorbed torque equals `q_target` by an
+        // inner monotone bisection (`meet_torque` below), not optimized.
+        // `alpha_i =
         // best_L/D_i + da` is prescribed (`twist = phi + alpha`), so there is
         // no twist<->induction feedback; the circulation solve is converged
         // by damped Newton (warm-started from the previous evaluation).  The
@@ -1003,14 +1033,26 @@ impl Prop {
         };
 
         // Outer optimizer over the N control values: for each candidate shape,
-        // an inner **monotone `da` bisection** (below) reliably matches the
-        // thrust target, so the outer NelderMead only needs to minimise the
-        // torque (efficiency) among shapes that meet the target.  Seeded at the
-        // full chord — the thrust-capable geometry — so it cannot be trapped in
-        // a thin/low-thrust region.
+        // an inner **monotone `da` bisection** (below) matches the absorbed
+        // torque to `q_target`, so the outer NelderMead only needs to
+        // maximise the thrust among shapes that absorb exactly the target
+        // torque.  Seeded at the full chord — the torque-capable geometry —
+        // so it cannot be trapped in a thin/low-torque region.
         // (da, err, thrust, torque, alpha, chord, phi) — one design candidate.
         type MeetOutcome = (f64, f64, f64, f64, Vec<f64>, Vec<f64>, Vec<f64>);
-        let meet_thrust = |controls: &[f64],
+        // A converged solve is usable only while every station carries
+        // non-negative circulation: the section models (and their polar
+        // fits) can support spurious flow branches with an outboard
+        // *brake* — negative gamma contributing negative torque and thrust.
+        // Such states must never seed the running best: with the old
+        // thrust-matched objective a brake dumps torque, so the garbage
+        // branch *won* the competition (low Q at the matched T) — the
+        // torque cliff between consecutive matches.  At a torque target a
+        // brake wastes torque budget, but only if it is never adopted here.
+        let physical = |q: f64, g: &[f64]| -> bool {
+            q.is_finite() && q > 0.0 && g.iter().all(|&x| x.is_finite() && x >= -1.0e-9)
+        };
+        let meet_torque = |controls: &[f64],
                            elems: &mut Vec<BladeElement<FoilFamily>>,
                            pg_r: &RefCell<Vec<f64>>,
                            hint_da: Option<f64>|
@@ -1018,29 +1060,30 @@ impl Prop {
             // returns (da, err, thrust, torque, alpha, chord, phi, reachable)
             let mut cur: Vec<f64> = pg_r.borrow().clone();
             let mut bst: Option<MeetOutcome> = None; // da, err, t, q, alpha, chord, phi
-            let mut prev: Option<(f64, f64)> = None; // (da, thrust)
+            let mut prev: Option<(f64, f64)> = None; // (da, torque)
             let mut bracket: Option<(f64, f64)> = None;
-            let better = |err: f64, q: f64, b: &Option<MeetOutcome>| -> bool {
+            // Prefer the sample closest to the target torque; at equal error
+            // prefer the larger thrust (the efficiency objective).
+            let better = |err: f64, t: f64, b: &Option<MeetOutcome>| -> bool {
                 match b {
-                    None => q > 0.0,
-                    Some((_, be, _, bq, _, _, _)) => {
-                        (q > 0.0) && (err < *be - 1.0e-9 || ((err - *be).abs() < 1.0e-9 && q < *bq))
+                    None => true,
+                    Some((_, be, bt, _, _, _, _)) => {
+                        err < *be - 1.0e-9 || ((err - *be).abs() < 1.0e-9 && t > *bt)
                     }
                 }
             };
 
-            // Warm start: evaluate the previous `da` first; if it already meets
-            // the target, return immediately (a single circulation solve).
-            // The acceptance also requires a physical result: a warm-started
-            // Newton solve can land on a garbage branch with negative (or
-            // non-finite) torque, and the objective f = q + 50*err would then
-            // *reward* the garbage (negative q minimises it).
+            // Warm start: evaluate the previous `da` first; if it already
+            // meets the target, return immediately (a single circulation
+            // solve).  The acceptance requires a physical result: a
+            // warm-started Newton solve can land on a brake-tip branch, and
+            // the objective must not reward that state.
             if let Some(hd) = hint_da {
                 if (DA_MIN..=DA_MAX).contains(&hd) {
                     let (t, q, alphas, chords, g, phis) = eval(controls, hd, elems, &cur);
+                    let err = (q - q_target).abs() / q_target.max(1.0e-9);
                     cur = g;
-                    let err = (t - thrust).abs() / thrust.max(1.0e-9);
-                    if err <= 0.03 && q > 0.0 && q.is_finite() {
+                    if err <= 0.03 && physical(q, &cur) {
                         *pg_r.borrow_mut() = cur.clone();
                         crate::dprintln!(
                             "lift-line [{}] ctrl=[{}] da={:.3} (warm): T={:.4} Q={:.4}",
@@ -1056,14 +1099,13 @@ impl Prop {
                         );
                         return ((hd, err, t, q, alphas, chords, phis), true);
                     }
-                    // The sample may still bracket the target (its thrust is
-                    // meaningful), but a garbage torque must not seed the
-                    // running best: `better` only replaces positive-torque
-                    // candidates, so a poisoned best would block them.
-                    if q > 0.0 && q.is_finite() {
+                    // The sample may still bracket the target (its torque is
+                    // meaningful), but a non-physical state must not seed the
+                    // running best: it would block the honest samples.
+                    if physical(q, &cur) {
                         bst = Some((hd, err, t, q, alphas, chords, phis));
                     }
-                    prev = Some((hd, t));
+                    prev = Some((hd, q));
                 }
             }
 
@@ -1079,27 +1121,27 @@ impl Prop {
             for &da in &cands {
                 let (t, q, alphas, chords, g, phis) = eval(controls, da, elems, &cur);
                 cur = g;
-                let err = (t - thrust).abs() / thrust.max(1.0e-9);
-                if better(err, q, &bst) {
+                let err = (q - q_target).abs() / q_target.max(1.0e-9);
+                if physical(q, &cur) && better(err, t, &bst) {
                     bst = Some((da, err, t, q, alphas, chords, phis));
                 }
-                if let Some((pd, pt)) = prev {
-                    if (pt < thrust && t >= thrust) || (pt >= thrust && t < thrust) {
+                if let Some((pd, pq)) = prev {
+                    if (pq < q_target && q >= q_target) || (pq >= q_target && q < q_target) {
                         bracket = Some((pd, da));
                     }
                 }
-                prev = Some((da, t));
+                prev = Some((da, q));
             }
             if let Some((mut lo, mut hi)) = bracket {
                 for _ in 0..6 {
                     let mid = 0.5 * (lo + hi);
                     let (t, q, alphas, chords, g, phis) = eval(controls, mid, elems, &cur);
                     cur = g;
-                    let err = (t - thrust).abs() / thrust.max(1.0e-9);
-                    if better(err, q, &bst) {
+                    let err = (q - q_target).abs() / q_target.max(1.0e-9);
+                    if physical(q, &cur) && better(err, t, &bst) {
                         bst = Some((mid, err, t, q, alphas, chords, phis));
                     }
-                    if t < thrust {
+                    if q < q_target {
                         lo = mid;
                     } else {
                         hi = mid;
@@ -1125,7 +1167,7 @@ impl Prop {
             let hint = *da_hint.borrow();
             let ((da, err, t, q, _al, _ch, _ph), _reach) = {
                 let mut e = state.borrow_mut();
-                meet_thrust(&controls, &mut e, &pg, hint)
+                meet_torque(&controls, &mut e, &pg, hint)
             };
             *da_hint.borrow_mut() = Some(da);
             pb.inc(1);
@@ -1144,8 +1186,11 @@ impl Prop {
                     q
                 );
             }
-            // Meet the target (50*err dominates) and then minimise torque.
-            q + 50.0 * err
+            // Absorb the target torque exactly (1000*err dominates: a design
+            // that cannot absorb the demanded torque is not the operating
+            // point) and then maximise the resulting thrust — at the fixed
+            // shaft power Q·ω, thrust ⇔ efficiency.
+            1000.0 * err - t
         };
 
         let nm = optimize::NelderMead {
@@ -1153,12 +1198,12 @@ impl Prop {
             ..Default::default()
         };
         let bounds: Vec<Option<(f64, f64)>> = vec![Some((0.0, 1.0)); n_ctrl];
-        // First run: warm start from the previous torque match's controls
-        // when this is the incumbent design (the target moves only a few
-        // percent between matches), else the full chord — the
-        // thrust-capable geometry.  When a seed was used, a second run from
-        // the full chord anchors reachability, so a large target move
-        // cannot trap the search in a thin region.
+        // First run: warm start from the previous operating point's controls
+        // when this is the incumbent design (the torque target is the same
+        // and only the thickness law moved between the pipeline's two runs),
+        // else the full chord — the torque-capable geometry.  When a seed
+        // was used, a second run from the full chord anchors reachability,
+        // so the search cannot be trapped in a thin region.
         let full_chord: Vec<f64> = vec![1.0; n_ctrl];
         let seeded: Vec<f64> = x0_seed
             .filter(|s| s.len() == n_ctrl)
@@ -1180,9 +1225,6 @@ impl Prop {
                 best_f = f;
                 best_x = x;
             }
-            if best_f < 0.03 {
-                break;
-            }
         }
         // Warm-chained scaled restarts around the running best (they keep
         // working the promising region, and the shared gamma/da warm state
@@ -1202,17 +1244,17 @@ impl Prop {
                 best_f = f;
                 best_x = x;
             }
-            if best_f < 0.03 || f >= before {
+            if f >= before {
                 break;
             }
         }
         let _ = best_f;
 
         // Final measured candidate, seeded with the optimizer's converged
-        // `da` so the reported geometry is exactly the design the outer loop
-        // evaluated as its best.  A cold full scan (hint=None) re-solves the
-        // candidates from a different Newton path and can land on another
-        // branch of the nonlinear system, reporting a *worse* thrust match
+        // `da` so the reported geometry is exactly the design the operating
+        // point evaluated as its best.  A cold full scan (hint=None) re-solves
+        // the candidates from a different Newton path and can land on another
+        // branch of the nonlinear system, reporting a *worse* torque match
         // than the optimizer actually achieved; the warm check still falls
         // back to the full scan if it does not meet the target.
         let mut elements = std::mem::take(&mut *state.borrow_mut());
@@ -1221,68 +1263,63 @@ impl Prop {
             .collect();
         let ((mut da, mut err, mut r_t, mut r_q, _al, mut chords, mut phis), _reach) = {
             let hint = *da_hint.borrow();
-            meet_thrust(&controls, &mut elements, &pg, hint)
+            meet_torque(&controls, &mut elements, &pg, hint)
         };
         if phis.len() != m {
             crate::dprintln!(
-                "lift-line camber {}: no thrust match (T={:.4}, err {:.3})",
+                "lift-line camber {}: no usable design (T={:.4}, err {:.3})",
                 label, r_t, err
             );
             return None;
         }
         // The warm hint's acceptance (err <= 3%) leaves the measured
-        // operating point up to a few percent off the target.  Candidates
-        // must compete on the torque at the *exact* target thrust: with the
-        // coarse slack, a high-torque design that happens to match thrust
-        // exactly outranks a low-torque one sitting a percent or two off —
-        // the mis-ranking that made the outer torque iteration oscillate
-        // (the logs show 15-20% error jumps when such a candidate won).
-        // Refine `da` with a bounded bisection around the warm value: the
-        // matched thrust is monotone in `da`, and every solve warm-starts
-        // from the previous circulation, so the Newton path stays on the
-        // branch the optimizer converged on.
-        if err > 1.0e-3 && r_t > 0.0 {
+        // operating point up to a few percent off the target torque.
+        // Candidates must compete on the thrust at the *exact* target
+        // torque, so refine `da` with a bounded bisection around the warm
+        // value: the absorbed torque is monotone in `da`, and every solve
+        // warm-starts from the previous circulation, so the Newton path
+        // stays on the branch the optimizer converged on.
+        if err > 1.0e-3 && r_q > 0.0 {
             let mut cur: Vec<f64> = pg.borrow().clone();
             let (mut lo, mut hi) = (da, da);
-            let (mut t_lo, mut t_hi) = (r_t, r_t);
-            // Expand a bracket around the warm da until the matched thrust
+            let (mut q_lo, mut q_hi) = (r_q, r_q);
+            // Expand a bracket around the warm da until the absorbed torque
             // straddles the target.
             for _ in 0..7 {
-                if (t_lo - thrust) * (t_hi - thrust) <= 0.0 && lo < hi {
+                if (q_lo - q_target) * (q_hi - q_target) <= 0.0 && lo < hi {
                     break;
                 }
-                if t_hi < thrust && hi < DA_MAX {
+                if q_hi < q_target && hi < DA_MAX {
                     lo = hi;
-                    t_lo = t_hi;
+                    q_lo = q_hi;
                     hi = (hi + 0.1).min(DA_MAX);
-                    let (t2, _q, _a, _c, g2, _p) = eval(&controls, hi, &mut elements, &cur);
+                    let (_t2, q2, _a, _c, g2, _p) = eval(&controls, hi, &mut elements, &cur);
                     cur = g2;
-                    t_hi = t2;
-                } else if t_lo > thrust && lo > DA_MIN {
+                    q_hi = q2;
+                } else if q_lo > q_target && lo > DA_MIN {
                     hi = lo;
-                    t_hi = t_lo;
+                    q_hi = q_lo;
                     lo = (lo - 0.1).max(DA_MIN);
-                    let (t2, _q, _a, _c, g2, _p) = eval(&controls, lo, &mut elements, &cur);
+                    let (_t2, q2, _a, _c, g2, _p) = eval(&controls, lo, &mut elements, &cur);
                     cur = g2;
-                    t_lo = t2;
+                    q_lo = q2;
                 } else {
                     break;
                 }
             }
-            let target = thrust;
-            if (t_lo - target) * (t_hi - target) <= 0.0 {
+            if (q_lo - q_target) * (q_hi - q_target) <= 0.0 {
                 let (mut l, mut h) = (lo, hi);
                 for _ in 0..14 {
                     let mid = 0.5 * (l + h);
                     let (t2, q2, _a, c2, g2, p2) = eval(&controls, mid, &mut elements, &cur);
                     cur = g2;
-                    let e2 = (t2 - target).abs() / target.max(1.0e-9);
-                    // Adopt the tighter sample only when it is physical: a
+                    let e2 = (q2 - q_target).abs() / q_target.max(1.0e-9);
+                    // Adopt the tighter sample only when it is physical
+                    // (positive torque, every station lifting): a
                     // warm-started Newton solve at some bisection point can
-                    // land on a garbage branch (negative or non-finite
-                    // torque) whose thrust still happens to match, and the
-                    // objective would then reward the garbage.
-                    if e2 < err && q2 > 0.0 && q2.is_finite() {
+                    // land on a brake-tip branch whose total torque still
+                    // matches, and the objective must not reward that state.
+                    if e2 < err && physical(q2, &cur) {
                         err = e2;
                         da = mid;
                         r_t = t2;
@@ -1290,7 +1327,7 @@ impl Prop {
                         chords = c2;
                         phis = p2;
                     }
-                    if t2 <= target {
+                    if q2 <= q_target {
                         l = mid;
                     } else {
                         h = mid;
@@ -1303,10 +1340,10 @@ impl Prop {
                 phis[i] + (alpha_base[i] + da).clamp(-lift_line::ALPHA_MAX, lift_line::ALPHA_MAX),
             );
         }
-        let f = r_q + 50.0 * err;
+        let f = 1000.0 * err - r_t;
         crate::dprintln!(
-            "lift-line camber {}: T={:.4} Q={:.4} (obj {:.4})",
-            label, r_t, r_q, f
+            "lift-line camber {}: T={:.4} Q={:.4} (err {:.2}%, obj {:.4})",
+            label, r_t, r_q, 100.0 * err, f
         );
         Some(PassOutcome {
             f,
@@ -1322,13 +1359,18 @@ impl Prop {
         })
     }
 
-    /// Design a blade with the coupled lifting line, targeting `thrust`.
+    /// Design a blade with the coupled lifting line that absorbs exactly
+    /// `q_target` of torque at `rpm` and maximises the resulting thrust
+    /// (i.e. the efficiency: the shaft power Q·ω is fixed by the operating
+    /// point).  One design pass — no iteration over a thrust target.
     ///
     /// `ar` optionally forces a minimum blade aspect ratio
     /// `(R - hub) / mean_chord`, which thins the blade (lowers induced loss
-    /// and raises efficiency).  Returns `(torque, thrust)` of the converged
-    /// design.
-    pub fn lift_line_design(&mut self, rpm: f64, thrust: f64, ar: Option<f64>) -> (f64, f64) {
+    /// and raises efficiency).  Returns `(torque, thrust, relative torque
+    /// error)` of the converged design: the error is small when the
+    /// geometry can absorb the demanded torque, and larger (with the
+    /// closest design returned) when chord/depth caps limit the loading.
+    pub fn lift_line_design(&mut self, rpm: f64, q_target: f64, ar: Option<f64>) -> (f64, f64, f64) {
         let u_0 = self.param.forward_airspeed;
         let omega = optimize::rpm2omega(rpm);
         let r_hub = self.param.hub_radius;
@@ -1443,8 +1485,15 @@ impl Prop {
             // crosses a polar bucket or the low-Re flat-plate cutoff.  Re and Mach
             // vary smoothly with r, so the underlying optimum does too: use a
             // least-squares fit (as the BEM path does for the twist) everywhere
-            // downstream (`eval`, `meet_thrust`, the final twist assembly).
-            let alpha_base = smooth_alpha_curve(&rr, &alpha_raw);
+            // downstream (`eval`, `meet_torque`, the final twist assembly).  The
+            // smoothed angles are floored at zero: a *negative* best-L/D (or a
+            // polynomial edge overshoot below it) would prescribe a negative-lift
+            // section — a tip brake — and the polar fits do produce spurious
+            // negative-alpha optima on thin low-Re outboard sections.  A real
+            // section's best L/D sits at positive lift; the floor keeps the
+            // design out of the negative-lift flow branch entirely.
+            let alpha_base: Vec<f64> =
+                smooth_alpha_curve(&rr, &alpha_raw).iter().map(|&a| a.max(0.0)).collect();
             seeds.push((format!("m={:.2}", m_c), vec![m_c; m], alpha_base, None));
             raw_alphas.push(alpha_raw);
             lds.push(ld_row);
@@ -1471,7 +1520,8 @@ impl Prop {
             self.warm_polar_pool(&work, "composed-camber warm-up");
             // Each station keeps its winning candidate's attack angle.
             let alpha_raw: Vec<f64> = (0..m).map(|i| raw_alphas[winners[i]][i]).collect();
-            let alpha_base = smooth_alpha_curve(&rr, &alpha_raw);
+            let alpha_base: Vec<f64> =
+                smooth_alpha_curve(&rr, &alpha_raw).iter().map(|&a| a.max(0.0)).collect();
             crate::dprintln!(
                 "lift-line composed camber m(r): [{}]",
                 m_dist
@@ -1483,24 +1533,23 @@ impl Prop {
             seeds.push(("m(r) per-station".into(), m_dist, alpha_base, None));
         }
 
-        // The previous torque match's winning design re-competes as the
-        // incumbent, warm-started from its own controls: consecutive
-        // matches then stay on one geometry branch.  The torque samples the
-        // outer loop sees become the smooth continuation of the previous
-        // design instead of a fresh optimization landing on an arbitrary
-        // local optimum — the behaviour that made the fixed-point
-        // iteration oscillate through 11 matches in the mechanical phase.
+        // The previous operating point's winning design re-competes as the
+        // incumbent, warm-started from its own controls: the pipeline's
+        // second run (the mechanical-thickness law sized on the first
+        // run's loads) then starts from the first run's geometry instead of
+        // the full chord — the two designs stay on one branch.
         if let Some(prev) = self.prev_win.as_ref() {
             if prev.camber_dist.len() == m
                 && prev.alpha_base.len() == m
                 && prev.design_x.len() == n_ctrl
             {
+                let alpha_base: Vec<f64> = prev.alpha_base.iter().map(|&a| a.max(0.0)).collect();
                 seeds.insert(
                     0,
                     (
                         "prev".to_string(),
                         prev.camber_dist.clone(),
-                        prev.alpha_base.clone(),
+                        alpha_base,
                         Some(prev.design_x.clone()),
                     ),
                 );
@@ -1510,8 +1559,8 @@ impl Prop {
         // --- One full design pass per candidate, in parallel --------------
         // The passes are independent (separate elements, attack angles and
         // warm state), so they run on scoped threads; the best objective
-        // (`q + 50*err` — the same one the optimizer minimises) wins, so
-        // camber competes with chord shape on equal terms.
+        // (`1000*err - thrust` — the same one the optimizer minimises) wins,
+        // so camber competes with chord shape on equal terms.
         let param = &self.param;
         let law = self.mech_thickness_law.as_ref();
         let store = self.store.clone();
@@ -1555,7 +1604,7 @@ impl Prop {
                                 rpm,
                                 omega,
                                 u_0,
-                                thrust,
+                                q_target,
                                 n_ctrl,
                                 s_cap,
                                 &label,
@@ -1592,7 +1641,7 @@ impl Prop {
                     rpm,
                     omega,
                     u_0,
-                    thrust,
+                    q_target,
                     n_ctrl,
                     s_cap,
                     &label,
@@ -1607,14 +1656,14 @@ impl Prop {
         }
         eval_pb.finish();
 
-        let win = match outcomes
+        let mut win = match outcomes
             .into_iter()
             .min_by(|a, b| a.f.partial_cmp(&b.f).unwrap())
         {
             Some(w) => w,
             // No candidate produced a usable design (every pass failed to
-            // meet the thrust target); nothing to report or export.
-            None => return (0.0, 0.0),
+            // match the torque target); nothing to report or export.
+            None => return (0.0, 0.0, 1.0),
         };
         crate::dprintln!(
             "Lifting-line design: camber {} da={:.3} T={:.4} Q={:.4}",
@@ -1626,8 +1675,6 @@ impl Prop {
         crate::dprintln!("Lifting-line blade stations");
         let mut elements: Vec<BladeElement<FoilFamily>> = Vec::with_capacity(m);
         for (i, &ri) in rr.iter().enumerate() {
-            let alpha =
-                (win.alpha_base[i] + win.da).clamp(-lift_line::ALPHA_MAX, lift_line::ALPHA_MAX);
             let phi0 = u_0.atan2(omega * ri).max(1.0e-3);
             let c = chord_law(&self.param, n_blades, ri, 0.0, s_cap);
             let foil = Rc::new(RefCell::new(station_foil(
@@ -1650,55 +1697,182 @@ impl Prop {
                 be.set_plate_mode(true);
             }
             be.set_chord(win.chords[i]);
-            be.set_twist(win.phis[i] + alpha);
+            elements.push(be);
+        }
+        // The exported blade's own operating point.  An independent cold
+        // solve (starting from zero circulation, not the optimizer's warm
+        // state) can settle on a neighbouring branch of the nonlinear flow
+        // and absorb a few percent more or less torque than the warm state
+        // the pass measured — and the exported blade is what the summary
+        // reports.  Re-match `da` with cold starts so the cold-absorbed
+        // torque hits the target, and export/report *that* state: the
+        // design point is then exactly what an independent solve of the
+        // exported geometry measures.  The same cold solve provides the
+        // per-station flow diagnostics and the station loads the mechanical
+        // law sizes on.
+        let cold_eval =
+            |da: f64, elems: &mut Vec<BladeElement<FoilFamily>>| -> (lift_line::LiftLineResult, Vec<f64>) {
+                let alphas: Vec<f64> = win
+                    .alpha_base
+                    .iter()
+                    .map(|&ab| (ab + da).clamp(-lift_line::ALPHA_MAX, lift_line::ALPHA_MAX))
+                    .collect();
+                let stations: Vec<lift_line::Station> = (0..m)
+                    .map(|i| lift_line::Station {
+                        r: rr[i],
+                        c: win.chords[i],
+                        alpha: alphas[i],
+                    })
+                    .collect();
+                let fs_refs: Vec<&FoilSimulator<FoilFamily>> =
+                    elems.iter().map(|be| &be.fs).collect();
+                let seed = vec![0.0; m];
+                let res = lift_line::solve_with_influence(
+                    &stations,
+                    self.n_blades,
+                    omega,
+                    u_0,
+                    &fs_refs,
+                    &seed,
+                    &infl,
+                );
+                (res, alphas)
+            };
+        let physical = |r: &lift_line::LiftLineResult| -> bool {
+            r.torque.is_finite()
+                && r.torque > 0.0
+                && r.gamma.iter().all(|&x| x.is_finite() && x >= -1.0e-9)
+        };
+        let target = q_target.max(1.0e-9);
+        let mut da = win.da;
+        let (mut res, mut alphas) = cold_eval(da, &mut elements);
+        let mut err = (res.torque - q_target).abs() / target;
+        let mut exported = physical(&res);
+        if exported && err > 2.0e-3 {
+            // Expand a bracket around the warm da until the cold-absorbed
+            // torque straddles the target, then bisect.  Samples that fall
+            // onto a non-physical branch are not adopted but still bracket.
+            let mut best: Option<(f64, f64, f64)> = None; // (err, da, torque)
+            let (mut lo, mut hi) = (da, da);
+            let (mut q_lo, mut q_hi) = (res.torque, res.torque);
+            for _ in 0..7 {
+                if (q_lo - q_target) * (q_hi - q_target) <= 0.0 && lo < hi {
+                    break;
+                }
+                if q_hi < q_target && hi < DA_MAX {
+                    lo = hi;
+                    q_lo = q_hi;
+                    hi = (hi + 0.1).min(DA_MAX);
+                    let (r2, _a2) = cold_eval(hi, &mut elements);
+                    if physical(&r2) {
+                        q_hi = r2.torque;
+                    } else {
+                        q_hi = f64::INFINITY;
+                    }
+                } else if q_lo > q_target && lo > DA_MIN {
+                    hi = lo;
+                    q_hi = q_lo;
+                    lo = (lo - 0.1).max(DA_MIN);
+                    let (r2, _a2) = cold_eval(lo, &mut elements);
+                    if physical(&r2) {
+                        q_lo = r2.torque;
+                    } else {
+                        q_lo = f64::NEG_INFINITY;
+                    }
+                } else {
+                    break;
+                }
+            }
+            if (q_lo - q_target) * (q_hi - q_target) <= 0.0 {
+                let (mut l, mut h) = (lo, hi);
+                for _ in 0..12 {
+                    let mid = 0.5 * (l + h);
+                    let (r2, _a2) = cold_eval(mid, &mut elements);
+                    if physical(&r2) {
+                        let e2 = (r2.torque - q_target).abs() / target;
+                        if best.is_none_or(|(be, _, _)| e2 < be) {
+                            best = Some((e2, mid, r2.torque));
+                        }
+                        if r2.torque <= q_target {
+                            l = mid;
+                        } else {
+                            h = mid;
+                        }
+                    }
+                }
+            }
+            if let Some((e2, da2, _q2)) = best {
+                if e2 < err {
+                    da = da2;
+                    let (r2, a2) = cold_eval(da, &mut elements);
+                    (res, alphas) = (r2, a2);
+                    err = e2;
+                    exported = true;
+                }
+            }
+        }
+        // The exported blade: twist follows the cold-solved inflow at the
+        // matched `da`, so the geometry, the trace and the reported
+        // operating point all describe the same state.  (If even the cold
+        // solve at the pass's own `da` was non-physical — it should not be:
+        // the pass only adopted physical samples — fall back to the warm
+        // state the optimizer measured.)
+        if !exported {
+            for (i, be) in elements.iter_mut().enumerate() {
+                be.set_twist(win.phis[i] + alphas[i]);
+            }
+            da = win.da;
+            (res, alphas) = cold_eval(da, &mut elements);
+            err = (res.torque - q_target).abs() / target;
+            crate::deprintln!(
+                "proply: cold re-solve of the winning blade was not physical; reporting the warm state"
+            );
+        } else {
+            for (i, be) in elements.iter_mut().enumerate() {
+                be.set_twist(res.phi[i] + alphas[i]);
+            }
+        }
+        if self.param.mech_thickness {
+            for (i, be) in elements.iter_mut().enumerate() {
+                be.thrust_n = Some(res.d_thrust[i]);
+            }
+        }
+        crate::dprintln!(
+            "Lifting-line blade stations (cold-verified: T={:.4} Q={:.4}, err {:.2}%)",
+            res.thrust,
+            res.torque,
+            100.0 * err
+        );
+        for (i, &ri) in rr.iter().enumerate() {
             crate::dprintln!(
                 "r={} camber={} alpha_base={} alpha={} phi={} twist={} chord={} ",
                 ri,
                 win.camber_dist[i],
                 win.alpha_base[i].to_degrees(),
-                alpha.to_degrees(),
-                win.phis[i].to_degrees(),
-                (win.phis[i] + alpha).to_degrees(),
+                alphas[i].to_degrees(),
+                res.phi[i].to_degrees(),
+                (res.phi[i] + alphas[i]).to_degrees(),
                 win.chords[i]
             );
-            elements.push(be);
-        }
-        // The mechanical-thickness sizing needs the station loads, and the
-        // lifting-line elements carry no induction (their loads come from
-        // the circulation solve, not a BEM state).  For a mechanical-law
-        // design take the annular element thrusts from one converged solve
-        // of the final geometry and store them on the elements.
-        if self.param.mech_thickness {
-            let stations: Vec<lift_line::Station> = (0..m)
-                .map(|i| lift_line::Station {
-                    r: rr[i],
-                    c: win.chords[i],
-                    alpha: (win.alpha_base[i] + win.da)
-                        .clamp(-lift_line::ALPHA_MAX, lift_line::ALPHA_MAX),
-                })
-                .collect();
-            let fs_refs: Vec<&FoilSimulator<FoilFamily>> =
-                elements.iter().map(|be| &be.fs).collect();
-            let seed = vec![0.0; m];
-            let res = lift_line::solve_with_influence(
-                &stations,
-                self.n_blades,
-                omega,
-                u_0,
-                &fs_refs,
-                &seed,
-                &infl,
+            crate::dprintln!(
+                "st{:2}: gamma={:8.3} ui={:7.2} vi={:7.2} dT={:8.4} dQ={:8.5}",
+                i,
+                res.gamma[i],
+                res.u_i[i],
+                res.v_i[i],
+                res.d_thrust[i],
+                res.d_torque[i]
             );
-            for (i, be) in elements.iter_mut().enumerate() {
-                be.thrust_n = Some(res.d_thrust[i]);
-            }
         }
         self.blade_elements = elements;
-        // Remember the winning design so the next torque-match iteration
-        // can warm-start its incumbent pass from it.
-        let (q, t) = (win.q, win.t);
+        // Remember the winning design so the pipeline's second run (the
+        // mechanical-thickness law) can warm-start its incumbent pass from it.
+        let (q, t) = (res.torque, res.thrust);
+        win.da = da;
+        win.q = q;
+        win.t = t;
         self.prev_win = Some(win);
-        (q, t)
+        (q, t, err)
     }
 }
 
@@ -1764,15 +1938,17 @@ fn compose_camber(rr: &[f64], lds: &[Vec<f64>], candidates: &[f64]) -> (Vec<f64>
 }
 
 /// One lifting-line camber candidate seed: (label, per-station camber,
-/// per-station smoothed best-L/D attack angles, warm-start controls for
-/// the first Nelder-Mead run — `Some` only for the previous match's
-/// incumbent design, see [`Prop::prev_win`]).
+/// per-station smoothed best-L/D attack angles floored at zero lift,
+/// warm-start controls for the first Nelder-Mead run — `Some` only for the
+/// previous operating point's incumbent design, see [`Prop::prev_win`]).
 type PassSeed = (String, Vec<f64>, Vec<f64>, Option<Vec<f64>>);
 
 /// One camber candidate's converged design pass: the objective the
-/// candidates compete on (`f = q + 50*err`), the measured operating point
-/// and the per-station geometry.  Plain data so the passes can run on
-/// worker threads; the caller rebuilds the winning blade elements from it.
+/// candidates compete on (`f = 1000*err - thrust`, i.e. absorb the target
+/// torque exactly — err is the relative torque error — then maximise the
+/// thrust at that torque), the measured operating point and the per-station
+/// geometry.  Plain data so the passes can run on worker threads; the
+/// caller rebuilds the winning blade elements from it.
 struct PassOutcome {
     f: f64,
     q: f64,
@@ -2078,23 +2254,29 @@ mod tests {
     }
 
     #[test]
-    fn lift_line_design_finite_and_thrust_matching() {
+    fn lift_line_design_finite_and_torque_matching() {
         // Plate polar (no rust-foil) so this is fast; checks the coupled
-        // lifting-line produces finite thrust that converges to the target.
+        // lifting-line produces a finite thrust while absorbing the target
+        // torque at the design RPM.
         let mut prop = test_prop();
         // coarser grid for speed
         prop.radial_steps = 12;
         prop.set_plate_mode(true);
-        let (q, t) = prop.lift_line_design(12000.0, 2.0, Some(4.0));
+        // The plate test propeller's full-chord torque ceiling is ~0.06 Nm
+        // at 12000 rpm (see the design's saturated ceiling below), so pick
+        // a target inside the absorbable range.
+        let q_target = 0.03;
+        let (q, t, err) = prop.lift_line_design(12000.0, q_target, Some(4.0));
         assert!(t.is_finite() && t > 0.0, "thrust {} not finite/positive", t);
         assert!(q.is_finite() && q > 0.0, "torque {} not finite/positive", q);
         // The target must actually be met (a u/v-swap in the force projection
         // once made the model thrust ~v/u times too small, so the design
         // could never converge onto the target).
         assert!(
-            (t - 2.0).abs() / 2.0 < 0.05,
-            "thrust {} does not match the 2.0 N target",
-            t
+            err < 0.05,
+            "torque error {:.4} vs the {:.3} Nm target",
+            err,
+            q_target
         );
         assert!(q < 0.5, "torque {} not bounded", q);
     }
@@ -2133,12 +2315,18 @@ mod tests {
 
     #[test]
     fn lifting_line_design_matches_target_torque() {
-        // The same convergence through the coupled lifting-line loop.
+        // The direct operating-point design through the coupled lifting
+        // line: `design_for_torque` must absorb the target torque at the
+        // design RPM in a single pass (no thrust-target iteration).
         let mut p = test_prop();
         p.param.lifting_line = true;
+        p.param.hub_depth = 0.003; // nonzero thickness law, as real props have
         p.radial_steps = 10;
         p.set_plate_mode(true);
-        let (q0, _) = p.lift_line_design(12000.0, 2.0, None);
+        // Reference torque at a working scale: the legacy BEM design for
+        // the same propeller at 2 N (the lifting line's absorbed-torque
+        // range covers this operating point).
+        let (q0, _t0) = p.full_optimize(12000.0, 2.0);
         assert!(q0 > 0.0, "reference torque {} not positive", q0);
         let q_target = 0.7 * q0;
         let res = p.design_for_torque(12000.0, q_target, 2.0, None);

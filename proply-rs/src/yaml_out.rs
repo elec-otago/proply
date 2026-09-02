@@ -65,7 +65,9 @@ struct DesignInfo {
     blades: usize,
     radius_m: f64,
     hub_radius_m: f64,
-    target_thrust_n: f64,
+    /// The design file's `thrust` — the seed for the operating-point search
+    /// only (the achieved thrust is reported under `performance`).
+    thrust_seed_n: f64,
     forward_airspeed_mps: f64,
     altitude_m: f64,
     stations: usize,
@@ -198,7 +200,7 @@ pub fn summary(
             blades: p.n_blades,
             radius_m: r6(param.radius),
             hub_radius_m: r6(param.hub_radius),
-            target_thrust_n: r6(param.thrust),
+            thrust_seed_n: r6(param.thrust),
             forward_airspeed_mps: r6(param.forward_airspeed),
             altitude_m: r6(param.altitude),
             stations: sections.len(),

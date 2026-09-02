@@ -52,12 +52,12 @@ pub fn run_design(
     // maximum-efficiency point.
     let (optimum_torque, optimum_rpm, power) = param.motor_operating_point();
 
-    // The design converges onto the motor operating point: the thrust
-    // target is iterated until the blade absorbs the design torque at the
-    // design RPM.  The inner loops maximise efficiency at a matched thrust,
-    // so the converged design is the maximum-efficiency design at that
-    // operating point.  When the geometry cannot absorb the demanded torque,
-    // the result carries a warning describing the closest design.
+    // The design converges onto the motor operating point: it absorbs the
+    // design torque at the design RPM and maximises efficiency (thrust, at
+    // the fixed shaft power) there — directly for the lifting-line loop,
+    // by iterating the thrust target for the legacy BEM loop.  When the
+    // geometry cannot absorb the demanded torque, the result carries a
+    // warning describing the closest design.
     let mut res = p.design_for_torque(optimum_rpm, optimum_torque, param.thrust, param.ar);
 
     // The mechanical thickness law is sized on the converged design's
