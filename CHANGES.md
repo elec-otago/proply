@@ -1,4 +1,55 @@
 # CHANGES
+## 2026-09-03 — Design directly onto the motor operating point (torque, RPM)
+
+### proply-rs
+
+The operating point was already (torque, RPM) — the motor's torque at the
+design RPM — with the JSON `thrust` used only as an iteration seed for an
+outer fixed point that ran a *full redesign* per sample.  That response
+was discontinuous: consecutive re-optimisations could land on different
+flow branches (honda@30 sampled Q = 1.63 and Q = 0.067 N m at the same
+thrust on successive matches — the observed torque cliff), so the damped
+iteration could not converge and needed ever more machinery
+(cross-match seeding, adaptive damping, restart pruning).
+
+The lifting-line path now reaches the operating point in a single design
+pass: each geometry evaluation matches a common attack offset `da` so
+the absorbed torque equals the target (a monotone bisection, the same
+shape as the old thrust match) and the chord/camber search maximises the
+resulting thrust — maximum efficiency, since the shaft power Q·ω is
+fixed by (torque, RPM).
+
+- Best-L/D seed angles are floored at zero lift: the polar fits produce
+  spurious negative-alpha optima on thin low-Re outboard sections (the
+  m=0.04 tip came out at −5.4°), prescribing a negative-lift tip brake
+  that the torque-matched objective would exploit.
+- Circulation samples with any negative station gamma are rejected
+  everywhere — brake-tip flow branches never seed the search.
+- The exported blade is cold-verified: `da` is re-matched with cold
+  solves on the winning geometry, so the reported operating point is
+  exactly what an independent solve of the exported blade measures.
+- The BEM path keeps its damped iteration (per-station momentum design
+  has no global offset); it now seeds itself from a momentum-theory
+  estimate of the thrust the demanded torque can produce.
+
+Results at element-count 30 (which used to cliff): honda_gx35 converges
+in one pass to Q = 1.6000 N m cold-verified, T = 39.9 N (the old loop
+never converged; its fallback sat 3.9% off target at 35.0 N);
+multistar_2209 and dys_2814_910kv likewise converge to their torque
+targets within 0.03-0.00% in one pass.
+30b6e1b
+
+## 2026-09-03 — Remove the thrust target from the JSON input format and the web UI
+
+### proply-rs / web
+
+The achieved thrust is an output of the design, so the JSON `thrust` key
+is no longer a design input: the field is removed from the parameters
+(the N / kgf / gf unit parsing goes with it), the web demo's Thrust
+field and default are gone, and the prop JSON files and docs follow the
+new schema.  A legacy `thrust` key in an old design file is still
+tolerated — it is ignored — and covered by a test.
+881d222
 
 ## 2026-09-03 — Reject garbage circulation solves in the design competition
 
