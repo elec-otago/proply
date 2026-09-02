@@ -26,18 +26,7 @@ pub struct PolarStore {
     /// freshly simulated polars a host without a filesystem (the browser)
     /// persists itself.
     new_keys: Vec<String>,
-    /// Freshly simulated polars since the last write to disk: when this
-    /// reaches [`CHECKPOINT_EVERY`], [`PolarStore::insert`] saves
-    /// automatically, so a long or interrupted run keeps the sweeps it has
-    /// already completed (a killed run used to lose everything).
-    pending: usize,
 }
-
-/// Auto-save the cache after this many newly simulated polars have
-/// accumulated since the last save.  A rust-foil sweep takes seconds; the
-/// whole-file JSON write takes milliseconds, so checkpointing every few
-/// sweeps costs nothing while bounding what an interrupted run loses.
-pub const CHECKPOINT_EVERY: usize = 25;
 
 pub fn cache_key(hash: &str, reynolds: f64, mach: f64) -> String {
     format!("{}|{}|{}", hash, reynolds, mach)
@@ -61,7 +50,6 @@ impl PolarStore {
             foils,
             dirty: false,
             new_keys: Vec::new(),
-            pending: 0,
         }
     }
 
@@ -79,7 +67,6 @@ impl PolarStore {
             foils: Self::parse(json).unwrap_or_default(),
             dirty: false,
             new_keys: Vec::new(),
-            pending: 0,
         }
     }
 
@@ -97,7 +84,6 @@ impl PolarStore {
         if let Some(json) = self.to_json_string() {
             let _ = std::fs::write(&self.path, json);
             self.dirty = false;
-            self.pending = 0;
         }
     }
 
@@ -105,19 +91,17 @@ impl PolarStore {
         self.foils.get(key)
     }
 
-    /// Insert a freshly simulated polar (marked for persistence).
+    /// Insert a freshly simulated polar, persisting it to disk
+    /// immediately: every completed calculation is durable on its own, so
+    /// an interrupted run loses at most the sweep in flight (the write of
+    /// the whole JSON file takes milliseconds next to the seconds each
+    /// rust-foil sweep takes).  Stores without a path — the wasm build —
+    /// never persist and the save is a no-op.
     pub fn insert(&mut self, key: String, polar: StoredPolar) {
         self.foils.insert(key.clone(), polar);
         self.new_keys.push(key);
         self.dirty = true;
-        // Checkpoint: persist once a batch of fresh polars has accumulated,
-        // so an interrupted run keeps the sweeps it already completed (the
-        // CLI's final save at exit still happens; stores without a path —
-        // the wasm build — never persist and the bookkeeping is a no-op).
-        self.pending += 1;
-        if self.pending >= CHECKPOINT_EVERY {
-            self.save();
-        }
+        self.save();
     }
 
     /// Insert pre-existing data (a warm-up load, not a new simulation): the
@@ -195,10 +179,9 @@ mod tests {
     }
 
     #[test]
-    fn insert_checkpoints_to_disk_every_batch() {
-        // Freshly simulated polars persist automatically once a batch
-        // (`CHECKPOINT_EVERY`) has accumulated — an interrupted run keeps
-        // the sweeps it completed instead of losing them all at exit.
+    fn insert_persists_each_polar_immediately() {
+        // Every freshly simulated polar is written to disk at once: an
+        // interrupted run keeps every completed calculation.
         let dir = std::env::temp_dir().join("proply_rs_cache_checkpoint");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("cache.json");
@@ -206,32 +189,20 @@ mod tests {
         let path_str = path.to_str().unwrap().to_string();
 
         let mut store = PolarStore::load(&path_str);
-        // Below the batch threshold: nothing on disk yet.
-        for i in 0..CHECKPOINT_EVERY - 1 {
-            store.insert(format!("k{i}"), sample(0.1 + i as f64 * 1e-9));
-        }
-        assert!(
-            !std::path::Path::new(&path_str).exists(),
-            "no save before the batch threshold"
-        );
-        // The batch boundary triggers the checkpoint save.
-        store.insert("k_batch".into(), sample(0.2));
+        store.insert("k1".into(), sample(0.1));
         assert!(
             std::path::Path::new(&path_str).exists(),
-            "checkpoint save must fire at the batch boundary"
+            "the first insert must write to disk immediately"
         );
-        assert!(!store.dirty, "checkpoint leaves the store clean");
-        // A second batch persists again (the counter resets per save).
-        for i in 0..CHECKPOINT_EVERY {
-            store.insert(format!("j{i}"), sample(0.3));
-        }
-        assert!(!store.dirty, "second checkpoint fired too");
+        assert!(!store.dirty, "insert leaves the store clean");
+        store.insert("k2".into(), sample(0.2));
+        assert!(!store.dirty, "the second insert persists too");
 
-        // The on-disk copy holds the checkpointed polars.
+        // The on-disk copy holds every inserted polar.
         let on_disk = PolarStore::load(&path_str);
-        assert_eq!(on_disk.len(), 2 * CHECKPOINT_EVERY);
-        assert!(on_disk.get("k_batch").is_some());
-        assert!(on_disk.get("j0").is_some());
+        assert_eq!(on_disk.len(), 2);
+        assert!(on_disk.get("k1").is_some());
+        assert!(on_disk.get("k2").is_some());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
