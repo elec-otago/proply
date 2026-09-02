@@ -1,5 +1,18 @@
 # CHANGES
 
+## 2026-09-02 — Fix the 3D preview for large props (far-plane clip)
+
+### proply-rs web demo
+
+- `web/viewer.js` now calls `camera.updateProjectionMatrix()` after
+  framing the STEP model.  The near/far planes were set per-model
+  (`radius / 100` .. `radius * 100`) but the projection was never
+  rebuilt, so the camera kept its initial `far = 1000`: any prop whose
+  framing distance exceeded 1000 mm-units (roughly a 200 mm+ radius) was
+  clipped at the far plane and the view rendered empty/dark.  The 3D
+  preview now frames and lights a 280 mm prop correctly.  JS-only
+  change; no Rust or wasm change.
+
 ## 2026-08-30 — Build label on the web demo
 
 ### proply-rs web demo

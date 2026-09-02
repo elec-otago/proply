@@ -161,6 +161,11 @@ export async function showStep(stepText, container, note) {
     const radius = Math.max(size.length() / 2, 1.0e-6);
     camera.near = radius / 100;
     camera.far = radius * 100;
+    // Changing near/far does not rebuild the projection matrix — without
+    // this call the camera keeps its initial far=1000, so any prop whose
+    // framing distance exceeds 1000 mm-units (roughly radius > 200 mm) is
+    // clipped at the far plane and never drawn.
+    camera.updateProjectionMatrix();
     camera.position
       .copy(center)
       .add(new THREE.Vector3(1.35, 0.85, 1.7).multiplyScalar(radius * 1.6));
