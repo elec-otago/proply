@@ -52,12 +52,14 @@ power, propulsive efficiency, hover figure of merit, tip speed) and the
 per-station section list (radius, chord, twist, camber, thickness, and
 — for BEM designs — the converged induced velocity and element loads).
 
-The design converges onto the motor's operating point: the thrust target
-(the JSON `thrust` key) is iterated until the blade absorbs the design
-torque at the design RPM.  The inner loops maximise efficiency at a
-matched thrust, and the shaft power is fixed once (torque, RPM) is, so
-the torque-matched design is the maximum-efficiency design at that
-operating point — the achieved thrust is an output.  This replaces the
+The design converges onto the motor's operating point: it absorbs the
+motor's torque at the design RPM and maximises the efficiency there.
+Because the shaft power Q·ω is fixed once (torque, RPM) is, maximum
+efficiency means maximum thrust — so the lifting-line design absorbs
+exactly the demanded torque (each geometry evaluation matches a common
+attack offset to it) and maximises the resulting thrust in a single
+pass.  The JSON `thrust` key is only the search seed: the achieved
+thrust is an output, reported under `performance`.  This replaces the
 old `--auto` torque ceiling (`--auto` is still accepted, and implied).
 
 Quantity keys in the design JSON may carry unit suffixes as quoted
@@ -240,12 +242,13 @@ model:
    `tip_chord·R²/r²` taper capped by blade spacing) and the spline gives a
    kink-free smooth chord at every radius.  The outer level is a
    **NelderMead** over those N control values, seeded at the full chord (so
-   it starts at the thrust-capable geometry); for each candidate shape an
-   inner **monotone `da` bisection** reliably matches the thrust target
-   (`alpha = best-L/D + da`), so the outer only minimises the torque —
-   i.e. it finds the most efficient chord *shape* that meets the required
-   thrust with no oscillation.  `--ar N` caps the control values (a
-   minimum blade aspect ratio), thinning the blade as `N` rises.
+   it starts at the torque-capable geometry); for each candidate shape an
+   inner **monotone `da` bisection** matches the absorbed torque to the
+   target (`alpha = best-L/D + da`), so the outer maximises the thrust of
+   the torque-matched shape — the most efficient chord *shape* at that
+   operating point, with no oscillation.  `--ar N` caps the control
+   values (a minimum blade aspect ratio), thinning the blade as `N`
+   rises.
 
 Because the wake is coupled, the reported torque *includes* the induced
 loss — so the design can make real efficiency trade-offs (induced vs
