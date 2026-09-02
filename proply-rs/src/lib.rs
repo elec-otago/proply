@@ -9,6 +9,7 @@
 pub mod arad;
 pub mod blade_element;
 pub mod cache;
+pub mod design_log;
 pub mod design_parameters;
 pub mod foil;
 pub mod lift_line;

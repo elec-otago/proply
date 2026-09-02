@@ -118,6 +118,11 @@ pub struct DesignParameters {
     pub plate: bool,
     pub dir: String,
     pub step_file: String,
+    /// Write a detailed design trace (every design-loop progress line,
+    /// mirrored from the console) to this file for debugging convergence.
+    /// Empty: no trace file.  Only the CLI honours it — the WebAssembly
+    /// build has no filesystem and ignores the key.
+    pub log: String,
 }
 
 fn default_chord_spline_n() -> usize {
@@ -176,6 +181,7 @@ impl Default for DesignParameters {
             plate: false,
             dir: ".".into(),
             step_file: String::new(),
+            log: String::new(),
         }
     }
 }
@@ -286,6 +292,7 @@ mod tests {
             "plate": true,
             "dir": "out",
             "step_file": "x.step",
+            "log": "design.log",
             "chord_spline_n": 5,
             "camber": 0.03,
             "cst": true,
@@ -301,6 +308,7 @@ mod tests {
         assert!(p.plate);
         assert_eq!(p.dir, "out");
         assert_eq!(p.step_file, "x.step");
+        assert_eq!(p.log, "design.log");
         assert_eq!(p.chord_spline_n, 5);
         assert!((p.camber.unwrap() - 0.03).abs() < 1e-12);
         assert!(p.cst);
@@ -324,6 +332,7 @@ mod tests {
         assert!(p2.camber.is_none());
         assert!(!p2.cst);
         assert!(!p2.arad);
+        assert_eq!(p2.log, "");
     }
 
     #[test]

@@ -27,6 +27,7 @@ struct Args {
     resolution: Option<usize>,
     dir: Option<String>,
     step_file: Option<String>,
+    log: Option<String>,
     plate: Option<bool>,
     ar: Option<f64>,
     chord_spline_n: Option<usize>,
@@ -99,12 +100,17 @@ OUTPUT OPTIONS:
                            default: .).
     --step-file <FILE>     Explicit output STEP path (overrides --dir +
                            <param name>.step).
+    --log <FILE>           Write a detailed design trace to FILE for
+                           debugging convergence: every design-loop line
+                           (operating-point torque match, per-station BEM
+                           state, camber scan, warnings) is mirrored there
+                           as it prints to the console.
 
 ALL OPTIONS IN JSON:
     Every design/run option above can instead be set in the --param JSON
     file (keys: bem, lifting_line, auto, resolution, n, ar, plate, cst,
     arad, mech_thickness, modulus, deflection_fraction, thickness_floor,
-    dir, step_file, chord_spline_n, camber).  An explicit CLI flag
+    dir, step_file, log, chord_spline_n, camber).  An explicit CLI flag
     overrides the JSON value, which overrides the built-in default.
     Quantities may carry unit suffixes as quoted strings (\"6 mm\", \"6.8cm\",
     \"500g\", \"0.5kg\", \"3 GPa\"); a bare number keeps its historical unit
@@ -128,6 +134,7 @@ fn parse_args() -> Result<Args, String> {
         resolution: None,
         dir: None,
         step_file: None,
+        log: None,
         plate: None,
         lifting_line: None,
         ar: None,
@@ -193,6 +200,7 @@ fn parse_args() -> Result<Args, String> {
             }
             "--dir" => a.dir = Some(value()?),
             "--step-file" => a.step_file = Some(value()?),
+            "--log" => a.log = Some(value()?),
             "--plate" => a.plate = Some(true), // testing: analytic flat-plate polars
             "--lifting-line" => a.lifting_line = Some(true), // coupled vortex-lattice design
             "--ar" => a.ar = Some(value()?.parse().map_err(|_| "bad --ar".to_string())?),
@@ -289,6 +297,9 @@ fn main() {
     if let Some(v) = args.step_file {
         param.step_file = v;
     }
+    if let Some(v) = args.log {
+        param.log = v;
+    }
 
     if !param.bem && !param.lifting_line {
         eprintln!(
@@ -303,6 +314,18 @@ fn main() {
         exit(1);
     }
 
+    // The design trace (--log <file>): every dprintln!/deprintln! line
+    // below — the console banner, the operating-point match, per-station
+    // BEM state, camber scan and warnings — is mirrored to the file.
+    // Open it before the first banner print so the trace starts at the
+    // top; an unwritable requested log is a fatal CLI error.
+    if !param.log.is_empty() {
+        proply_rs::design_log::open(&param.log).unwrap_or_else(|e| {
+            eprintln!("proply-rs: cannot open log {}: {}", param.log, e);
+            exit(1);
+        });
+    }
+
     let store: Arc<Mutex<PolarStore>> = Arc::new(Mutex::new(PolarStore::load(
         proply_rs::cache::default_cache_path().as_str(),
     )));
@@ -312,23 +335,23 @@ fn main() {
     // maximum-efficiency point.
     let (optimum_torque, optimum_rpm, power) = param.motor_operating_point();
     if param.motor_torque.is_some() {
-        println!("Using specified motor operating point (motor_torque/motor_RPM)");
+        proply_rs::dprintln!("Using specified motor operating point (motor_torque/motor_RPM)");
     }
 
-    println!("\nPROPLY: Automatic propeller Design\n\n");
-    println!(
+    proply_rs::dprintln!("\nPROPLY: Automatic propeller Design\n\n");
+    proply_rs::dprintln!(
         "Optimum Motor Torque {:5.3} Nm at {:5.1} RPM, power={:5.1} Watts",
         optimum_torque, optimum_rpm, power
     );
     let resolution_m = (param.radius - param.hub_radius) / param.resolution as f64;
-    println!("Spanwise resolution (mm) {:4.2}", resolution_m * 1000.0);
-    println!("{}", param);
+    proply_rs::dprintln!("Spanwise resolution (mm) {:4.2}", resolution_m * 1000.0);
+    proply_rs::dprintln!("{}", param);
     let dv = optimize::dv_from_thrust(param.thrust, param.radius, param.forward_airspeed);
-    println!(
+    proply_rs::dprintln!(
         "Airspeed at propellers (hovering): {:4.2} m/s",
         param.forward_airspeed + dv
     );
-    println!("\n\n");
+    proply_rs::dprintln!("\n\n");
 
     // The whole design (converged onto the motor operating point, then the
     // STEP and YAML text) runs in the shared pipeline — the same code the
@@ -336,16 +359,17 @@ fn main() {
     let outcome = match pipeline::run_design(&param, store.clone()) {
         Ok(o) => o,
         Err(e) => {
-            eprintln!("proply-rs: {}", e);
+            // The design trace (if any) ends with the failure reason.
+            proply_rs::deprintln!("proply-rs: {}", e);
             exit(1);
         }
     };
-    println!(
+    proply_rs::dprintln!(
         "Total Thrust: {:5.2}, Torque: {:5.3}",
         outcome.thrust, outcome.torque
     );
     if let Some(warning) = &outcome.warning {
-        println!("proply: WARNING {}", warning);
+        proply_rs::dprintln!("proply: WARNING {}", warning);
     }
 
     let step_filename = if param.step_file.is_empty() {
@@ -354,10 +378,10 @@ fn main() {
         param.step_file
     };
     step_out::write_step_file(&step_filename, &outcome.step).unwrap_or_else(|e| {
-        eprintln!("cannot write {}: {}", step_filename, e);
+        proply_rs::deprintln!("cannot write {}: {}", step_filename, e);
         exit(1);
     });
-    println!("Wrote {}", step_filename);
+    proply_rs::dprintln!("Wrote {}", step_filename);
 
     // YAML summary of the finished design: beside the STEP output (so
     // <propname>.yml in the output directory, or next to an explicit
@@ -367,10 +391,10 @@ fn main() {
         .to_string_lossy()
         .into_owned();
     yaml_out::write_yaml_file(&yaml_filename, &outcome.yaml).unwrap_or_else(|e| {
-        eprintln!("cannot write {}: {}", yaml_filename, e);
+        proply_rs::deprintln!("cannot write {}: {}", yaml_filename, e);
         exit(1);
     });
-    println!("Wrote {}", yaml_filename);
+    proply_rs::dprintln!("Wrote {}", yaml_filename);
 
     // Persist any newly simulated polars.
     store.lock().unwrap().save();

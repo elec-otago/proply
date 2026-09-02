@@ -1,5 +1,21 @@
 # CHANGES
 
+## 2026-09-02 — Design trace log (`--log <file>`)
+
+### proply-rs CLI
+
+- New `--log <FILE>` output option (equally settable as the `log` key in
+  the JSON design file): every design-loop line the console prints is
+  mirrored to FILE as it prints — the operating-point torque match,
+  per-station BEM state, the lifting-line camber scan, warnings and the
+  final totals — giving a detailed, durable record for debugging
+  convergence issues (a failed run's trace ends with the failure reason).
+- New `design_log` module holds the thread-safe trace sink and the
+  `dprintln!` / `deprintln!` tee macros; the per-station BEM trace now
+  also reports the solver residual (`bem_err`).  Nothing is written when
+  no log is requested, so the WebAssembly build (no filesystem) and the
+  library tests are unaffected.
+
 ## 2026-09-02 — Fix the 3D preview for large props (far-plane clip)
 
 ### proply-rs web demo

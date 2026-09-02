@@ -212,7 +212,7 @@ impl Prop {
             let f = foil.borrow();
             f.get_max_chord(x_limit, y_limit, twist)
         };
-        println!("Max Chord {}", c_max);
+        crate::dprintln!("Max Chord {}", c_max);
         foil.borrow_mut().modify_chord(c_max);
 
         let mut be = BladeElement::new(
@@ -341,12 +341,12 @@ impl Prop {
             self.param.deflection_fraction,
             self.param.thickness_floor,
         ) else {
-            eprintln!(
+            crate::deprintln!(
                 "proply: mechanical thickness could not be sized (no station loads) — keeping the geometric law"
             );
             return false;
         };
-        println!(
+        crate::dprintln!(
             "Mechanical thickness: sized from the station loads — predicted tip deflection {:.3} mm (allowed {:.3} mm, E = {} Pa)",
             law.tip_deflection * 1000.0,
             law.deflection_limit * 1000.0,
@@ -424,20 +424,21 @@ impl Prop {
                 let dm = be.d_m();
                 thrust += dt;
                 torque += dm;
-                println!(
-                    "r={}, theta={}, dv={}, a_prime={}, thrust={}, torque={}, eff={}",
+                crate::dprintln!(
+                    "r={}, theta={}, dv={}, a_prime={}, thrust={}, torque={}, eff={}, bem_err={}",
                     be.r,
                     be.get_twist().to_degrees(),
                     dv,
                     a_prime,
                     dt,
                     dm,
-                    dt / dm
+                    dt / dm,
+                    err
                 );
             } else {
-                eprintln!(
-                    "r={}: BEM did not converge {} {} {}",
-                    be.r, be.dv, dv_goal, a_prime
+                crate::deprintln!(
+                    "r={}: BEM did not converge (bem_err {:.6}, dv_goal {}) dv={} a_prime={}",
+                    be.r, err, dv_goal, dv, a_prime
                 );
             }
         }
@@ -566,17 +567,17 @@ impl Prop {
         let smoothed = smooth(&extra_chords, 11, "hanning");
         let chord_poly = Pchip::new(&c_points, &smoothed);
 
-        println!("Smoothed Blade Form");
+        crate::dprintln!("Smoothed Blade Form");
         for be in self.blade_elements.iter_mut() {
             let c = chord_poly.eval(be.r);
             let t = polyval(&twist_poly, be.r);
             be.set_chord(c);
             be.set_twist(t);
-            println!("{}", be);
+            crate::dprintln!("{}", be);
         }
 
         let f = self.get_forces(optimum_rpm);
-        println!(
+        crate::dprintln!(
             "Total Thrust: {:5.2}, Torque: {:5.3} ({} of {} stations converged)",
             f.thrust, f.torque, f.converged, f.total
         );
@@ -631,7 +632,7 @@ impl Prop {
         for iter in 0..MAX_ITERS {
             let (q, t) = self.run_design(rpm, thrust, ar);
             let err = (q - q_target).abs() / q_target;
-            println!(
+            crate::dprintln!(
                 "Operating point match {:2}: thrust target {:6.3} N -> T={:6.3} N, Q={:6.4} Nm (design Q={:6.4}, err {:4.2}%)",
                 iter + 1,
                 thrust,
@@ -654,7 +655,7 @@ impl Prop {
                 best = Some((err, thrust));
             }
             if !q.is_finite() || q <= 1.0e-9 {
-                eprintln!(
+                crate::deprintln!(
                     "proply: torque match stalled (absorbed Q={:.4}, design Q={:.4})",
                     q, q_target
                 );
@@ -662,7 +663,7 @@ impl Prop {
             }
             let next = thrust * (q_target / q).powf(DAMPING);
             if (next - thrust).abs() / thrust < 1.0e-3 {
-                eprintln!(
+                crate::deprintln!(
                     "proply: torque match stalled at Q={:.4} Nm (design Q={:.4})",
                     q, q_target
                 );
@@ -677,7 +678,7 @@ impl Prop {
         // as if nothing was wrong).
         if let Some((_, t_best)) = best {
             if (t_best - thrust).abs() > 1.0e-9 {
-                eprintln!(
+                crate::deprintln!(
                     "proply: falling back to the closest design (thrust target {:.3} N)",
                     t_best
                 );
@@ -704,7 +705,7 @@ impl Prop {
             "design torque {:.4} Nm at {:.0} rpm not achievable: the closest design absorbs {:.4} Nm ({:.1}% of the target) at {:.2} N thrust; {}/{} BEM stations converged",
             q_target, rpm, q, 100.0 * err, t, converged, total
         ));
-        println!("proply: WARNING {}", warning.as_ref().unwrap());
+        crate::dprintln!("proply: WARNING {}", warning.as_ref().unwrap());
         DesignResult {
             torque: q,
             thrust: t,
@@ -992,7 +993,7 @@ impl Prop {
                     let err = (t - thrust).abs() / thrust.max(1.0e-9);
                     if err <= 0.03 {
                         *pg_r.borrow_mut() = cur.clone();
-                        println!(
+                        crate::dprintln!(
                             "lift-line [{}] ctrl=[{}] da={:.3} (warm): T={:.4} Q={:.4}",
                             label,
                             controls
@@ -1075,7 +1076,7 @@ impl Prop {
             pb.inc(1);
             pb.set_message(format!("{}: T={:.3} Q={:.4}", label, t, q));
             if hint.is_none() {
-                println!(
+                crate::dprintln!(
                     "lift-line [{}] ctrl=[{}] da={:.3}: T={:.4} Q={:.4}",
                     label,
                     controls
@@ -1140,7 +1141,7 @@ impl Prop {
             meet_thrust(&controls, &mut elements, &pg, hint)
         };
         if phis.len() != m {
-            println!(
+            crate::dprintln!(
                 "lift-line camber {}: no thrust match (T={:.4}, err {:.3})",
                 label, r_t, err
             );
@@ -1152,7 +1153,7 @@ impl Prop {
             );
         }
         let f = r_q + 50.0 * err;
-        println!(
+        crate::dprintln!(
             "lift-line camber {}: T={:.4} Q={:.4} (obj {:.4})",
             label, r_t, r_q, f
         );
@@ -1318,7 +1319,7 @@ impl Prop {
             // Each station keeps its winning candidate's attack angle.
             let alpha_raw: Vec<f64> = (0..m).map(|i| raw_alphas[winners[i]][i]).collect();
             let alpha_base = smooth_alpha_curve(&rr, &alpha_raw);
-            println!(
+            crate::dprintln!(
                 "lift-line composed camber m(r): [{}]",
                 m_dist
                     .iter()
@@ -1436,14 +1437,14 @@ impl Prop {
             // meet the thrust target); nothing to report or export.
             None => return (0.0, 0.0),
         };
-        println!(
+        crate::dprintln!(
             "Lifting-line design: camber {} da={:.3} T={:.4} Q={:.4}",
             win.label, win.da, win.t, win.q
         );
 
         // Rebuild the winning elements on this thread from the pass's plain
         // geometry outcome (chord and twist per station).
-        println!("Lifting-line blade stations");
+        crate::dprintln!("Lifting-line blade stations");
         let mut elements: Vec<BladeElement<FoilFamily>> = Vec::with_capacity(m);
         for (i, &ri) in rr.iter().enumerate() {
             let alpha =
@@ -1471,7 +1472,7 @@ impl Prop {
             }
             be.set_chord(win.chords[i]);
             be.set_twist(win.phis[i] + alpha);
-            println!(
+            crate::dprintln!(
                 "r={} camber={} alpha_base={} alpha={} phi={} twist={} chord={} ",
                 ri,
                 win.camber_dist[i],
