@@ -1,5 +1,35 @@
 # CHANGES
 
+## 2026-09-02 — Cache failed polar sweeps (the seeding warm-up)
+
+### proply-rs
+
+- The seeding warm-up (and any other first-touch sweep) on a fresh prop
+  used to *fail* on roughly half its calculations — rust-foil returns
+  zero converged points for thick mechanical-law root sections at moderate
+  Reynolds numbers — and a failed sweep stored nothing, so every fresh
+  run re-attempted each doomed bucket once (and an interrupted run lost
+  even its successes before per-polar persistence).  A failed sweep now
+  stores a **degenerate marker** (an empty polar) through the normal
+  insert path, so it is persisted the moment it happens; markers never
+  pass the polar checks, and any later fetch — the same run or a future
+  one — treats the key as degenerate (flat-plate fallback) without
+  re-sweeping.  The seeding warm-up now caches *every* outcome: run A of
+  a cold prop re-swept only the 31 previously-failed keys (storing 31
+  markers), and run B's seeding warm-up completed with **zero** sweeps.
+
+## 2026-09-02 — Persist every polar the moment it is calculated
+
+### proply-rs
+
+- The polar cache is now written to disk with **each** completed
+  rust-foil sweep (`PolarStore::insert` saves immediately), not in
+  batches: an interrupted run loses at most the sweep in flight.  The
+  whole-file JSON write takes milliseconds next to the seconds each sweep
+  takes.  Verified by killing a discovery run mid-design: each finished
+  calculation was already on disk (every polar appears the moment it is
+  calculated).
+
 ## 2026-09-02 — Checkpoint the polar cache during a run
 
 ### proply-rs

@@ -506,8 +506,9 @@ impl<F: FoilLike> FoilSimulator<F> {
         }
     }
 
-    /// Simulate the polar with rust-foil and store it in the shared cache.
-    /// Returns the stored polar (or None for the degenerate case).
+    /// Simulate the polar with rust-foil and store it in the shared cache:
+    /// the polar itself when the sweep converged, a degenerate marker when
+    /// it failed (so the failure is cached too and never re-attempted).
     fn xfoil_simulate_polars(&self, reynolds: f64, mach: f64) {
         let (kept_x, kept_y) = {
             let f = self.foil.borrow();
@@ -535,13 +536,34 @@ impl<F: FoilLike> FoilSimulator<F> {
             }
         }
 
+        let key = cache_key(&self.foil.borrow().hash(), reynolds, mach);
+        let mut store = self.store.lock().unwrap();
         if alfa.len() < 5 {
-            // Foil didn't simulate; nothing is stored (see get_polars).
+            // The sweep failed — nothing usable to fit (see get_polars).
+            // Cache the *failure* as a marker polar: a marker never passes
+            // the polar checks, so any later fetch — this run or a future
+            // one, since markers persist like any other polar — treats the
+            // key as degenerate and never runs the doomed sweep again.
+            // Without this, every fresh run re-attempted each failing
+            // bucket once (the seeding warm-up on thick mechanical-law
+            // root sections failed ~half its sweeps).
+            crate::dprintln!(
+                "polar sweep FAILED ({} pts): {} -> cached as degenerate marker",
+                alfa.len(),
+                key
+            );
+            store.insert(
+                key,
+                StoredPolar {
+                    alpha: Vec::new(),
+                    cl: Vec::new(),
+                    cd: Vec::new(),
+                },
+            );
             return;
         }
 
-        let key = cache_key(&self.foil.borrow().hash(), reynolds, mach);
-        let mut store = self.store.lock().unwrap();
+        crate::dprintln!("polar sweep: {} ({} pts)", key, alfa.len());
         store.insert(
             key,
             StoredPolar {

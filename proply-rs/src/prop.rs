@@ -838,6 +838,7 @@ impl Prop {
                 }
             }
         }
+        crate::dprintln!("warm-up {}: {} polar tasks", what, tasks.len());
         let pb = ProgressBar::new(tasks.len() as u64);
         pb.set_style(
             ProgressStyle::with_template(
@@ -885,6 +886,7 @@ impl Prop {
             worker(&queue, &store, &pb);
         }
         pb.finish();
+        crate::dprintln!("warm-up {}: done", what);
     }
 
     /// One camber candidate's design pass: build the station elements from
