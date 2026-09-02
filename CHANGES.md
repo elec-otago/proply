@@ -1,5 +1,22 @@
 # CHANGES
 
+## 2026-09-02 — Rename `resolution` to `element_count`
+
+### proply-rs CLI / JSON schema
+
+- The `--resolution` option was described as a "radial resolution in
+  millimetres", but it is actually the *number* of radial blade elements
+  (spanwise stations) the design is solved on — each element covers
+  `(radius - hub_radius)/N` of the span, and the station count is
+  `N * radius / (radius - hub_radius)` (≈ N for small hubs).  It is
+  renamed **`--element-count <N>`** (JSON key **`element_count`**), with
+  the old `--resolution` flag and `resolution` JSON key kept as accepted
+  aliases so existing design files and scripts keep working.
+- The startup banner now reports what it means ("Blade elements: 10
+  (each covers 25.20 mm of span)") and the design summary's
+  `spanwise_resolution` field is `element_count`.  The CLI help for `--n`
+  now states it is the STEP loft's chordwise sampling (geometry only).
+
 ## 2026-09-02 — Stop Nelder-Mead at the objective's noise floor
 
 ### proply-rs

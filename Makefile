@@ -10,9 +10,9 @@
 #
 # Designs use the coupled lifting-line solver by default.  Switch design
 # modes by overriding DESIGN_FLAGS, e.g.
-#   make gallery DESIGN_FLAGS="--naca --bem --n 40 --resolution 30"
+#   make gallery DESIGN_FLAGS="--naca --bem --n 40 --element-count 30"
 
-DESIGN_FLAGS ?= --naca --lifting-line --n 40 --resolution 30
+DESIGN_FLAGS ?= --naca --lifting-line --n 40 --element-count 30
 
 PROPS  := $(wildcard props/*.json)
 STEPS  := $(PROPS:props/%.json=build/out/%.step)

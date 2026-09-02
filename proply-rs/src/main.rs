@@ -24,7 +24,7 @@ struct Args {
     bem: Option<bool>,
     lifting_line: Option<bool>,
     auto: Option<bool>,
-    resolution: Option<usize>,
+    element_count: Option<usize>,
     dir: Option<String>,
     step_file: Option<String>,
     log: Option<String>,
@@ -57,10 +57,15 @@ DESIGN OPTIONS:
                            (spanwise-induced losses; smooth chord).
     --param <FILE>         JSON propeller parameter file
                            (default: prop_design.json).
-    --n <N>                STEP loft resolution (default: 40).
-    --resolution <MM>      Radial (spanwise) resolution in millimetres;
-                           2 x (radius - hub_radius) stations
-                           (default: 40).
+    --n <N>                STEP loft resolution: chordwise sample points
+                           per airfoil section of the exported solid
+                           (geometry only; default: 40).
+    --element-count <N>    Number of radial blade elements (spanwise
+                           stations) the design is solved on; each element
+                           covers (radius - hub_radius)/N of the span
+                           (default: 40).  Design accuracy improves with the
+                           count up to ~30-40, then plateaus; changing it
+                           revisits new polar buckets on the first run.
     --naca                 NACA airfoil family (default).
     --cst                  CST (Kulfan) airfoil family: every station uses
                            the default 18-parameter section, re-thicknessed
@@ -108,9 +113,11 @@ OUTPUT OPTIONS:
 
 ALL OPTIONS IN JSON:
     Every design/run option above can instead be set in the --param JSON
-    file (keys: bem, lifting_line, auto, resolution, n, ar, plate, cst,
+    file (keys: bem, lifting_line, auto, element_count, n, ar, plate, cst,
     arad, mech_thickness, modulus, deflection_fraction, thickness_floor,
-    dir, step_file, log, chord_spline_n, camber).  An explicit CLI flag
+    dir, step_file, log, chord_spline_n, camber).  The old `resolution`
+    key (and `--resolution` flag) is accepted as an alias for
+    element_count.  An explicit CLI flag
     overrides the JSON value, which overrides the built-in default.
     Quantities may carry unit suffixes as quoted strings (\"6 mm\", \"6.8cm\",
     \"500g\", \"0.5kg\", \"3 GPa\"); a bare number keeps its historical unit
@@ -131,7 +138,7 @@ fn parse_args() -> Result<Args, String> {
         n: None,
         bem: None,
         auto: None,
-        resolution: None,
+        element_count: None,
         dir: None,
         step_file: None,
         log: None,
@@ -191,13 +198,20 @@ fn parse_args() -> Result<Args, String> {
                         .map_err(|_| "bad --thickness-floor".to_string())?,
                 )
             }
-            "--resolution" => {
-                a.resolution = Some(
+            "--element-count" => {
+                a.element_count = Some(
                     value()?
                         .parse()
-                        .map_err(|_| "bad --resolution".to_string())?,
+                        .map_err(|_| "bad --element-count".to_string())?,
                 )
             }
+            // Legacy alias (the option used to be described as a
+            // millimetre spacing).
+            "--resolution" => a.element_count = Some(
+                value()?
+                    .parse()
+                    .map_err(|_| "bad --resolution".to_string())?,
+            ),
             "--dir" => a.dir = Some(value()?),
             "--step-file" => a.step_file = Some(value()?),
             "--log" => a.log = Some(value()?),
@@ -255,8 +269,8 @@ fn main() {
     if let Some(v) = args.auto {
         param.auto = v;
     }
-    if let Some(v) = args.resolution {
-        param.resolution = v;
+    if let Some(v) = args.element_count {
+        param.element_count = v;
     }
     if let Some(v) = args.n {
         param.n = v;
@@ -346,8 +360,12 @@ fn main() {
         "Optimum Motor Torque {:5.3} Nm at {:5.1} RPM, power={:5.1} Watts",
         optimum_torque, optimum_rpm, power
     );
-    let resolution_m = (param.radius - param.hub_radius) / param.resolution as f64;
-    proply_rs::dprintln!("Spanwise resolution (mm) {:4.2}", resolution_m * 1000.0);
+    let element_width = (param.radius - param.hub_radius) / param.element_count as f64;
+    proply_rs::dprintln!(
+        "Blade elements: {} (each covers {:.2} mm of span)",
+        param.element_count,
+        element_width * 1000.0
+    );
     proply_rs::dprintln!("{}", param);
     let dv = optimize::dv_from_thrust(param.thrust, param.radius, param.forward_airspeed);
     proply_rs::dprintln!(

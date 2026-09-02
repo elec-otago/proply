@@ -708,7 +708,7 @@ mod tests {
     fn optimize_all_zero_chord_station_is_finite() {
         // The full station solve for the multistar_2209_980kv tip station
         // (u_0 = 20 m/s, five blades, 5 mm max chord, only two stations at
-        // --resolution 30).  Guards the whole chain: objective, bounds and
+        // --element-count 30).  Guards the whole chain: objective, bounds and
         // multi-start polish must all return finite design variables.
         let fs = PlateSim { chord: 0.005 };
         let (x, fun) = optimize_all(

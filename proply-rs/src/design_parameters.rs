@@ -112,7 +112,15 @@ pub struct DesignParameters {
     /// files and scripts passing `--auto` keep working.
     #[serde(default)]
     pub auto: bool,
-    pub resolution: usize,
+    /// Number of radial blade elements (spanwise stations) the design
+    /// uses: each element covers `(radius - hub_radius) / element_count`
+    /// of the blade span, and the actual station count is
+    /// `element_count * radius / (radius - hub_radius)`, rounded down
+    /// (≈ `element_count` when the hub is small).  The old name
+    /// `resolution` (once described as a millimetre spacing) is accepted
+    /// as an alias.
+    #[serde(alias = "resolution")]
+    pub element_count: usize,
     pub n: usize,
     pub ar: Option<f64>,
     pub plate: bool,
@@ -175,7 +183,7 @@ impl Default for DesignParameters {
             bem: true,
             lifting_line: false,
             auto: false,
-            resolution: 40,
+            element_count: 40,
             n: 40,
             ar: None,
             plate: false,
@@ -286,7 +294,7 @@ mod tests {
             "bem": false,
             "lifting_line": true,
             "auto": true,
-            "resolution": 60,
+            "element_count": 60,
             "n": 24,
             "ar": 4.5,
             "plate": true,
@@ -302,7 +310,7 @@ mod tests {
         assert!(!p.bem);
         assert!(p.lifting_line);
         assert!(p.auto);
-        assert_eq!(p.resolution, 60);
+        assert_eq!(p.element_count, 60);
         assert_eq!(p.n, 24);
         assert_eq!(p.ar, Some(4.5));
         assert!(p.plate);
@@ -324,7 +332,7 @@ mod tests {
         assert!(p2.bem);
         assert!(!p2.lifting_line);
         assert!(!p2.auto);
-        assert_eq!(p2.resolution, 40);
+        assert_eq!(p2.element_count, 40);
         assert_eq!(p2.n, 40);
         assert_eq!(p2.ar, None);
         assert!(!p2.plate);
@@ -333,6 +341,22 @@ mod tests {
         assert!(!p2.cst);
         assert!(!p2.arad);
         assert_eq!(p2.log, "");
+    }
+
+    #[test]
+    fn legacy_resolution_key_is_aliased_to_element_count() {
+        // `element_count` replaced the misleading `resolution` key (once
+        // described as a millimetre spacing); design files written against
+        // the old name must still parse.
+        let p = DesignParameters::from_json(
+            r#"{
+            "name": "x", "radius": 0.05, "thrust": 1.0, "blades": 2,
+            "resolution": 22
+        }"#,
+        )
+        .unwrap();
+        assert_eq!(p.element_count, 22);
+        assert_eq!(p.n, 40);
     }
 
     #[test]

@@ -69,7 +69,7 @@ struct DesignInfo {
     forward_airspeed_mps: f64,
     altitude_m: f64,
     stations: usize,
-    spanwise_resolution: usize,
+    element_count: usize,
     loft_points: usize,
     foil_family: &'static str,
     /// "geometric" (the p = 0.3 power law on the hub depth) or "mechanical"
@@ -202,7 +202,7 @@ pub fn summary(
             forward_airspeed_mps: r6(param.forward_airspeed),
             altitude_m: r6(param.altitude),
             stations: sections.len(),
-            spanwise_resolution: param.resolution,
+            element_count: param.element_count,
             loft_points: param.n,
             foil_family: if param.arad {
                 "arad"

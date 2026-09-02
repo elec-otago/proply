@@ -42,8 +42,8 @@ pub fn run_design(
     param: &DesignParameters,
     store: Arc<Mutex<PolarStore>>,
 ) -> Result<DesignOutcome, String> {
-    let resolution_m = (param.radius - param.hub_radius) / param.resolution as f64;
-    let mut p = Prop::new(param.clone(), resolution_m, store);
+    let element_width = (param.radius - param.hub_radius) / param.element_count as f64;
+    let mut p = Prop::new(param.clone(), element_width, store);
     p.n_blades = param.blades;
     p.set_plate_mode(param.plate);
 

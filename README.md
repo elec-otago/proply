@@ -40,7 +40,7 @@ for an example.
 Design the propeller at the motor's maximum-efficiency operating point:
 
 ```sh
-cargo run --release -p proply-rs -- --naca --bem --n 40 --resolution 30 \
+cargo run --release -p proply-rs -- --naca --bem --n 40 --element-count 30 \
     --dir=build/out --param='props/test_prop.json'
 ```
 

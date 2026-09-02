@@ -176,11 +176,11 @@ pub struct Prop {
 }
 
 impl Prop {
-    pub fn new(param: DesignParameters, resolution: f64, store: Arc<Mutex<PolarStore>>) -> Self {
-        let radial_steps = (param.radius / resolution) as usize;
+    pub fn new(param: DesignParameters, element_width: f64, store: Arc<Mutex<PolarStore>>) -> Self {
+        let radial_steps = (param.radius / element_width) as usize;
         Self {
             param,
-            radial_resolution: resolution,
+            radial_resolution: element_width,
             radial_steps,
             n_blades: 2,
             blade_elements: Vec::new(),

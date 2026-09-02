@@ -48,7 +48,7 @@ const DEFAULT_PARAMS = {
   // so the JSON carries exactly one selected loop.
   bem: false,
   lifting_line: true,
-  resolution: 10,
+  element_count: 10,
   n: 12,
 };
 

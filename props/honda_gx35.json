@@ -19,7 +19,7 @@
   "modulus": "5 GPa",
   "deflection_fraction": 0.05,
   "thickness_floor": 0.06,
-  "resolution": 10,
+  "element_count": 10,
   "n": 12,
   "motor_torque": 1.6,
   "motor_RPM": 5500,
