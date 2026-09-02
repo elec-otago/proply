@@ -1,5 +1,26 @@
 # CHANGES
 
+## 2026-09-02 — Stop Nelder-Mead at the objective's noise floor
+
+### proply-rs
+
+- `optimize::NelderMead` now stops when the simplex shrinks into a value
+  plateau: each time the simplex's extent halves, the search checks
+  whether the function spread fell with it.  On a smooth objective the
+  spread falls with the size (quadratically near a minimum), so nothing
+  changes; on an objective with a deterministic roughness floor — the
+  design objective's da-matching branches and its 50x error amplification
+  leave the spread pinned at ~1e-3 once the simplex is small — the spread
+  stops falling while the size keeps halving towards the fine `xatol`,
+  and the search stops after four such halving events instead of grinding
+  the noise floor.  Configurable via `plateau_halvings` (default 4).
+
+Measured on the honda design (real polars, warm cache): the same design
+bit-for-bit, with the Nelder-Mead evaluations dropping from ~19,000 to
+~9,250 per design (and the repeated-evaluation tail from ~6,000 to
+~1,800).  The Rosenbrock and BEM-solver tests still converge to their
+tight tolerances — the detector only fires on true plateaus.
+
 ## 2026-09-02 — Converge the torque match (lifting-line design)
 
 ### proply-rs

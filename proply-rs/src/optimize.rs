@@ -298,6 +298,17 @@ pub struct NelderMead {
     pub fatol: f64,
     /// Quadratic-penalty weight for bound violations.
     pub penalty: f64,
+    /// Noise-aware stopping: the objective may be unresolvable below some
+    /// scale of `x` (a deterministic roughness — e.g. the design objective's
+    /// da-matching branches and its 50x error amplification make the value
+    /// spread stop falling once the simplex is small, while the simplex
+    /// keeps halving towards the fine `xatol`).  When the simplex's extent
+    /// halves without the value spread falling by at least 20%, the search
+    /// has reached that resolution floor: stop after `plateau_halvings`
+    /// such halving events instead of grinding to `xatol`.  On a smooth
+    /// objective the spread falls with the size (spread ~ size^2 near a
+    /// minimum), so this never fires there.  Zero disables it.
+    pub plateau_halvings: usize,
 }
 
 impl Default for NelderMead {
@@ -307,6 +318,7 @@ impl Default for NelderMead {
             xatol: 1e-7,
             fatol: 1e-7,
             penalty: 1.0e6,
+            plateau_halvings: 4,
         }
     }
 }
@@ -361,6 +373,11 @@ impl NelderMead {
         let rho = 0.5; // contraction
         let sigma = 0.5; // shrink
 
+        // Noise-floor tracking (see `plateau_halvings`).
+        let mut min_size = f64::INFINITY;
+        let mut spread_at_halving = f64::INFINITY;
+        let mut plateaus = 0usize;
+
         for _iter in 0..self.maxiter {
             simplex.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
             let best = &simplex[0];
@@ -379,6 +396,27 @@ impl NelderMead {
             let spread = (simplex[n].1 - simplex[0].1).abs();
             if size < self.xatol && spread < self.fatol * (1.0 + best.1.abs()) {
                 break;
+            }
+
+            // Noise-aware stopping (see `plateau_halvings`): watch how the
+            // value spread responds each time the simplex's extent halves.
+            // While the search descends a real valley the spread falls with
+            // the size (at least quadratically near a minimum), so the
+            // plateau counter resets; once the simplex is smaller than the
+            // objective's roughness scale the spread stops falling and the
+            // counter accumulates — the shrink tail is grinding the noise
+            // floor, not converging, so stop.
+            if self.plateau_halvings > 0 && size < 0.5 * min_size {
+                if spread >= 0.8 * spread_at_halving {
+                    plateaus += 1;
+                    if plateaus >= self.plateau_halvings {
+                        break;
+                    }
+                } else {
+                    plateaus = 0;
+                }
+                min_size = size;
+                spread_at_halving = spread;
             }
 
             // Centroid of all but the worst.
