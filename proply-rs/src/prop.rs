@@ -1031,12 +1031,16 @@ impl Prop {
 
             // Warm start: evaluate the previous `da` first; if it already meets
             // the target, return immediately (a single circulation solve).
+            // The acceptance also requires a physical result: a warm-started
+            // Newton solve can land on a garbage branch with negative (or
+            // non-finite) torque, and the objective f = q + 50*err would then
+            // *reward* the garbage (negative q minimises it).
             if let Some(hd) = hint_da {
                 if (DA_MIN..=DA_MAX).contains(&hd) {
                     let (t, q, alphas, chords, g, phis) = eval(controls, hd, elems, &cur);
                     cur = g;
                     let err = (t - thrust).abs() / thrust.max(1.0e-9);
-                    if err <= 0.03 {
+                    if err <= 0.03 && q > 0.0 && q.is_finite() {
                         *pg_r.borrow_mut() = cur.clone();
                         crate::dprintln!(
                             "lift-line [{}] ctrl=[{}] da={:.3} (warm): T={:.4} Q={:.4}",
@@ -1052,7 +1056,13 @@ impl Prop {
                         );
                         return ((hd, err, t, q, alphas, chords, phis), true);
                     }
-                    bst = Some((hd, err, t, q, alphas, chords, phis));
+                    // The sample may still bracket the target (its thrust is
+                    // meaningful), but a garbage torque must not seed the
+                    // running best: `better` only replaces positive-torque
+                    // candidates, so a poisoned best would block them.
+                    if q > 0.0 && q.is_finite() {
+                        bst = Some((hd, err, t, q, alphas, chords, phis));
+                    }
                     prev = Some((hd, t));
                 }
             }
@@ -1267,7 +1277,12 @@ impl Prop {
                     let (t2, q2, _a, c2, g2, p2) = eval(&controls, mid, &mut elements, &cur);
                     cur = g2;
                     let e2 = (t2 - target).abs() / target.max(1.0e-9);
-                    if e2 < err {
+                    // Adopt the tighter sample only when it is physical: a
+                    // warm-started Newton solve at some bisection point can
+                    // land on a garbage branch (negative or non-finite
+                    // torque) whose thrust still happens to match, and the
+                    // objective would then reward the garbage.
+                    if e2 < err && q2 > 0.0 && q2.is_finite() {
                         err = e2;
                         da = mid;
                         r_t = t2;

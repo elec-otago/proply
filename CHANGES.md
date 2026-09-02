@@ -1,5 +1,26 @@
 # CHANGES
 
+## 2026-09-03 — Reject garbage circulation solves in the design competition
+
+### proply-rs
+
+Found auditing a 7-hour `make gallery` run: some props' torque matches
+blew up with errors of 784% and 6144%, stalling at **negative absorbed
+torque** (Q = −10.95 and −96.7 N m).  A warm-started Newton solve can
+land on a garbage branch with negative torque whose thrust still happens
+to match the target, and two adoption points trusted it:
+
+- the warm da-acceptance (`err <= 3%`) returned any match, and
+- the tight da-refinement accepted any bisection sample with a smaller
+  thrust error.
+
+Because the pass objective is `f = q + 50·err`, the garbage *won* the
+candidate competition (negative q minimises f) and derailed the outer
+torque match.  All adoption points — the warm acceptance, the failed-warm
+best seeding, and the refinement — now require a physical result
+(`q > 0`, finite).  The failing honda config no longer produces garbage
+or stalls, and its torque match proceeds on sane designs.
+
 ## 2026-09-02 — Cache failed polar sweeps (the seeding warm-up)
 
 ### proply-rs
