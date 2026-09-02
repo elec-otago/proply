@@ -19,7 +19,7 @@ entirely in your browser tab):
 
 - `proply-rs/` — the propeller design tool (BEM design loop, STEP output)
 - `rust-foil/` — airfoil simulation (Rust port of XFOIL)
-- `props/` — JSON propeller parameter files (motor, geometry, thrust target)
+- `props/` — JSON propeller parameter files (motor, geometry)
 - `images/` — rendered PNG of each prop (see [GALLERY.md](GALLERY.md))
 - `legacy/` — the original Python implementation, kept for reference
 - [MECHANICAL.md](MECHANICAL.md) — how the mechanical strength calculation
@@ -34,7 +34,7 @@ cargo build --release
 ## Usage
 
 Specify the prop with a JSON parameter file in `props/` (motor constants,
-blade count, radius, chord, thrust target, ...). See `props/test_prop.json`
+blade count, radius, chord, ...). See `props/test_prop.json`
 for an example.
 
 Design the propeller at the motor's maximum-efficiency operating point:
@@ -49,13 +49,14 @@ This writes `build/out/<name>.step` — an assembly containing the hub and
 summary of the design (motor operating point, performance totals, and the
 per-station section list).
 
-- Every design converges onto the motor's operating point: the thrust
-  target (the JSON `thrust` key) is iterated until the blade absorbs the
-  design torque at the design RPM, at maximum efficiency (`--auto` is
-  implied, and still accepted for compatibility).
+- Every design converges onto the motor's operating point: the blade
+  absorbs the motor's design torque at the design RPM at maximum
+  efficiency (the operating point is (torque, RPM); the achieved thrust
+  is an output, not an input — `--auto` is implied, and still accepted
+  for compatibility).
 - Quantity keys in the design JSON may carry unit suffixes as quoted
-  strings — lengths in `m`, `cm` or `mm`, thrust in `N`, `kg` or `g`
-  (kilogram-force):
+  strings — lengths in `m`, `cm` or `mm`, pressures in `Pa`, `kPa`, `MPa`
+  or `GPa`:
 
   ```json
       "radius": "6.8cm",
@@ -63,14 +64,13 @@ per-station section list).
       "center_hole": "1.5mm",
       "hub_radius": "6 mm",
       "hub_depth": "6mm",
-      "trailing_edge": "0.25mm",
-      "thrust": "500g"
+      "trailing_edge": "0.25mm"
   ```
 
-  A bare number keeps its historical unit — metres for lengths, newtons
-  for thrust, millimetres for `trailing_edge` — so existing files parse
-  exactly as before.  `center_hole` may be omitted: it defaults to half
-  the `hub_radius`.
+  A bare number keeps its historical unit — metres for lengths,
+  millimetres for `trailing_edge` — so existing files parse exactly as
+  before.  `center_hole` may be omitted: it defaults to half the
+  `hub_radius`.
 - A `motor_torque` + `motor_RPM` pair in the design JSON pins the
   operating point directly (e.g. an engine's rated torque and speed),
   overriding the electric motor model derived from `motor_Kv` and

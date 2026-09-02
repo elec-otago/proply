@@ -1,5 +1,5 @@
 {
-    "comment": "Physically realizable: a Multistar 1706-class 5in (127mm) 3-blade prop on 3S, cruising at 3 m/s. Three blades (rather than two) lower the per-blade loading so the design converges to the target at every station; a heavier hover thrust on this tiny prop is energetically marginal and does not converge.",
+    "comment": "Physically realizable: a Multistar 1706-class 5in (127mm) 3-blade prop on 3S, cruising at 3 m/s. Three blades (rather than two) lower the per-blade loading so every BEM station converges at the motor's operating point.",
 
     "name": "test_prop",
 
@@ -12,7 +12,6 @@
     "motor_winding_resistance": 0.405,
 
     "blades": 3,
-    "thrust": "3 N",
 
     "radius": "68mm",
     "tip_chord": "5mm",

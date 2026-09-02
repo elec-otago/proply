@@ -606,24 +606,18 @@ impl Prop {
     /// absorbed torque equals `q_target` (torque is monotone in `da` over
     /// the attached range) and the chord/camber search then maximises the
     /// resulting thrust in a single pass.  No thrust target is iterated —
-    /// the achieved thrust is an output, not a constraint (`thrust_seed`,
-    /// the JSON `thrust` key, is ignored here).
+    /// the achieved thrust is an output, not a constraint.
     ///
     /// The BEM path sizes each station from momentum theory for a target
     /// induced velocity and has no equivalent single global offset, so it
     /// keeps the damped multiplicative iteration over the thrust target
-    /// (torque rises monotonically with it); `thrust_seed` is that
-    /// iteration's starting point.
+    /// (torque rises monotonically with it); the iteration starts from a
+    /// momentum-theory estimate of the thrust the demanded torque can
+    /// produce (see [`Prop::bem_thrust_seed`]).
     ///
     /// If no geometry can absorb the demanded torque (chord/depth caps
     /// limit the loading), the closest design is returned with a warning.
-    pub fn design_for_torque(
-        &mut self,
-        rpm: f64,
-        q_target: f64,
-        thrust_seed: f64,
-        ar: Option<f64>,
-    ) -> DesignResult {
+    pub fn design_for_torque(&mut self, rpm: f64, q_target: f64, ar: Option<f64>) -> DesignResult {
         if self.param.lifting_line {
             let (q, t, err) = self.lift_line_design(rpm, q_target, ar);
             let (converged, total) = self.station_coverage();
@@ -643,7 +637,35 @@ impl Prop {
                 total_stations: total,
             };
         }
-        self.bem_design_for_torque(rpm, q_target, thrust_seed)
+        let seed = self.bem_thrust_seed(rpm, q_target);
+        self.bem_design_for_torque(rpm, q_target, seed)
+    }
+
+    /// A starting thrust target for the BEM fixed-point iteration,
+    /// estimated from the demanded torque by momentum theory: the
+    /// iteration's absorbed torque is monotone in the target, so it
+    /// converges from either side and the seed only needs the right
+    /// magnitude.  In forward flight the thrust is bounded by P/u_0
+    /// (with the ideal Froude efficiency at the disk ~P/(u_0+dv/2));
+    /// hovering, the ideal disk gives T = (2 ρ A P²)^{1/3} and a real
+    /// rotor achieves roughly half of that (figure of merit ~0.3-0.5), so
+    /// the estimates sit within a factor ~2-3 of any sane answer.
+    fn bem_thrust_seed(&self, rpm: f64, q_target: f64) -> f64 {
+        let p = (q_target * optimize::rpm2omega(rpm)).abs();
+        let u = self.param.forward_airspeed;
+        let area = std::f64::consts::PI
+            * (self.param.radius.powi(2) - self.param.hub_radius.powi(2)).max(1.0e-6);
+        // Ideal-disk thrust for the shaft power P: T = (2 ρ A P²)^{1/3}.
+        let hover = (2.0 * crate::optimize::RHO * area * p * p).cbrt();
+        let seed = if u > 0.5 {
+            // Forward flight: T ≤ P/u_0 (with η ≤ 1); blend the cruise
+            // bound with the hover estimate so slow flight stays sane.
+            let cruise = p / u;
+            0.5 * (cruise * cruise * hover).cbrt()
+        } else {
+            0.5 * hover
+        };
+        seed.max(1.0e-3)
     }
 
     /// The BEM path of [`design_for_torque`]: iterate the thrust target
@@ -2285,7 +2307,7 @@ mod tests {
     fn bem_design_matches_target_torque() {
         // Plate polars (no rust-foil) so this is fast: the operating-point
         // match must land the absorbed torque on the target at the design
-        // RPM, converging from the seed thrust target.
+        // RPM, converging from the internal momentum-theory seed.
         let mut p = test_prop();
         p.param.hub_depth = 0.003; // nonzero thickness law, as real props have
         p.radial_steps = 10;
@@ -2293,7 +2315,7 @@ mod tests {
         let (q0, _t0) = p.full_optimize(12000.0, 2.0);
         assert!(q0 > 0.0, "reference torque {} not positive", q0);
         let q_target = 0.8 * q0;
-        let res = p.design_for_torque(12000.0, q_target, 2.0, None);
+        let res = p.design_for_torque(12000.0, q_target, None);
         assert!(
             (res.torque - q_target).abs() / q_target < 0.01,
             "Q {} vs target {}",
@@ -2329,7 +2351,7 @@ mod tests {
         let (q0, _t0) = p.full_optimize(12000.0, 2.0);
         assert!(q0 > 0.0, "reference torque {} not positive", q0);
         let q_target = 0.7 * q0;
-        let res = p.design_for_torque(12000.0, q_target, 2.0, None);
+        let res = p.design_for_torque(12000.0, q_target, None);
         assert!(
             (res.torque - q_target).abs() / q_target < 0.01,
             "Q {} vs target {}",
@@ -2357,7 +2379,7 @@ mod tests {
         p.param.hub_depth = 0.0; // degenerate depth law: no chord allowed
         p.radial_steps = 10;
         p.set_plate_mode(true);
-        let res = p.design_for_torque(12000.0, 0.05, 2.0, None);
+        let res = p.design_for_torque(12000.0, 0.05, None);
         assert!(res.torque == 0.0, "torque {}", res.torque);
         assert!(res.thrust == 0.0, "thrust {}", res.thrust);
         let w = res

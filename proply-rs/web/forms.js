@@ -60,7 +60,6 @@ export const TABS = [
         type: 'boolean',
       },
       { key: 'radius', label: 'Radius', type: 'quantity', unit: 'mm', bareToDisplay: 1000 },
-      { key: 'thrust', label: 'Thrust', type: 'quantity', unit: 'N', bareToDisplay: 1 },
       { key: 'tip_chord', label: 'Tip chord', type: 'quantity', unit: 'mm', bareToDisplay: 1000 },
       { key: 'hub_radius', label: 'Hub radius', type: 'quantity', unit: 'mm', bareToDisplay: 1000 },
       { key: 'hub_depth', label: 'Hub depth', type: 'quantity', unit: 'mm', bareToDisplay: 1000 },

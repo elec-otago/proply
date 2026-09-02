@@ -21,7 +21,6 @@ fn fast_params() -> DesignParameters {
         "motor_volts": 11.0,
         "motor_no_load_current": 0.5,
         "motor_winding_resistance": 0.206,
-        "thrust": 2.0,
         "radius": 0.0625,
         "tip_chord": 0.007,
         "hub_radius": 0.005,

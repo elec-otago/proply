@@ -13,7 +13,6 @@
     "motor_torque": 334.8,
     "motor_RPM": 1950.0,
     "blades": 3,
-    "thrust": "150kg",
 
     "radius": "60cm",
     "tip_chord": "7cm",

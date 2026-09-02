@@ -10,7 +10,6 @@ use std::sync::{Arc, Mutex};
 
 use proply_rs::cache::PolarStore;
 use proply_rs::design_parameters::DesignParameters;
-use proply_rs::optimize;
 use proply_rs::pipeline;
 use proply_rs::step_out;
 use proply_rs::yaml_out;
@@ -367,11 +366,6 @@ fn main() {
         element_width * 1000.0
     );
     proply_rs::dprintln!("{}", param);
-    let dv = optimize::dv_from_thrust(param.thrust, param.radius, param.forward_airspeed);
-    proply_rs::dprintln!(
-        "Airspeed at propellers (hovering): {:4.2} m/s",
-        param.forward_airspeed + dv
-    );
     proply_rs::dprintln!("\n\n");
 
     // The whole design (converged onto the motor operating point, then the

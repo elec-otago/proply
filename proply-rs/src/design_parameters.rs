@@ -6,8 +6,8 @@
 //! optional and defaults to half the `hub_radius` (the Python used a fixed
 //! 5 mm).  Physical quantities also accept unit-suffixed strings
 //! (`"6 mm"`, `"6.8cm"`, `"500g"`); a bare number keeps its historical
-//! unit — metres for lengths, newtons for thrust, millimetres for
-//! `trailing_edge` (see [`crate::units`]).
+//! unit — metres for lengths, millimetres for `trailing_edge` (see
+//! [`crate::units`]).
 
 use serde::Deserialize;
 
@@ -22,8 +22,6 @@ pub struct DesignParameters {
     pub name: String,
     #[serde(deserialize_with = "crate::units::de_length_m")]
     pub radius: f64,
-    #[serde(deserialize_with = "crate::units::de_force_n")]
-    pub thrust: f64,
     pub blades: usize,
     /// Mounting bore radius (m).  Absent in the JSON: half the hub radius
     /// (see [`DesignParameters::center_hole`]).
@@ -154,7 +152,6 @@ impl Default for DesignParameters {
         Self {
             name: "hello world".into(),
             radius: d(0.0625),
-            thrust: d(2.0),
             blades: 2,
             center_hole: None,
             tip_chord: d(7.0 / 1000.0),
@@ -486,14 +483,12 @@ mod tests {
         let base = r#"{
             "name": "units", "blades": 2,
             "radius": 0.068, "tip_chord": 0.005, "hub_radius": 0.006,
-            "hub_depth": 0.006, "center_hole": 0.0015, "trailing_edge": 0.25,
-            "thrust": 4.0
+            "hub_depth": 0.006, "center_hole": 0.0015, "trailing_edge": 0.25
         }"#;
         let suffixed = r#"{
             "name": "units", "blades": 2,
             "radius": "6.8cm", "tip_chord": "5mm", "hub_radius": "6 mm",
-            "hub_depth": "6mm", "center_hole": "1.5mm", "trailing_edge": "0.25mm",
-            "thrust": "4N"
+            "hub_depth": "6mm", "center_hole": "1.5mm", "trailing_edge": "0.25mm"
         }"#;
         let a = DesignParameters::from_json(base).unwrap();
         let b = DesignParameters::from_json(suffixed).unwrap();
@@ -502,7 +497,6 @@ mod tests {
             ("tip_chord", a.tip_chord, b.tip_chord),
             ("hub_radius", a.hub_radius, b.hub_radius),
             ("hub_depth", a.hub_depth, b.hub_depth),
-            ("thrust", a.thrust, b.thrust),
         ] {
             assert!((x - y).abs() < 1e-15, "{}: {} vs {}", what, x, y);
         }
@@ -512,32 +506,29 @@ mod tests {
     }
 
     #[test]
-    fn thrust_in_kilograms_and_grams() {
-        let json = |t: &str| {
-            format!(r#"{{"name": "x", "radius": 0.05, "blades": 2, "thrust": "{t}"}}"#)
-        };
-        let kg = DesignParameters::from_json(&json("0.5kg")).unwrap();
-        let g = DesignParameters::from_json(&json("500g")).unwrap();
-        assert!(
-            (kg.thrust - g.thrust).abs() < 1e-9,
-            "kg {} vs g {}",
-            kg.thrust,
-            g.thrust
-        );
-        assert!((kg.thrust - 0.5 * 9.80665).abs() < 1e-9, "kgf {}", kg.thrust);
+    fn legacy_thrust_key_is_ignored() {
+        // The operating point is (torque, RPM): the old `thrust` input is
+        // no longer a design parameter, but files written for the old
+        // format must still parse (the key is ignored, the achieved thrust
+        // is an output of the design).
+        let json = r#"{"name": "x", "radius": 0.05, "blades": 2, "thrust": "500g"}"#;
+        let p = DesignParameters::from_json(json).unwrap();
+        assert_eq!(p.name, "x");
+        assert_eq!(p.radius, 0.05);
+        assert_eq!(p.blades, 2);
     }
 
     #[test]
     fn wrong_unit_kind_errors() {
         let err = DesignParameters::from_json(
-            r#"{"name": "x", "radius": "500g", "blades": 2, "thrust": 1.0}"#,
+            r#"{"name": "x", "radius": "500g", "blades": 2}"#,
         )
         .unwrap_err();
         assert!(err.contains("m, cm, mm"), "{}", err);
         let err = DesignParameters::from_json(
-            r#"{"name": "x", "radius": 0.05, "blades": 2, "thrust": "5 furlongs"}"#,
+            r#"{"name": "x", "radius": 0.05, "modulus": "5 furlongs", "blades": 2}"#,
         )
         .unwrap_err();
-        assert!(err.contains("N, kg, g"), "{}", err);
+        assert!(err.contains("Pa, kPa, MPa, GPa"), "{}", err);
     }
 }

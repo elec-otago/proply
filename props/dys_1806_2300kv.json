@@ -9,7 +9,6 @@
     "motor_no_load_current": 0.6,
     "motor_winding_resistance": 0.19,
 
-    "thrust": 5.0,
     "blades": 3,
 
     "radius": 0.0635,

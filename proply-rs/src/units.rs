@@ -2,14 +2,12 @@
 //! Unit-suffixed quantities in the design JSON.
 //!
 //! A quantity field accepts a bare JSON number — meaning exactly what it
-//! has always meant (metres for lengths, newtons for thrust, millimetres
-//! for `trailing_edge`, pascals for `modulus`) — or a quoted string
-//! carrying a unit suffix: `"5mm"`, `"6 mm"`, `"6.8cm"`, `"500g"`,
-//! `"0.5kg"`, `"3.2N"`, `"3 GPa"`.  JSON has no unquoted `5mm` scalar, so
-//! suffixed values must be strings.
+//! has always meant (metres for lengths, millimetres for `trailing_edge`,
+//! pascals for `modulus`) — or a quoted string carrying a unit suffix:
+//! `"5mm"`, `"6 mm"`, `"6.8cm"`, `"3 GPa"`.  JSON has no unquoted `5mm`
+//! scalar, so suffixed values must be strings.
 //!
-//! Length units: `m`, `cm`, `mm`.  Force units: `N`, `kg` (kilogram-force,
-//! g0 = 9.80665 N), `g` (gram-force).  Pressure units: `Pa`, `kPa`, `MPa`,
+//! Length units: `m`, `cm`, `mm`.  Pressure units: `Pa`, `kPa`, `MPa`,
 //! `GPa`.  Units match case-insensitively and may be separated from the
 //! number by whitespace.  A string without a unit uses the field's
 //! bare-number unit, and a unit from the wrong kind (`"tip_chord":
@@ -17,9 +15,6 @@
 
 use serde::Deserialize;
 use serde::Deserializer;
-
-/// Standard gravity (m/s^2): the kgf/gf -> N conversion.
-const G0: f64 = 9.80665;
 
 /// Split a quantity string into (number, unit): the unit is the trailing
 /// run of ASCII letters (a leading scan would cut exponent forms like
@@ -55,16 +50,6 @@ fn length_scale(unit: &str) -> Option<f64> {
     }
 }
 
-/// Scale factor of a force unit to newtons.
-fn force_scale(unit: &str) -> Option<f64> {
-    match unit.to_ascii_lowercase().as_str() {
-        "n" => Some(1.0),
-        "kg" => Some(G0),
-        "g" => Some(G0 * 1.0e-3),
-        _ => None,
-    }
-}
-
 /// Scale factor of a pressure unit to pascals.
 fn pressure_scale(unit: &str) -> Option<f64> {
     match unit.to_ascii_lowercase().as_str() {
@@ -90,25 +75,6 @@ fn length(value: &serde_json::Value, storage_m: f64) -> Result<f64, String> {
                 Some(u) => length_scale(u)
                     .map(|scale| v * scale / storage_m)
                     .ok_or_else(|| format!("invalid quantity '{s}' for a length (expected m, cm, mm)")),
-            }
-        }
-        other => Err(format!(
-            "invalid quantity '{other}' (expected a number or a unit-suffixed string)"
-        )),
-    }
-}
-
-/// Parse a force whose bare unit is newtons.
-fn force(value: &serde_json::Value) -> Result<f64, String> {
-    match value {
-        serde_json::Value::Number(n) => Ok(n.as_f64().unwrap_or(f64::NAN)),
-        serde_json::Value::String(s) => {
-            let (v, unit) = split_quantity(s)?;
-            match unit {
-                None => Ok(v),
-                Some(u) => force_scale(u)
-                    .map(|scale| v * scale)
-                    .ok_or_else(|| format!("invalid quantity '{s}' for a force (expected N, kg, g)")),
             }
         }
         other => Err(format!(
@@ -155,15 +121,6 @@ where
 {
     let v = serde_json::Value::deserialize(d)?;
     length(&v, 1.0e-3).map_err(serde::de::Error::custom)
-}
-
-/// `deserialize_with` helper: a force in newtons (bare number = N).
-pub fn de_force_n<'de, D>(d: D) -> Result<f64, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let v = serde_json::Value::deserialize(d)?;
-    force(&v).map_err(serde::de::Error::custom)
 }
 
 /// `deserialize_with` helper: a pressure in pascals (bare number = Pa).
@@ -226,16 +183,6 @@ mod tests {
     }
 
     #[test]
-    fn forces_in_newtons() {
-        assert_eq!(force(&serde_json::json!(4.0)).unwrap(), 4.0);
-        assert_eq!(force(&serde_json::json!("4N")).unwrap(), 4.0);
-        assert_eq!(force(&serde_json::json!("4 n")).unwrap(), 4.0);
-        assert!((force(&serde_json::json!("0.5kg")).unwrap() - 0.5 * G0).abs() < 1e-12);
-        assert!((force(&serde_json::json!("500g")).unwrap() - 0.5 * G0).abs() < 1e-9);
-        assert!((force(&serde_json::json!("2KG")).unwrap() - 2.0 * G0).abs() < 1e-12);
-    }
-
-    #[test]
     fn pressures_in_pascals() {
         assert_eq!(pressure(&serde_json::json!(3.0e9)).unwrap(), 3.0e9);
         assert_eq!(pressure(&serde_json::json!("3e9")).unwrap(), 3.0e9);
@@ -255,18 +202,15 @@ mod tests {
 
     #[test]
     fn bad_quantities_error() {
-        // A force unit on a length field.
+        // A pressure unit on a length field.
         let err = length(&serde_json::json!("500g"), 1.0).unwrap_err();
         assert!(err.contains("500g") && err.contains("m, cm, mm"), "{}", err);
-        // A length unit on a force field.
-        let err = force(&serde_json::json!("5mm")).unwrap_err();
-        assert!(err.contains("N, kg, g"), "{}", err);
         // Unknown units.
-        assert!(force(&serde_json::json!("5 furlongs")).is_err());
+        assert!(pressure(&serde_json::json!("5 furlongs")).is_err());
         // Non-numeric value.
         assert!(length(&serde_json::json!("amm"), 1.0).is_err());
         // Wrong JSON type.
         assert!(length(&serde_json::json!(true), 1.0).is_err());
-        assert!(force(&serde_json::json!([1.0])).is_err());
+        assert!(pressure(&serde_json::json!([1.0])).is_err());
     }
 }

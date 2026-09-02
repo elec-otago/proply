@@ -58,13 +58,13 @@ Because the shaft power Q·ω is fixed once (torque, RPM) is, maximum
 efficiency means maximum thrust — so the lifting-line design absorbs
 exactly the demanded torque (each geometry evaluation matches a common
 attack offset to it) and maximises the resulting thrust in a single
-pass.  The JSON `thrust` key is only the search seed: the achieved
-thrust is an output, reported under `performance`.  This replaces the
-old `--auto` torque ceiling (`--auto` is still accepted, and implied).
+pass.  The achieved thrust is an output, reported under `performance`.
+This replaces the old `--auto` torque ceiling (`--auto` is still
+accepted, and implied).
 
 Quantity keys in the design JSON may carry unit suffixes as quoted
-strings — lengths in `m`, `cm` or `mm`, thrust in `N`, `kg` or `g`
-(kilogram-force):
+strings — lengths in `m`, `cm` or `mm`, pressures in `Pa`, `kPa`, `MPa`
+or `GPa`:
 
 ```json
     "radius": "6.8cm",
@@ -72,13 +72,12 @@ strings — lengths in `m`, `cm` or `mm`, thrust in `N`, `kg` or `g`
     "center_hole": "1.5mm",
     "hub_radius": "6 mm",
     "hub_depth": "6mm",
-    "trailing_edge": "0.25mm",
-    "thrust": "500g"
+    "trailing_edge": "0.25mm"
 ```
 
-A bare number keeps its historical unit — metres for lengths, newtons
-for thrust, millimetres for `trailing_edge` — so every existing file
-parses exactly as before.
+A bare number keeps its historical unit — metres for lengths,
+millimetres for `trailing_edge` — so every existing file parses exactly
+as before (a legacy `thrust` key in an old file is ignored).
 
 Design the same propeller with CST (Kulfan) station foils instead of the
 NACA 4-series:

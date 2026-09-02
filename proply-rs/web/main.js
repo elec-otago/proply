@@ -29,7 +29,6 @@ const DEFAULT_PARAMS = {
   motor_no_load_current: 0.5,
   motor_winding_resistance: 0.405,
   blades: 3,
-  thrust: '3 N',
   radius: '68 mm',
   tip_chord: '5 mm',
   scimitar_percent: 0.0,
