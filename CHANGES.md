@@ -1,5 +1,46 @@
 # CHANGES
 
+## 2026-09-02 — Converge the torque match (lifting-line design)
+
+### proply-rs
+
+Analysis of the design logs showed three convergence inefficiencies —
+measured on the 268 mm honda design (real polars), the torque-match
+iteration oscillated through 16 matches with ~46,700 circulation solves
+(~half of them repeating the previous evaluation), and the plate-mode
+run through 18:
+
+- **Candidates now compete at the exact target thrust.**  The pass's
+  warm `da` acceptance (thrust within 3%) let a high-torque design that
+  happened to match thrust exactly outrank a low-torque one sitting a
+  percent or two off target — the mis-ranking that made the outer torque
+  iteration oscillate (both code versions show 15-20% error jumps when
+  such a candidate won).  The final measured candidate refines `da` with
+  a bounded bisection around the warm value (branch-safe: the matched
+  thrust is monotone in `da`, every solve warm-starts from the previous
+  circulation), so candidates are ranked on the torque at the target.
+- **The previous match's design re-competes warm.**  Its chord controls,
+  camber distribution and attack angles are kept on the `Prop` and the
+  next match runs them as the "prev" incumbent, warm-started from its
+  own controls (with the full-chord run kept as the reachability anchor,
+  and warm-chained scaled restarts that stop as soon as they cannot beat
+  the running best).  Consecutive matches stay on one geometry branch
+  instead of re-optimizing from scratch and landing on arbitrary local
+  optima.
+- **The torque-match update adapts to the measured response.**  The
+  fixed 0.8 damping exponent assumed an elasticity of ~1.25; the design
+  logs show a thrust→torque elasticity of 2-5 with the mechanical
+  thickness law (linearly unstable under fixed damping), so the exponent
+  is now reduced towards 1/(measured elasticity), and every step is
+  capped at ±25%.
+
+Result (honda, real polars, warm cache): 16 → 6 torque matches,
+~46,700 → ~19,000 circulation solves, 4.5 s → 1.8 s, with a monotone
+error decrease (no 15-20% jumps) — and a genuinely better design, since
+the old winner ranking was distorted: figure of merit 0.366 → 0.370,
+propulsive efficiency 0.864 → 0.870, torque target met to 0.10% (was
+0.45%).  Same-state runs remain bit-identical.
+
 ## 2026-09-02 — Speed up lifting-line designs (degenerate polars, hot path)
 
 ### proply-rs

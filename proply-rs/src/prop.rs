@@ -168,6 +168,11 @@ pub struct Prop {
     /// Predicted tip deflection of the sized mechanical law (m),
     /// reported in the design summary.
     pub mech_tip_deflection: Option<f64>,
+    /// The winning design of the most recent lifting-line pass: the next
+    /// torque-match iteration seeds its incumbent candidate from this, so
+    /// consecutive matches stay on the same geometry branch (fewer, less
+    /// oscillatory torque-match iterations).
+    prev_win: Option<PassOutcome>,
 }
 
 impl Prop {
@@ -185,6 +190,7 @@ impl Prop {
             plate_mode: false,
             mech_thickness_law: None,
             mech_tip_deflection: None,
+            prev_win: None,
         }
     }
 
@@ -620,15 +626,27 @@ impl Prop {
         const MAX_ITERS: usize = 30;
         /// Relative torque tolerance for a converged match.
         const TOL: f64 = 1.0e-2;
-        /// Damping exponent for the target update: ideally T ∝ Q^(2/3) in
-        /// hover (T ∝ P^(2/3)) and ~Q^1 in cruise, so 0.8 keeps the fixed
-        /// point iteration stable across both regimes.
+        /// Baseline damping exponent for the target update: ideally
+        /// T ∝ Q^(2/3) in hover (T ∝ P^(2/3)) and ~Q^1 in cruise, so 0.8 is
+        /// a sound starting point.  The exponent is then adapted to the
+        /// locally measured response slope (see below).
         const DAMPING: f64 = 0.8;
+        /// The measured thrust → torque response is steep with the
+        /// mechanical thickness law (elasticity up to ~5, from the design
+        /// logs) and slightly noisy, so an unbounded update overshoots and
+        /// oscillates; cap every step at ±25% of the current target.
+        const STEP_CAP: f64 = 0.25;
 
         let mut thrust = thrust_seed.max(1.0e-3);
         // (relative error, thrust target) of the closest design so far —
         // the fallback if the iteration cannot close on the target.
         let mut best: Option<(f64, f64)> = None;
+        // (thrust, torque) of the previous sample: the local slope adapts
+        // the damping exponent to the measured elasticity.  A fixed 0.8
+        // exponent under-damped the mechanical-law phase (the log shows a
+        // response elasticity of 2-5 and an 11-match oscillation; damping
+        // above 1/elasticity is linearly unstable there).
+        let mut prev: Option<(f64, f64)> = None;
         for iter in 0..MAX_ITERS {
             let (q, t) = self.run_design(rpm, thrust, ar);
             let err = (q - q_target).abs() / q_target;
@@ -661,7 +679,26 @@ impl Prop {
                 );
                 break;
             }
-            let next = thrust * (q_target / q).powf(DAMPING);
+            // Next target: the damped power law, with the exponent reduced
+            // towards 1 / (measured elasticity) so the update stays inside
+            // the linearly-stable range (elasticity from the last two
+            // samples, when they are usable).
+            let mut damp = DAMPING;
+            if let Some((t0, q0)) = prev {
+                let rel_dt = (thrust - t0) / t0;
+                let rel_dq = (q - q0) / q0;
+                if rel_dt.abs() > 1.0e-3 && rel_dq.abs() > 5.0e-3 {
+                    let elasticity = rel_dq / rel_dt;
+                    if (0.2..=6.0).contains(&elasticity) && elasticity.is_finite() {
+                        damp = (0.9 / elasticity).clamp(0.25, DAMPING);
+                    }
+                }
+            }
+            let mut next = thrust * (q_target / q).powf(damp);
+            let rel = (next - thrust) / thrust;
+            if rel.abs() > STEP_CAP {
+                next = thrust * (1.0 + STEP_CAP * rel.signum());
+            }
             if (next - thrust).abs() / thrust < 1.0e-3 {
                 crate::deprintln!(
                     "proply: torque match stalled at Q={:.4} Nm (design Q={:.4})",
@@ -669,6 +706,7 @@ impl Prop {
                 );
                 break;
             }
+            prev = Some((thrust, q));
             thrust = next;
         }
         // Not converged: re-run the closest design so the blade in place is
@@ -880,6 +918,11 @@ impl Prop {
         label: &str,
         camber_dist: &[f64],
         alpha_base: &[f64],
+        // Warm start for the first Nelder-Mead run: the previous torque
+        // match's winning controls (`None` = start from the full chord).
+        // The incumbent's pass re-optimizes from its previous optimum, so
+        // consecutive matches' designs (and torque samples) stay close.
+        x0_seed: Option<&[f64]>,
         pb: &ProgressBar,
     ) -> Option<PassOutcome> {
         let m = rr.len();
@@ -1098,28 +1141,56 @@ impl Prop {
             ..Default::default()
         };
         let bounds: Vec<Option<(f64, f64)>> = vec![Some((0.0, 1.0)); n_ctrl];
-        // First start at the full chord (the thrust-capable geometry); each
-        // later start warm-starts from the running best point so the simplex
-        // keeps working the promising region (and the shared gamma/da warm
-        // state — pg / da_hint — is already near the solution).
+        // First run: warm start from the previous torque match's controls
+        // when this is the incumbent design (the target moves only a few
+        // percent between matches), else the full chord — the
+        // thrust-capable geometry.  When a seed was used, a second run from
+        // the full chord anchors reachability, so a large target move
+        // cannot trap the search in a thin region.
+        let full_chord: Vec<f64> = vec![1.0; n_ctrl];
+        let seeded: Vec<f64> = x0_seed
+            .filter(|s| s.len() == n_ctrl)
+            .map(|s| s.to_vec())
+            .unwrap_or_else(|| full_chord.clone());
+        let mut runs: Vec<Vec<f64>> = vec![seeded];
+        if runs[0]
+            .iter()
+            .zip(&full_chord)
+            .any(|(a, b)| (a - b).abs() > 1.0e-12)
+        {
+            runs.push(full_chord);
+        }
         let mut best_x: Vec<f64> = vec![1.0; n_ctrl];
         let mut best_f = f64::INFINITY;
-        for i in 0..3 {
-            let x0: Vec<f64> = if i == 0 {
-                vec![1.0; n_ctrl]
-            } else {
-                let scale = if i == 1 { 0.85 } else { 0.7 };
-                best_x
-                    .iter()
-                    .map(|&v| (scale * v).clamp(0.0, 1.0))
-                    .collect()
-            };
+        for x0 in runs {
             let (x, f) = nm.minimize(obj, &x0, &bounds);
             if f < best_f {
                 best_f = f;
                 best_x = x;
             }
             if best_f < 0.03 {
+                break;
+            }
+        }
+        // Warm-chained scaled restarts around the running best (they keep
+        // working the promising region, and the shared gamma/da warm state
+        // — pg / da_hint — is already near the solution).  A restart that
+        // cannot beat the running best stops the chain: the simplex is
+        // already in the solution's basin, and a scaled copy would only
+        // re-grind it (the log showed ~half of all evaluations repeating
+        // the previous one).
+        for scale in [0.85, 0.7] {
+            let x0: Vec<f64> = best_x
+                .iter()
+                .map(|&v| (scale * v).clamp(0.0, 1.0))
+                .collect();
+            let before = best_f;
+            let (x, f) = nm.minimize(obj, &x0, &bounds);
+            if f < best_f {
+                best_f = f;
+                best_x = x;
+            }
+            if best_f < 0.03 || f >= before {
                 break;
             }
         }
@@ -1136,7 +1207,7 @@ impl Prop {
         let controls: Vec<f64> = (0..n_ctrl)
             .map(|k| CH_FLOOR * (cap_ctl[k] / CH_FLOOR).powf(best_x[k].clamp(0.0, 1.0)))
             .collect();
-        let ((da, err, r_t, r_q, _al, chords, phis), _reach) = {
+        let ((mut da, mut err, mut r_t, mut r_q, _al, mut chords, mut phis), _reach) = {
             let hint = *da_hint.borrow();
             meet_thrust(&controls, &mut elements, &pg, hint)
         };
@@ -1146,6 +1217,69 @@ impl Prop {
                 label, r_t, err
             );
             return None;
+        }
+        // The warm hint's acceptance (err <= 3%) leaves the measured
+        // operating point up to a few percent off the target.  Candidates
+        // must compete on the torque at the *exact* target thrust: with the
+        // coarse slack, a high-torque design that happens to match thrust
+        // exactly outranks a low-torque one sitting a percent or two off —
+        // the mis-ranking that made the outer torque iteration oscillate
+        // (the logs show 15-20% error jumps when such a candidate won).
+        // Refine `da` with a bounded bisection around the warm value: the
+        // matched thrust is monotone in `da`, and every solve warm-starts
+        // from the previous circulation, so the Newton path stays on the
+        // branch the optimizer converged on.
+        if err > 1.0e-3 && r_t > 0.0 {
+            let mut cur: Vec<f64> = pg.borrow().clone();
+            let (mut lo, mut hi) = (da, da);
+            let (mut t_lo, mut t_hi) = (r_t, r_t);
+            // Expand a bracket around the warm da until the matched thrust
+            // straddles the target.
+            for _ in 0..7 {
+                if (t_lo - thrust) * (t_hi - thrust) <= 0.0 && lo < hi {
+                    break;
+                }
+                if t_hi < thrust && hi < DA_MAX {
+                    lo = hi;
+                    t_lo = t_hi;
+                    hi = (hi + 0.1).min(DA_MAX);
+                    let (t2, _q, _a, _c, g2, _p) = eval(&controls, hi, &mut elements, &cur);
+                    cur = g2;
+                    t_hi = t2;
+                } else if t_lo > thrust && lo > DA_MIN {
+                    hi = lo;
+                    t_hi = t_lo;
+                    lo = (lo - 0.1).max(DA_MIN);
+                    let (t2, _q, _a, _c, g2, _p) = eval(&controls, lo, &mut elements, &cur);
+                    cur = g2;
+                    t_lo = t2;
+                } else {
+                    break;
+                }
+            }
+            let target = thrust;
+            if (t_lo - target) * (t_hi - target) <= 0.0 {
+                let (mut l, mut h) = (lo, hi);
+                for _ in 0..14 {
+                    let mid = 0.5 * (l + h);
+                    let (t2, q2, _a, c2, g2, p2) = eval(&controls, mid, &mut elements, &cur);
+                    cur = g2;
+                    let e2 = (t2 - target).abs() / target.max(1.0e-9);
+                    if e2 < err {
+                        err = e2;
+                        da = mid;
+                        r_t = t2;
+                        r_q = q2;
+                        chords = c2;
+                        phis = p2;
+                    }
+                    if t2 <= target {
+                        l = mid;
+                    } else {
+                        h = mid;
+                    }
+                }
+            }
         }
         for i in 0..m {
             elements[i].set_twist(
@@ -1167,6 +1301,7 @@ impl Prop {
             phis,
             chords,
             camber_dist: camber_dist.to_vec(),
+            design_x: best_x,
         })
     }
 
@@ -1260,7 +1395,8 @@ impl Prop {
         // on a cold cache they simulate their own (serially) and the phase
         // runs minutes with no other output: show a bar (hidden when
         // stderr is not a TTY).
-        let mut seeds: Vec<(String, Vec<f64>, Vec<f64>)> = Vec::with_capacity(cambers.len() + 1);
+        let mut seeds: Vec<PassSeed> =
+            Vec::with_capacity(cambers.len() + 2);
         let mut raw_alphas: Vec<Vec<f64>> = Vec::with_capacity(cambers.len());
         let mut lds: Vec<Vec<f64>> = Vec::with_capacity(cambers.len());
         let seed_pb = ProgressBar::new((rows.len() * m) as u64);
@@ -1292,7 +1428,7 @@ impl Prop {
             // least-squares fit (as the BEM path does for the twist) everywhere
             // downstream (`eval`, `meet_thrust`, the final twist assembly).
             let alpha_base = smooth_alpha_curve(&rr, &alpha_raw);
-            seeds.push((format!("m={:.2}", m_c), vec![m_c; m], alpha_base));
+            seeds.push((format!("m={:.2}", m_c), vec![m_c; m], alpha_base, None));
             raw_alphas.push(alpha_raw);
             lds.push(ld_row);
         }
@@ -1327,7 +1463,31 @@ impl Prop {
                     .collect::<Vec<_>>()
                     .join(" ")
             );
-            seeds.push(("m(r) per-station".into(), m_dist, alpha_base));
+            seeds.push(("m(r) per-station".into(), m_dist, alpha_base, None));
+        }
+
+        // The previous torque match's winning design re-competes as the
+        // incumbent, warm-started from its own controls: consecutive
+        // matches then stay on one geometry branch.  The torque samples the
+        // outer loop sees become the smooth continuation of the previous
+        // design instead of a fresh optimization landing on an arbitrary
+        // local optimum — the behaviour that made the fixed-point
+        // iteration oscillate through 11 matches in the mechanical phase.
+        if let Some(prev) = self.prev_win.as_ref() {
+            if prev.camber_dist.len() == m
+                && prev.alpha_base.len() == m
+                && prev.design_x.len() == n_ctrl
+            {
+                seeds.insert(
+                    0,
+                    (
+                        "prev".to_string(),
+                        prev.camber_dist.clone(),
+                        prev.alpha_base.clone(),
+                        Some(prev.design_x.clone()),
+                    ),
+                );
+            }
         }
 
         // --- One full design pass per candidate, in parallel --------------
@@ -1359,7 +1519,7 @@ impl Prop {
             thread::scope(|s| {
                 let handles: Vec<_> = seeds
                     .into_iter()
-                    .map(|(label, camber_dist, alpha_base)| {
+                    .map(|(label, camber_dist, alpha_base, x0_seed)| {
                         let (store, rr, ref_r, cap_ctl, infl) =
                             (&store, &rr, &ref_r, &cap_ctl, &infl);
                         let eval_pb = &eval_pb;
@@ -1384,6 +1544,7 @@ impl Prop {
                                 &label,
                                 &camber_dist,
                                 &alpha_base,
+                                x0_seed.as_deref(),
                                 eval_pb,
                             )
                         })
@@ -1399,7 +1560,7 @@ impl Prop {
             // No thread support (wasm) or a single core: the candidate
             // passes run inline, in seed order.  Identical results — the
             // passes are independent by construction.
-            for (label, camber_dist, alpha_base) in seeds {
+            for (label, camber_dist, alpha_base, x0_seed) in seeds {
                 if let Some(o) = Self::run_design_pass(
                     param,
                     law,
@@ -1420,6 +1581,7 @@ impl Prop {
                     &label,
                     &camber_dist,
                     &alpha_base,
+                    x0_seed.as_deref(),
                     &eval_pb,
                 ) {
                     outcomes.push(o);
@@ -1515,7 +1677,11 @@ impl Prop {
             }
         }
         self.blade_elements = elements;
-        (win.q, win.t)
+        // Remember the winning design so the next torque-match iteration
+        // can warm-start its incumbent pass from it.
+        let (q, t) = (win.q, win.t);
+        self.prev_win = Some(win);
+        (q, t)
     }
 }
 
@@ -1580,6 +1746,12 @@ fn compose_camber(rr: &[f64], lds: &[Vec<f64>], candidates: &[f64]) -> (Vec<f64>
     (m_dist, winners)
 }
 
+/// One lifting-line camber candidate seed: (label, per-station camber,
+/// per-station smoothed best-L/D attack angles, warm-start controls for
+/// the first Nelder-Mead run — `Some` only for the previous match's
+/// incumbent design, see [`Prop::prev_win`]).
+type PassSeed = (String, Vec<f64>, Vec<f64>, Option<Vec<f64>>);
+
 /// One camber candidate's converged design pass: the objective the
 /// candidates compete on (`f = q + 50*err`), the measured operating point
 /// and the per-station geometry.  Plain data so the passes can run on
@@ -1594,6 +1766,10 @@ struct PassOutcome {
     phis: Vec<f64>,
     chords: Vec<f64>,
     camber_dist: Vec<f64>,
+    /// The winning chord-spline controls (`x ∈ [0, 1]`, the Nelder-Mead
+    /// design variables) — kept so the next torque match can warm-start
+    /// from this design instead of the full chord.
+    design_x: Vec<f64>,
 }
 
 #[cfg(test)]

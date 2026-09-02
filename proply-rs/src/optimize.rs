@@ -366,7 +366,10 @@ impl NelderMead {
             let best = &simplex[0];
             let worst = &simplex[n];
 
-            // Convergence: simplex size and function spread.
+            // Convergence: simplex size and function spread.  The spread is
+            // compared relative to the objective's own scale — an absolute
+            // `fatol` on objectives of order 1-100 is never satisfiable, so
+            // the loop only ever exited through `size`.
             let mut size: f64 = 0.0;
             for s in simplex.iter().take(n + 1).skip(1) {
                 for (j, v) in s.0.iter().enumerate() {
@@ -374,7 +377,7 @@ impl NelderMead {
                 }
             }
             let spread = (simplex[n].1 - simplex[0].1).abs();
-            if size < self.xatol && spread < self.fatol {
+            if size < self.xatol && spread < self.fatol * (1.0 + best.1.abs()) {
                 break;
             }
 
