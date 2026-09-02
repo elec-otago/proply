@@ -43,7 +43,7 @@ $(STAMP): Makefile
 # match (and ntm_28_26_1200Kv.json omits it).
 build/out/%.step build/out/%.yml &: props/%.json $(STAMP)
 	@mkdir -p $(dir $@)
-	cargo run --release -p proply-rs -- $(DESIGN_FLAGS) --step-file=build/out/$*.step --param=$<
+	cargo run --release -p proply-rs -- $(DESIGN_FLAGS) --log build/out/$*.log --step-file=build/out/$*.step --param=$<
 
 # freecadcmd forwards script arguments only when each is preceded by --pass,
 # and it crashes during Qt teardown *after* the image is saved, so the exit
