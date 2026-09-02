@@ -17,7 +17,7 @@ pub struct StoredPolar {
 }
 
 /// An in-memory map of cached polars with lazy persistence.
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct PolarStore {
     path: String,
     foils: HashMap<String, StoredPolar>,
@@ -26,6 +26,28 @@ pub struct PolarStore {
     /// freshly simulated polars a host without a filesystem (the browser)
     /// persists itself.
     new_keys: Vec<String>,
+    /// The per-polar persistence hook, fired synchronously by
+    /// [`PolarStore::insert`] for every freshly simulated polar — good or a
+    /// degenerate failure marker.  Native hosts checkpoint to disk inside
+    /// `insert` and leave this unset; the browser host (wasm.rs) installs
+    /// it so each new polar is handed to the IndexedDB cache the moment it
+    /// is calculated, instead of only when a design finishes.  Present only
+    /// where it can be set: wasm builds and the crate's own tests.
+    #[cfg(any(test, target_arch = "wasm32"))]
+    on_insert: Option<Box<dyn Fn(&str, &StoredPolar) + Send + Sync>>,
+}
+
+// Manual Debug (the persist hook is a closure): `Mutex<PolarStore>`'s
+// `lock().unwrap()` needs it.
+impl std::fmt::Debug for PolarStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PolarStore")
+            .field("path", &self.path)
+            .field("entries", &self.foils.len())
+            .field("dirty", &self.dirty)
+            .field("pending", &self.new_keys.len())
+            .finish_non_exhaustive()
+    }
 }
 
 pub fn cache_key(hash: &str, reynolds: f64, mach: f64) -> String {
@@ -50,6 +72,8 @@ impl PolarStore {
             foils,
             dirty: false,
             new_keys: Vec::new(),
+            #[cfg(any(test, target_arch = "wasm32"))]
+            on_insert: None,
         }
     }
 
@@ -67,6 +91,8 @@ impl PolarStore {
             foils: Self::parse(json).unwrap_or_default(),
             dirty: false,
             new_keys: Vec::new(),
+            #[cfg(any(test, target_arch = "wasm32"))]
+            on_insert: None,
         }
     }
 
@@ -96,12 +122,25 @@ impl PolarStore {
     /// an interrupted run loses at most the sweep in flight (the write of
     /// the whole JSON file takes milliseconds next to the seconds each
     /// rust-foil sweep takes).  Stores without a path — the wasm build —
-    /// never persist and the save is a no-op.
+    /// never persist and the save is a no-op, so the wasm host instead
+    /// installs the per-polar hook ([`PolarStore::on_insert`]) and each
+    /// new polar is pushed to its cache here, at calculation time.
     pub fn insert(&mut self, key: String, polar: StoredPolar) {
+        #[cfg(any(test, target_arch = "wasm32"))]
+        if let Some(h) = self.on_insert.as_ref() {
+            h(&key, &polar);
+        }
         self.foils.insert(key.clone(), polar);
         self.new_keys.push(key);
         self.dirty = true;
         self.save();
+    }
+
+    /// Install the per-polar persistence hook (the wasm host installs it;
+    /// the crate's tests exercise it).  See [`PolarStore::on_insert`].
+    #[cfg(any(test, target_arch = "wasm32"))]
+    pub(crate) fn set_on_insert(&mut self, hook: Box<dyn Fn(&str, &StoredPolar) + Send + Sync>) {
+        self.on_insert = Some(hook);
     }
 
     /// Insert pre-existing data (a warm-up load, not a new simulation): the
@@ -252,5 +291,72 @@ mod tests {
         store.insert("k".into(), sample(0.1));
         store.save(); // no path: must not panic or mark anything
         assert_eq!(store.len(), 1);
+    }
+
+    #[test]
+    fn insert_fires_the_per_polar_persist_hook() {
+        // The wasm host's checkpoint: every freshly simulated polar — a
+        // good sweep or a degenerate failure marker — must reach the hook
+        // exactly once, at insert time; pre-existing hydrated data must
+        // not (the host already has it).
+        let calls = std::sync::Arc::new(std::sync::Mutex::new(Vec::<(String, usize)>::new()));
+        let calls2 = calls.clone();
+        let mut store = PolarStore::in_memory();
+        store.set_on_insert(Box::new(move |key: &str, p: &StoredPolar| {
+            calls2.lock().unwrap().push((key.to_string(), p.alpha.len()));
+        }));
+        store.insert("good".into(), sample(0.1));
+        store.insert(
+            "bad".into(),
+            StoredPolar {
+                alpha: Vec::new(),
+                cl: Vec::new(),
+                cd: Vec::new(),
+            },
+        );
+        store.hydrate("hydrated".into(), sample(0.3));
+
+        let got = calls.lock().unwrap();
+        assert_eq!(got.len(), 2, "hook fired per insert, not per hydrate");
+        assert_eq!(got[0].0, "good");
+        assert_eq!(got[0].1, 2);
+        assert_eq!(got[1].0, "bad");
+        assert_eq!(got[1].1, 0, "failure markers reach the hook too");
+    }
+
+    #[test]
+    fn failed_sweep_marker_round_trips_the_web_persistence_chain() {
+        // The browser flow the wasm session follows: a failed rust-foil
+        // sweep stores a *marker* (an empty polar, via the same insert as
+        // a successful sweep); `PropSession::take_new_json` drains it and
+        // the host stores it in IndexedDB; the next page load hydrates it
+        // back.  The marker must survive that round trip as an empty
+        // polar — the degenerate entry that makes `bucket_fits` take the
+        // flat-plate fallback instead of ever re-running the doomed sweep.
+        let marker = StoredPolar {
+            alpha: Vec::new(),
+            cl: Vec::new(),
+            cd: Vec::new(),
+        };
+
+        // Design session: the failed sweep inserts the marker in memory.
+        let mut session = PolarStore::in_memory();
+        session.insert("h|bucket|mach".into(), marker.clone());
+        assert_eq!(session.len(), 1, "marker cached in the session");
+
+        // take_new_json: the marker is among the freshly simulated polars.
+        let drained = session.take_new_entries();
+        assert_eq!(drained.len(), 1, "marker reported for persistence");
+        assert!(drained["h|bucket|mach"].alpha.is_empty());
+
+        // The host persists the drained map; a fresh page session hydrates
+        // it (hydrate_json is the same JSON document take_new_json made).
+        let json = serde_json::to_string(&drained).unwrap();
+        let mut reload = PolarStore::from_json_str(&json);
+        let got = reload.get("h|bucket|mach").expect("marker hydrated");
+        assert!(got.alpha.is_empty(), "empty marker survives the round trip");
+        // Hydrated data is pre-existing: it is not reported again, so the
+        // host never re-persists it on the next design.
+        assert!(reload.take_new_entries().is_empty());
     }
 }

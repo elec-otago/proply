@@ -7,9 +7,25 @@ import { loadAllPolars, putPolars, clearPolars } from './idb.js';
 
 let session = null;
 
+// A fresh design session with the per-polar persistence hook installed:
+// every polar the moment it is calculated — a good sweep or a failed one
+// (cached as a degenerate marker) — is handed to the host, which writes
+// it into IndexedDB immediately.  A design interrupted mid-way (the page
+// closed, the worker killed) therefore keeps every completed sweep,
+// exactly like the CLI's per-polar disk checkpoint.  The end-of-design
+// drain in runDesign remains as the catch-up flush.
+function makeSession() {
+  const s = new PropSession();
+  s.set_on_polar((key, alpha, cl, cd) => {
+    putPolars([[key, { alpha: Array.from(alpha), cl: Array.from(cl), cd: Array.from(cd) }]])
+      .catch((e) => console.warn('could not persist polar:', e));
+  });
+  return s;
+}
+
 async function boot() {
   await init();
-  session = new PropSession();
+  session = makeSession();
   let hydrated = 0;
   try {
     for (const [key, polar] of await loadAllPolars()) {
@@ -69,7 +85,7 @@ self.onmessage = (ev) => {
   } else if (msg.type === 'clear-cache') {
     clearPolars()
       .then(() => {
-        session = new PropSession(); // drop the hydrated store too
+        session = makeSession(); // drop the hydrated store too
         postMessage({ type: 'cache-cleared' });
       })
       .catch((e) => {

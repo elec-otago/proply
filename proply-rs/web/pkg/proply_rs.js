@@ -233,6 +233,19 @@ export class PropSession {
         return ret >>> 0;
     }
     /**
+     * Install the host's per-polar persistence hook: called synchronously
+     * for every polar the moment it is freshly calculated — a good sweep
+     * or a degenerate failure marker — with the cache key and the
+     * (alpha, cl, cd) arrays.  The host writes each record to its
+     * IndexedDB cache immediately, so a design interrupted mid-way keeps
+     * every completed sweep, exactly like the native CLI's per-polar disk
+     * checkpoint.  The hook replaces any previously installed one.
+     * @param {Function} on_polar
+     */
+    set_on_polar(on_polar) {
+        wasm.propsession_set_on_polar(this.__wbg_ptr, on_polar);
+    }
+    /**
      * A JSON map `key -> {alpha, cl, cd}` of the polars simulated since
      * the last call — what the host should persist (e.g. into IndexedDB).
      * The session keeps every polar for future designs.
@@ -270,6 +283,10 @@ function __wbg_get_imports() {
         __wbg___wbindgen_throw_bb96b2010945f0bc: function(arg0, arg1) {
             throw new Error(getStringFromWasm0(arg0, arg1));
         },
+        __wbg_call_85c2616c93afb65b: function() { return handleError(function (arg0, arg1, arg2, arg3, arg4, arg5) {
+            const ret = arg0.call(arg1, arg2, arg3, arg4, arg5);
+            return ret;
+        }, arguments); },
         __wbg_error_757e9472f8410341: function(arg0, arg1) {
             let deferred0_0;
             let deferred0_1;
@@ -291,6 +308,10 @@ function __wbg_get_imports() {
         },
         __wbg_new_227d7c05414eb861: function() {
             const ret = new Error();
+            return ret;
+        },
+        __wbg_new_from_slice_f6e95bc2809a2b07: function(arg0, arg1) {
+            const ret = new Float64Array(getArrayF64FromWasm0(arg0, arg1));
             return ret;
         },
         __wbg_now_e7c6795a7f81e10f: function(arg0) {
@@ -396,6 +417,15 @@ function getUint8ArrayMemory0() {
         cachedUint8ArrayMemory0 = new Uint8Array(wasm.memory.buffer);
     }
     return cachedUint8ArrayMemory0;
+}
+
+function handleError(f, args) {
+    try {
+        return f.apply(this, args);
+    } catch (e) {
+        const idx = addToExternrefTable0(e);
+        wasm.__wbindgen_exn_store(idx);
+    }
 }
 
 function isLikeNone(x) {

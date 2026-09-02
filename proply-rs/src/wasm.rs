@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex};
 
 use js_sys::Float64Array;
 use wasm_bindgen::prelude::*;
+use wasm_bindgen::JsValue;
 
 use crate::cache::{PolarStore, StoredPolar};
 use crate::design_parameters::DesignParameters;
@@ -88,6 +89,24 @@ impl PropSession {
     /// format), replacing any current contents.
     pub fn hydrate_json(&self, json: &str) {
         *self.store.lock().unwrap() = PolarStore::from_json_str(json);
+    }
+
+    /// Install the host's per-polar persistence hook: called synchronously
+    /// for every polar the moment it is freshly calculated — a good sweep
+    /// or a degenerate failure marker — with the cache key and the
+    /// (alpha, cl, cd) arrays.  The host writes each record to its
+    /// IndexedDB cache immediately, so a design interrupted mid-way keeps
+    /// every completed sweep, exactly like the native CLI's per-polar disk
+    /// checkpoint.  The hook replaces any previously installed one.
+    pub fn set_on_polar(&self, on_polar: js_sys::Function) {
+        let mut store = self.store.lock().unwrap();
+        store.set_on_insert(Box::new(move |key: &str, p: &StoredPolar| {
+            let key = JsValue::from_str(key);
+            let alpha = Float64Array::from(p.alpha.as_slice());
+            let cl = Float64Array::from(p.cl.as_slice());
+            let cd = Float64Array::from(p.cd.as_slice());
+            let _ = on_polar.call4(&JsValue::UNDEFINED, &key, &alpha, &cl, &cd);
+        }));
     }
 
     /// The whole cache as a JSON document (export/migration escape hatch).

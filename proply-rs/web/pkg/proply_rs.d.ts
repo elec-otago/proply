@@ -54,6 +54,16 @@ export class PropSession {
      */
     polar_count(): number;
     /**
+     * Install the host's per-polar persistence hook: called synchronously
+     * for every polar the moment it is freshly calculated — a good sweep
+     * or a degenerate failure marker — with the cache key and the
+     * (alpha, cl, cd) arrays.  The host writes each record to its
+     * IndexedDB cache immediately, so a design interrupted mid-way keeps
+     * every completed sweep, exactly like the native CLI's per-polar disk
+     * checkpoint.  The hook replaces any previously installed one.
+     */
+    set_on_polar(on_polar: Function): void;
+    /**
      * A JSON map `key -> {alpha, cl, cd}` of the polars simulated since
      * the last call — what the host should persist (e.g. into IndexedDB).
      * The session keeps every polar for future designs.
@@ -87,12 +97,14 @@ export interface InitOutput {
     readonly propsession_hydrate_json: (a: number, b: number, c: number) => void;
     readonly propsession_new: () => number;
     readonly propsession_polar_count: (a: number) => number;
+    readonly propsession_set_on_polar: (a: number, b: any) => void;
     readonly propsession_take_new_json: (a: number) => [number, number];
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
-    readonly __wbindgen_free: (a: number, b: number, c: number) => void;
+    readonly __wbindgen_exn_store: (a: number) => void;
     readonly __externref_table_alloc: () => number;
     readonly __wbindgen_externrefs: WebAssembly.Table;
+    readonly __wbindgen_free: (a: number, b: number, c: number) => void;
     readonly __externref_table_dealloc: (a: number) => void;
     readonly __wbindgen_start: () => void;
 }
