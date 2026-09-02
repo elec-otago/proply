@@ -326,9 +326,12 @@ fn main() {
         });
     }
 
-    let store: Arc<Mutex<PolarStore>> = Arc::new(Mutex::new(PolarStore::load(
-        proply_rs::cache::default_cache_path().as_str(),
-    )));
+    let cache_path = proply_rs::cache::default_cache_path();
+    let store: Arc<Mutex<PolarStore>> = Arc::new(Mutex::new(PolarStore::load(&cache_path)));
+    // The degenerate-polar markers proven by earlier runs (foil_cache.json's
+    // `.bad.json` sidecar): loaded so this run never re-sweeps them, saved
+    // at exit so the next run inherits this run's discoveries.
+    proply_rs::simulator::load_persisted_bad_keys(&cache_path);
 
     // An explicitly specified operating point (motor_torque + motor_RPM in
     // the design file, e.g. an engine) overrides the electric motor model's
@@ -396,6 +399,8 @@ fn main() {
     });
     proply_rs::dprintln!("Wrote {}", yaml_filename);
 
-    // Persist any newly simulated polars.
+    // Persist any newly simulated polars, and the degenerate-polar markers
+    // proven during this run (both beside foil_cache.json).
     store.lock().unwrap().save();
+    proply_rs::simulator::save_persisted_bad_keys(&cache_path);
 }

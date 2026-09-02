@@ -66,8 +66,9 @@ docs/_build/
 # PyBuilder
 target/
 
-# proply-rs runtime polar cache
+# proply-rs runtime polar cache (and the degenerate-polar sidecar)
 foil_cache.json
+foil_cache.json.bad.json
 
 # proply-rs design outputs: the YAML summaries in build/out are committed
 # (linked from GALLERY.md); STEP files and everything else under build/

@@ -24,7 +24,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::cache::{cache_key, PolarStore, StoredPolar};
 use crate::foil::FoilLike;
@@ -117,40 +117,120 @@ fn sim_cv() -> &'static std::sync::Condvar {
     CV.get_or_init(std::sync::Condvar::new)
 }
 
+/// Cache keys whose sweep came back degenerate this session: too few
+/// converged points, or an unphysical near-zero-drag polar (see
+/// [`polar_is_physical`] and [`CD_FLOOR`]).  rust-foil's viscous solve
+/// fails *deterministically* on those (foil, Reynolds, Mach) targets, so
+/// re-running the sweep reproduces the same garbage — yet every fresh
+/// design pass (new simulators, empty fit caches) used to re-run it, once
+/// per pass, for each stubborn bucket.  A key lands here the first time a
+/// sweep proves it degenerate, and [`bucket_fits`] then falls straight
+/// back to the flat-plate model — numerically identical to what the
+/// repeated sweeps returned, without the sweeps.
+fn bad_keys() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
+    static BAD: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+        std::sync::OnceLock::new();
+    BAD.get_or_init(|| std::sync::Mutex::new(std::collections::HashSet::new()))
+}
+
+/// The sidecar file that carries the degenerate-key markers across runs:
+/// the polar-cache path with `.bad.json` appended (`foil_cache.bad.json`
+/// beside `foil_cache.json`).  The CLI loads it at startup and saves it at
+/// exit, so keys proven degenerate in one run (or one prop of a `make`
+/// sweep) are not swept again by the next.
+pub fn bad_keys_sidecar(cache_path: &str) -> String {
+    format!("{cache_path}.bad.json")
+}
+
+/// Load the persisted degenerate-key markers into the session set (the
+/// native CLI calls this at startup, next to loading the polar cache).
+/// Missing or unreadable files are fine — the markers only suppress
+/// re-sweeping keys already proven degenerate.  Deleting the sidecar
+/// clears them (e.g. after a code update that might simulate them).
+pub fn load_persisted_bad_keys(cache_path: &str) {
+    let Ok(text) = std::fs::read_to_string(bad_keys_sidecar(cache_path)) else {
+        return;
+    };
+    if let Ok(keys) = serde_json::from_str::<Vec<String>>(&text) {
+        let mut set = bad_keys().lock().unwrap();
+        for key in keys {
+            set.insert(key);
+        }
+    }
+}
+
+/// Persist the session's degenerate-key markers (the native CLI calls this
+/// at exit, next to saving the polar cache).  An empty set removes any
+/// stale sidecar.  Only meaningful on hosts with a filesystem — the
+/// WebAssembly build never calls it.
+pub fn save_persisted_bad_keys(cache_path: &str) {
+    let mut keys: Vec<String> = bad_keys().lock().unwrap().iter().cloned().collect();
+    keys.sort();
+    let path = bad_keys_sidecar(cache_path);
+    if keys.is_empty() {
+        let _ = std::fs::remove_file(&path);
+        return;
+    }
+    if let Ok(json) = serde_json::to_string(&keys) {
+        let _ = std::fs::write(&path, json);
+    }
+}
+
+/// The Reynolds grid the polars are simulated at, computed once
+/// (`np.geomspace(30000, 2e6, 20)`); [`re_grid`] indexes it.
+fn re_grid_values() -> &'static [f64; N_RE] {
+    static GRID: OnceLock<[f64; N_RE]> = OnceLock::new();
+    GRID.get_or_init(|| {
+        std::array::from_fn(|i| RE_MIN * (RE_MAX / RE_MIN).powf(i as f64 / (N_RE - 1) as f64))
+    })
+}
+
 /// Grid point `i` of the Reynolds grid (log-spaced, `RE_MIN..=RE_MAX`).
 fn re_grid(i: usize) -> f64 {
-    RE_MIN * (RE_MAX / RE_MIN).powf(i as f64 / (N_RE - 1) as f64)
+    re_grid_values()[i]
 }
 
 /// Bracket `re >= RE_MIN` on the Reynolds grid: `(lo, hi, w)` with `lo`/`hi`
 /// adjacent grid indices and `w` the log-Re blend weight toward `hi`
 /// (0 at `re_grid(lo)`, 1 at `re_grid(hi)`).  Clamped at the top of the
 /// grid — no extrapolation past `RE_MAX`.
+///
+/// The grid is geometric (`re_grid(i) = RE_MIN * q^i`), so the bracket
+/// index is a single logarithm; the correction loops only absorb
+/// floating-point rounding at exact grid points.  (The old linear scan
+/// recomputed grid points with `powf` on every step — up to a microsecond
+/// of the hot lookup path at high Reynolds numbers.)
 fn re_bracket(re: f64) -> (usize, usize, f64) {
-    let mut lo = 0;
-    while lo + 2 < N_RE && re_grid(lo + 1) <= re {
+    let grid = re_grid_values();
+    let spread = (RE_MAX / RE_MIN).ln();
+    let mut lo = (((re / RE_MIN).ln() / spread) * (N_RE - 1) as f64) as usize;
+    lo = lo.min(N_RE - 2);
+    while lo < N_RE - 2 && grid[lo + 1] <= re {
         lo += 1;
     }
-    let (g_lo, g_hi) = (re_grid(lo), re_grid(lo + 1));
+    while lo > 0 && grid[lo] > re {
+        lo -= 1;
+    }
+    let (g_lo, g_hi) = (grid[lo], grid[lo + 1]);
     let w = ((re / g_lo).ln() / (g_hi / g_lo).ln()).clamp(0.0, 1.0);
     (lo, lo + 1, w)
 }
 
-/// Linear blend of two polynomial coefficient vectors (highest power first,
-/// as `polyfit` returns), padding the shorter with zero high-order
-/// coefficients.
-fn blend_poly(lo: &[f64], hi: &[f64], w: f64) -> Vec<f64> {
-    let n = lo.len().max(hi.len());
-    let lift = |p: &[f64]| -> Vec<f64> {
-        let mut v = vec![0.0; n - p.len()];
-        v.extend_from_slice(p);
-        v
-    };
-    let (a, b) = (lift(lo), lift(hi));
-    a.iter()
-        .zip(b.iter())
-        .map(|(&x, &y)| (1.0 - w) * x + w * y)
-        .collect()
+/// Zero-pad a polynomial coefficient vector (highest power first, up to
+/// [`N_FIT`] entries) into a [`Fit`].
+fn into_fit(coeffs: &[f64]) -> Fit {
+    debug_assert!(coeffs.len() <= N_FIT);
+    let mut fit = [0.0; N_FIT];
+    fit[N_FIT - coeffs.len()..].copy_from_slice(coeffs);
+    fit
+}
+
+/// Elementwise log-Re blend of two fixed fits into `out`
+/// (`out = (1 - w) * lo + w * hi`).
+fn blend_fit(out: &mut Fit, lo: &Fit, hi: &Fit, w: f64) {
+    for i in 0..N_FIT {
+        out[i] = (1.0 - w) * lo[i] + w * hi[i];
+    }
 }
 
 /// A simulated foil: returns CL and CD for a velocity and angle of attack,
@@ -160,10 +240,17 @@ fn blend_poly(lo: &[f64], hi: &[f64], w: f64) -> Vec<f64> {
 /// like the Python `self.fs = FoilSimulator(self.foil)` — so chord changes
 /// made through `set_chord` are seen by the simulator (they feed the
 /// Reynolds number).
-/// (hash, reynolds) -> fitted (cl, cd) polynomial coefficients.
-type PolarEq = (String, u64);
-/// Keyed cache of polar fits, `PolarEq -> (cl, cd) coefficient vectors`.
-type PolyCache = RefCell<HashMap<PolarEq, (Vec<f64>, Vec<f64>)>>;
+/// One fitted (cl or cd) polynomial: degree 9, coefficients highest power
+/// first, zero-padded to ten entries.  Fixed size so the hot lookup path
+/// (bucket blend + evaluation, run millions of times per design) never
+/// touches the heap.
+type Fit = [f64; N_FIT];
+const N_FIT: usize = 10;
+/// Keyed cache of polar fits.  The cache belongs to one [`FoilSimulator`]
+/// whose foil shape is fixed for its lifetime (chord changes do not alter
+/// the foil hash), so the Reynolds bucket alone identifies the fit — the
+/// old `(hash String, Reynolds)` key cost a string hash on every lookup.
+type PolyCache = RefCell<HashMap<u64, (Fit, Fit)>>;
 pub struct FoilSimulator<F: FoilLike> {
     foil: Rc<RefCell<F>>,
     store: Arc<Mutex<PolarStore>>,
@@ -214,8 +301,8 @@ impl<F: FoilLike> FoilSimulator<F> {
         if w >= 1.0 {
             return flat;
         }
-        let (cl_poly, _) = self.get_polars(v);
-        (1.0 - w) * polyval(&cl_poly, alpha) + w * flat
+        let (cl_fit, _) = self.blended_fits(v);
+        (1.0 - w) * polyval(&cl_fit, alpha) + w * flat
     }
 
     pub fn get_cd(&self, v: f64, alpha: f64) -> f64 {
@@ -231,8 +318,8 @@ impl<F: FoilLike> FoilSimulator<F> {
         if w >= 1.0 {
             return flat;
         }
-        let (_, cd_poly) = self.get_polars(v);
-        (1.0 - w) * polyval(&cd_poly, alpha) + w * flat
+        let (_, cd_fit) = self.blended_fits(v);
+        (1.0 - w) * polyval(&cd_fit, alpha) + w * flat
     }
 
     /// The fitted (cl, cd) polynomials for the velocity `v`, interpolated
@@ -240,47 +327,75 @@ impl<F: FoilLike> FoilSimulator<F> {
     /// buckets' fits are blended in log-Re, and below the grid floor the
     /// blend runs from the first bucket down to the flat-plate model.
     pub fn get_polars(&self, v: f64) -> (Vec<f64>, Vec<f64>) {
+        let (cl_fit, cd_fit) = self.blended_fits(v);
+        (cl_fit.to_vec(), cd_fit.to_vec())
+    }
+
+    /// The blended (cl, cd) fits for the velocity `v` — exactly the
+    /// [`FoilSimulator::get_polars`] coefficient blend, computed into
+    /// fixed arrays with no per-call heap allocation (the design loops run
+    /// this millions of times per pass).
+    fn blended_fits(&self, v: f64) -> (Fit, Fit) {
         let re = self.foil.borrow().reynolds(v);
         let mach = self.get_mach(v);
 
         if re < RE_FLAT_PLATE {
-            return flat_plate_polys();
+            return *flat_plate_fit();
         }
         if re < RE_MIN {
-            let (fp_cl, fp_cd) = flat_plate_polys();
+            let fp = flat_plate_fit();
+            let (cl_hi, cd_hi) = self.bucket_fits(RE_MIN, mach);
             let w = (re / RE_FLAT_PLATE).ln() / (RE_MIN / RE_FLAT_PLATE).ln();
-            let (cl_hi, cd_hi) = self.bucket_polars(RE_MIN, mach);
-            return (blend_poly(&fp_cl, &cl_hi, w), blend_poly(&fp_cd, &cd_hi, w));
+            let (mut cl, mut cd) = ([0.0; N_FIT], [0.0; N_FIT]);
+            blend_fit(&mut cl, &fp.0, &cl_hi, w);
+            blend_fit(&mut cd, &fp.1, &cd_hi, w);
+            return (cl, cd);
         }
 
         let (lo, hi, w) = re_bracket(re);
-        let (cl_lo, cd_lo) = self.bucket_polars(re_grid(lo), mach);
-        let (cl_hi, cd_hi) = self.bucket_polars(re_grid(hi), mach);
-        (blend_poly(&cl_lo, &cl_hi, w), blend_poly(&cd_lo, &cd_hi, w))
+        let (cl_lo, cd_lo) = self.bucket_fits(re_grid(lo), mach);
+        let (cl_hi, cd_hi) = self.bucket_fits(re_grid(hi), mach);
+        let (mut cl, mut cd) = ([0.0; N_FIT], [0.0; N_FIT]);
+        blend_fit(&mut cl, &cl_lo, &cl_hi, w);
+        blend_fit(&mut cd, &cd_lo, &cd_hi, w);
+        (cl, cd)
     }
 
     /// The fitted (cl, cd) polynomials of the single grid bucket at
     /// `reynolds` (a [`re_grid`] point): the memoized degree-9 fit of the
     /// cached polar, simulated with rust-foil on first use.  This is the
     /// bucket-level fetch the interpolation blends.
-    fn bucket_polars(&self, reynolds: f64, mach: f64) -> (Vec<f64>, Vec<f64>) {
-        let key = (self.foil.borrow().hash(), reynolds.to_bits());
-
-        if let Some(p) = self.poly_cache.borrow().get(&key) {
-            return p.clone();
+    fn bucket_fits(&self, reynolds: f64, mach: f64) -> (Fit, Fit) {
+        // The fit cache is per simulator and its foil shape is fixed for
+        // the simulator's lifetime (chord changes do not alter the foil
+        // hash), so the Reynolds bucket alone keys the fit.
+        let key = reynolds.to_bits();
+        if let Some(fits) = self.poly_cache.borrow().get(&key) {
+            return *fits;
         }
 
-        let ck = cache_key(&key.0, reynolds, mach);
+        let hash = self.foil.borrow().hash();
+        let ck = cache_key(&hash, reynolds, mach);
+        // A key this session (or a previous run — see
+        // load_persisted_bad_keys) already proved degenerate: skip the
+        // store and the sweep entirely — the flat-plate fallback is what
+        // the sweep would have returned anyway.
+        if bad_keys().lock().unwrap().contains(&ck) {
+            let fp = *flat_plate_fit();
+            self.poly_cache.borrow_mut().insert(key, fp);
+            return fp;
+        }
         let cached = {
             let store = self.store.lock().unwrap();
             store.get(&ck).cloned()
         };
-        let (cl_poly, cd_poly) = match cached {
-            Some(p) if p.alpha.len() > 20 && polar_is_physical(&p) => fit_polar(&p),
+        let fits = match &cached {
+            Some(p) if p.alpha.len() > 20 && polar_is_physical(p) => fit_stored(p),
             _ => {
                 // Claim the key (blocking while another thread simulates
-                // it), then re-check the store once the claim is ours — the
-                // previous holder may have stored it in the meantime.
+                // it), then inspect the store once the claim is ours — the
+                // previous holder may have stored a good polar in the
+                // meantime.
                 {
                     let mut keys = sim_keys().lock().unwrap();
                     while keys.contains(&ck) {
@@ -288,43 +403,64 @@ impl<F: FoilLike> FoilSimulator<F> {
                     }
                     keys.insert(ck.clone());
                 }
-                let raced = {
+                let fits = {
                     let store = self.store.lock().unwrap();
-                    store.get(&ck).and_then(|p| {
-                        if p.alpha.len() > 20 && polar_is_physical(p) {
-                            Some(fit_polar(p))
-                        } else {
-                            None
+                    let entry = store.get(&ck).cloned();
+                    match entry {
+                        // A good cached polar: fit it.
+                        Some(p) if p.alpha.len() > 20 && polar_is_physical(&p) => fit_stored(&p),
+                        // A *stored but degenerate* sweep.  rust-foil fails
+                        // deterministically on these targets, so the entry
+                        // itself is the proof: re-sweeping reproduces the
+                        // same garbage.  Blacklist the key for the session
+                        // and take the flat-plate fallback immediately —
+                        // the value the doomed sweep would have produced.
+                        Some(_) => {
+                            drop(store);
+                            bad_keys().lock().unwrap().insert(ck.clone());
+                            *flat_plate_fit()
                         }
-                    })
-                };
-                let polys = match raced {
-                    Some(polys) => polys,
-                    None => {
-                        self.xfoil_simulate_polars(reynolds, mach);
-                        let store = self.store.lock().unwrap();
-                        match store.get(&ck) {
-                            Some(p) if p.alpha.len() > 20 && polar_is_physical(p) => fit_polar(p),
-                            // Degenerate case: too few converged points, or an
-                            // unphysical (near-zero drag) sweep.  The Python
-                            // code recurses forever here (its fallback never
-                            // writes to the DB); we return the flat-plate
-                            // model instead.
-                            _ => flat_plate_polys(),
+                        // Nothing stored: this is the cold first touch (or
+                        // the previous holder's sweep stored nothing, which
+                        // the blacklist check below catches).
+                        None => {
+                            drop(store);
+                            if bad_keys().lock().unwrap().contains(&ck) {
+                                *flat_plate_fit()
+                            } else {
+                                self.xfoil_simulate_polars(reynolds, mach);
+                                let store = self.store.lock().unwrap();
+                                match store.get(&ck) {
+                                    Some(p) if p.alpha.len() > 20 && polar_is_physical(p) => {
+                                        fit_stored(p)
+                                    }
+                                    // Degenerate case: too few converged
+                                    // points, or an unphysical (near-zero
+                                    // drag) sweep.  The Python code recurses
+                                    // forever here (its fallback never writes
+                                    // to the DB); we return the flat-plate
+                                    // model instead — and remember the key so
+                                    // the design never pays for this doomed
+                                    // sweep again.
+                                    _ => {
+                                        drop(store);
+                                        bad_keys().lock().unwrap().insert(ck.clone());
+                                        *flat_plate_fit()
+                                    }
+                                }
+                            }
                         }
                     }
                 };
                 let mut keys = sim_keys().lock().unwrap();
                 keys.remove(&ck);
                 sim_cv().notify_all();
-                polys
+                fits
             }
         };
 
-        self.poly_cache
-            .borrow_mut()
-            .insert(key, (cl_poly.clone(), cd_poly.clone()));
-        (cl_poly, cd_poly)
+        self.poly_cache.borrow_mut().insert(key, fits);
+        fits
     }
 
     /// The `(Reynolds-grid bucket, Mach)` warm targets an evaluation at
@@ -359,7 +495,7 @@ impl<F: FoilLike> FoilSimulator<F> {
         if self.plate_mode {
             return;
         }
-        self.bucket_polars(reynolds, mach);
+        self.bucket_fits(reynolds, mach);
     }
 
     /// Simulate and cache the polar buckets an evaluation at speed `v`
@@ -420,6 +556,22 @@ impl<F: FoilLike> FoilSimulator<F> {
 /// Degree-9 least-squares fit of cl and cd over alpha (radians).
 fn fit_polar(p: &StoredPolar) -> (Vec<f64>, Vec<f64>) {
     (polyfit(&p.alpha, &p.cl, 9), polyfit(&p.alpha, &p.cd, 9))
+}
+
+/// [`fit_polar`] into fixed [`Fit`] arrays.
+fn fit_stored(p: &StoredPolar) -> (Fit, Fit) {
+    let (cl, cd) = fit_polar(p);
+    (into_fit(&cl), into_fit(&cd))
+}
+
+/// The flat-plate fallback fits, computed once: degree 4 over the same
+/// degree-abscissa grid as [`flat_plate_polys`], zero-padded to [`Fit`]s.
+fn flat_plate_fit() -> &'static (Fit, Fit) {
+    static FP: OnceLock<(Fit, Fit)> = OnceLock::new();
+    FP.get_or_init(|| {
+        let (cl, cd) = flat_plate_polys();
+        (into_fit(&cl), into_fit(&cd))
+    })
 }
 
 /// The flat-plate fallback model, fitted like the Python `Foil didn't
@@ -798,6 +950,88 @@ mod tests {
         // Below the blend floor the analytic flat plate is exact.
         let cl = fs.get_cl(v_for(RE_FLAT_PLATE * 0.999), a);
         assert!((cl - tau * a).abs() < 1e-12, "cl {}", cl);
+    }
+
+    #[test]
+    fn stored_degenerate_polar_is_not_resimulated() {
+        // A stored sweep with unphysical (near-zero) drag must fall back to
+        // the flat-plate model WITHOUT re-running the sweep: rust-foil
+        // fails deterministically on those targets, and re-sweeping them on
+        // every design pass used to dominate warm runs (the honda cache
+        // held 29 such polars of 348; a re-run spent ~90% of its time
+        // re-simulating them).  If the code regressed and re-swept, the
+        // *real* polar (cd ~ 0.008 at 5°) would come back instead of the
+        // fitted flat-plate fallback, and this assertion fails.
+        let chord = 0.06;
+        let v = 22.0; // Re ~ 107k, between buckets 4 and 5
+        // A foil configuration no other test uses, so the session-wide
+        // degenerate-key blacklist below cannot leak into their keys.
+        let f = Naca4::new(chord, 0.14, 0.01, 0.35);
+        let store = test_store();
+        let fs = FoilSimulator::new(Rc::new(RefCell::new(f.clone())), store.clone());
+        let re_raw = f.reynolds(v);
+        let (lo, hi, _) = re_bracket(re_raw);
+        let tau = 2.0 * std::f64::consts::PI;
+        for g in [re_grid(lo), re_grid(hi)] {
+            let mut alpha = Vec::new();
+            let mut cl = Vec::new();
+            let mut cd = Vec::new();
+            for i in 0..41 {
+                let a = (-20.0 + i as f64) * DEG2RAD;
+                alpha.push(a);
+                cl.push(tau * a);
+                cd.push(1.0e-9); // the degenerate signature: ~zero drag
+            }
+            let vg = g * 15.11e-6 / (1.225 * chord);
+            let ma = f.mach(vg);
+            let mach = ((ma * 20.0).round()) / 20.0;
+            let key = cache_key(&f.hash(), g, mach);
+            store
+                .lock()
+                .unwrap()
+                .insert(key, StoredPolar { alpha, cl, cd });
+        }
+        let a = 5.0 * DEG2RAD;
+        let cd = fs.get_cd(v, a);
+        // The fallback is the fitted flat-plate model (its own quirk: the
+        // fit's abscissa is degrees, so at a radian alpha it returns the
+        // near-zero-drag value — the point is the value must come from the
+        // fallback, never from a fresh sweep of the degenerate bucket).
+        let (_, cd_fp) = flat_plate_polys();
+        let cd_expected = polyval(&cd_fp, a);
+        assert!(
+            (cd - cd_expected).abs() < 1.0e-12,
+            "cd {} should be the flat-plate fallback {} (a stored degenerate polar must not be re-simulated)",
+            cd,
+            cd_expected
+        );
+    }
+
+    #[test]
+    fn bad_key_sidecar_round_trips() {
+        // The CLI persists the session's degenerate-key markers so future
+        // runs skip the doomed sweeps.  The probe key is unique to this
+        // test, so the shared session set is only ever *extended* by it
+        // (never cleared) and no other test can collide with it.
+        let dir = std::env::temp_dir().join(format!("proply-bad-keys-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let cache = dir.join("cache.json");
+        let cs = cache.to_str().unwrap().to_string();
+        let side = bad_keys_sidecar(&cs);
+        let probe = "proply-probe-bad-key|12345.6|0.05";
+
+        // A hand-written sidecar loads into the session set...
+        std::fs::write(&side, format!(r#"["{probe}"]"#)).unwrap();
+        load_persisted_bad_keys(&cs);
+        assert!(bad_keys().lock().unwrap().contains(probe));
+        // ...and saving persists it (with whatever else the session holds).
+        save_persisted_bad_keys(&cs);
+        let text = std::fs::read_to_string(&side).expect("sidecar written");
+        let parsed: Vec<String> = serde_json::from_str(&text).expect("sidecar parses");
+        assert!(parsed.contains(&probe.to_string()), "probe key persisted");
+
+        bad_keys().lock().unwrap().remove(probe);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

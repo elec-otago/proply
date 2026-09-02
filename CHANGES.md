@@ -1,5 +1,41 @@
 # CHANGES
 
+## 2026-09-02 — Speed up lifting-line designs (degenerate polars, hot path)
+
+### proply-rs
+
+Measured on the 268 mm honda design (real polars, lifting line): the pure
+design math is ~1 s, everything else was the polar machinery.  Three
+changes:
+
+- **Don't re-simulate degenerate polars.**  rust-foil's viscous solve
+  fails *deterministically* on some (foil, Reynolds) targets — too few
+  converged points, or an unphysical near-zero-drag sweep — yet every
+  fresh design pass (new simulators, empty fit caches) re-ran the doomed
+  sweep for each stubborn bucket: 29 of a 348-key warm honda cache were
+  degenerate and a re-run spent ~90% of its time re-simulating them.  A
+  key proven degenerate is now remembered for the session and falls
+  straight back to the flat-plate model (the value the doomed sweep would
+  have produced), and a *stored* degenerate polar is trusted without
+  re-sweeping.
+- **Persist the degenerate-key markers.**  The CLI saves them to a sidecar
+  (`foil_cache.json.bad.json`) at exit and loads it at startup, so keys
+  proven degenerate in one run — or one prop of a `make` sweep — are not
+  swept again by the next (rust-foil buckets that store *nothing* would
+  otherwise be re-swept on every run).  Delete the sidecar to retry them.
+- **Allocation-free polar lookup path.**  The hot `get_cl`/`get_cd` path
+  now blends fixed-size `[f64; 10]` fit arrays and evaluates them with no
+  per-call heap allocation: the per-simulator fit cache is keyed by the
+  Reynolds bucket alone (the foil is fixed per simulator — no string
+  hashing), the Reynolds grid is computed once instead of per call, and
+  the bucket bracket is a single logarithm instead of a `powf` scan.
+  Same coefficient-blend arithmetic throughout, so polar values are
+  unchanged.  A cached lookup drops from ~1.3 µs to ~130 ns (10x).
+
+The fully-warm honda design goes from ~28 min (cold, original code; a
+warm re-run never finished) to ~4.5 s, with bit-identical outputs
+verified across the code versions.
+
 ## 2026-09-02 — Design trace log (`--log <file>`)
 
 ### proply-rs CLI
