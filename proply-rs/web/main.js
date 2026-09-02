@@ -43,7 +43,11 @@ const DEFAULT_PARAMS = {
   modulus: '3 GPa',
   deflection_fraction: 0.05,
   thickness_floor: 0.06,
-  bem: true,
+  // The design loop: the coupled vortex lifting-line design is the
+  // default (the `--lifting-line` CLI flag); `bem: false` is explicit
+  // so the JSON carries exactly one selected loop.
+  bem: false,
+  lifting_line: true,
   resolution: 10,
   n: 12,
 };

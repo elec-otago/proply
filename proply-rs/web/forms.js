@@ -31,7 +31,11 @@ export const STORAGE_KEY = 'proply-design-params';
 // syncForm derives its position from those keys.
 //
 // type "boolean" is a checkbox editing a JSON boolean: checked composes
-// `true`, unchecked drops the key so the Rust default applies.
+// `true`, unchecked drops the key so the Rust default applies.  The
+// `lifting_line` checkbox is a binary design-loop choice instead: checked
+// composes `lifting_line: true`, unchecked composes `bem: true` — always
+// exactly one key, so the wasm never sees an unselected (or doubly
+// selected) loop.
 export const TABS = [
   {
     id: 'prop',
@@ -48,6 +52,12 @@ export const TABS = [
           { value: 'cst', label: 'CST (Kulfan)' },
           { value: 'arad', label: 'ARA-D' },
         ],
+      },
+      {
+        key: 'lifting_line',
+        label: 'Lifting-line design loop',
+        hint: 'Coupled vortex lifting-line design (checked, the default).  Uncheck to run the blade-element momentum (BEM) loop.',
+        type: 'boolean',
       },
       { key: 'radius', label: 'Radius', type: 'quantity', unit: 'mm', bareToDisplay: 1000 },
       { key: 'thrust', label: 'Thrust', type: 'quantity', unit: 'N', bareToDisplay: 1 },
@@ -123,14 +133,29 @@ function allFields() {
 /// fields are written as JSON numbers.  Select fields are pseudo fields:
 /// the foil family is written as the `cst` / `arad` booleans, with the
 /// NACA default dropping both keys (the wasm defaults to NACA 4-series).
+/// The `lifting_line` checkbox is the design-loop choice: checked writes
+/// `lifting_line: true`, unchecked writes `bem: true` (exactly one).
 export function composeDesign(current, values) {
   const out = { ...current };
   for (const field of allFields()) {
     if (field.type === 'select') continue; // composed below
     if (field.type === 'boolean') {
-      // Checked writes true; unchecked drops the key (Rust default).
-      if (values[field.key]) out[field.key] = true;
-      else delete out[field.key];
+      if (field.key === 'lifting_line') {
+        // Design loop: checked = lifting-line, unchecked = BEM.  Write
+        // exactly one key so the wasm never sees a loop-less design.
+        if (values[field.key]) {
+          out.lifting_line = true;
+          delete out.bem;
+        } else {
+          out.bem = true;
+          delete out.lifting_line;
+        }
+      } else if (values[field.key]) {
+        // Checked writes true; unchecked drops the key (Rust default).
+        out[field.key] = true;
+      } else {
+        delete out[field.key];
+      }
       continue;
     }
     const v = values[field.key];
