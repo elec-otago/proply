@@ -1,4 +1,30 @@
 # CHANGES
+## 2026-09-03 — render-step: headless software rendering of the gallery
+
+### proply-rs / render-step
+
+The FreeCAD preview pipeline was unreliable headlessly: freecadcmd's
+saved PNG ignored the camera (view commands and direct coin camera
+edits never reached `saveImage`, which captured a stale edge-on frame),
+so gallery renders looked clipped across the rotor disk.  Replaced with
+a self-contained renderer that needs no CAD kernel and no display:
+
+- `proply-rs` writes a triangle mesh (ASCII PLY) beside every STEP
+  (`--mesh-file`; the gallery Makefile's design rule passes it): the
+  same geometry `step_out` serialises — per-station foil outlines
+  wrapped on the rotor cylinders plus the hub — so mesh and STEP always
+  describe the same blade.
+- `render-step` (new workspace member, pure Rust + the `png` crate)
+  takes `--step <file>.step`, loads the sibling `.ply`, and rasterises
+  it with a small software z-buffer: a perspective camera ~45 deg off
+  the rotor axis framed from the model bounding box with a margin, 2x2
+  supersampled Lambert shading, deterministic PNG output.
+- The gallery Makefile designs each prop with `--mesh-file` and renders
+  the PNGs with `render-step`; `props/renderprop.py` is removed.
+
+Validated on honda_gx35 and dji_phantom3 (renders match the geometry);
+147 proply-rs tests pass, clippy clean.
+1b2e9b7
 ## 2026-09-03 — Reject unattached flow states (extreme induced inflow)
 
 ### proply-rs
