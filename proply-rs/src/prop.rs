@@ -1014,11 +1014,12 @@ impl Prop {
         // eval(controls, da): chord = smooth shape-preserving cubic (PCHIP)
         // spline through the N control values at `ref_r` (kink-free, clipped to
         // the geometrically-allowed chord for safety), attack angle prescribed.
+        #[allow(clippy::type_complexity)]
         let eval = |controls: &[f64],
                     da: f64,
                     elems: &mut Vec<BladeElement<FoilFamily>>,
                     seed: &[f64]|
-         -> (f64, f64, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
+         -> (f64, f64, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
             let alphas: Vec<f64> = alpha_base
                 .iter()
                 .map(|&ab| (ab + da).clamp(-lift_line::ALPHA_MAX, lift_line::ALPHA_MAX))
@@ -1051,6 +1052,7 @@ impl Prop {
                 chords,
                 res.gamma.clone(),
                 res.phi.clone(),
+                res.u_i.clone(),
             )
         };
 
@@ -1071,11 +1073,12 @@ impl Prop {
         // branch *won* the competition (low Q at the matched T) — the
         // torque cliff between consecutive matches.  At a torque target a
         // brake wastes torque budget, but only if it is never adopted here.
-        let physical = |q: f64, g: &[f64]| -> bool {
+        let physical = |q: f64, g: &[f64], ui: &[f64]| -> bool {
             q.is_finite()
                 && q > 0.0
                 && g.iter().all(|&x| x.is_finite() && x >= -1.0e-9)
                 && circulation_smooth(g)
+                && flow_ui_sane(ui, rr, u_0, omega)
         };
         let meet_torque = |controls: &[f64],
                            elems: &mut Vec<BladeElement<FoilFamily>>,
@@ -1105,10 +1108,10 @@ impl Prop {
             // the objective must not reward that state.
             if let Some(hd) = hint_da {
                 if (DA_MIN..=DA_MAX).contains(&hd) {
-                    let (t, q, alphas, chords, g, phis) = eval(controls, hd, elems, &cur);
+                    let (t, q, alphas, chords, g, phis, u_i) = eval(controls, hd, elems, &cur);
                     let err = (q - q_target).abs() / q_target.max(1.0e-9);
                     cur = g;
-                    if err <= 0.03 && physical(q, &cur) {
+                    if err <= 0.03 && physical(q, &cur, &u_i) {
                         *pg_r.borrow_mut() = cur.clone();
                         crate::dprintln!(
                             "lift-line [{}] ctrl=[{}] da={:.3} (warm): T={:.4} Q={:.4}",
@@ -1127,7 +1130,7 @@ impl Prop {
                     // The sample may still bracket the target (its torque is
                     // meaningful), but a non-physical state must not seed the
                     // running best: it would block the honest samples.
-                    if physical(q, &cur) {
+                    if physical(q, &cur, &u_i) {
                         bst = Some((hd, err, t, q, alphas, chords, phis));
                     }
                     prev = Some((hd, q));
@@ -1144,10 +1147,10 @@ impl Prop {
             }
             cands.sort_by(|a, b| a.partial_cmp(b).unwrap());
             for &da in &cands {
-                let (t, q, alphas, chords, g, phis) = eval(controls, da, elems, &cur);
+                let (t, q, alphas, chords, g, phis, u_i) = eval(controls, da, elems, &cur);
                 cur = g;
                 let err = (q - q_target).abs() / q_target.max(1.0e-9);
-                if physical(q, &cur) && better(err, t, &bst) {
+                if physical(q, &cur, &u_i) && better(err, t, &bst) {
                     bst = Some((da, err, t, q, alphas, chords, phis));
                 }
                 if let Some((pd, pq)) = prev {
@@ -1160,10 +1163,10 @@ impl Prop {
             if let Some((mut lo, mut hi)) = bracket {
                 for _ in 0..6 {
                     let mid = 0.5 * (lo + hi);
-                    let (t, q, alphas, chords, g, phis) = eval(controls, mid, elems, &cur);
+                    let (t, q, alphas, chords, g, phis, u_i) = eval(controls, mid, elems, &cur);
                     cur = g;
                     let err = (q - q_target).abs() / q_target.max(1.0e-9);
-                    if physical(q, &cur) && better(err, t, &bst) {
+                    if physical(q, &cur, &u_i) && better(err, t, &bst) {
                         bst = Some((mid, err, t, q, alphas, chords, phis));
                     }
                     if q < q_target {
@@ -1318,14 +1321,14 @@ impl Prop {
                     lo = hi;
                     q_lo = q_hi;
                     hi = (hi + 0.1).min(DA_MAX);
-                    let (_t2, q2, _a, _c, g2, _p) = eval(&controls, hi, &mut elements, &cur);
+                    let (_t2, q2, _a, _c, g2, _p, _u2) = eval(&controls, hi, &mut elements, &cur);
                     cur = g2;
                     q_hi = q2;
                 } else if q_lo > q_target && lo > DA_MIN {
                     hi = lo;
                     q_hi = q_lo;
                     lo = (lo - 0.1).max(DA_MIN);
-                    let (_t2, q2, _a, _c, g2, _p) = eval(&controls, lo, &mut elements, &cur);
+                    let (_t2, q2, _a, _c, g2, _p, _u2) = eval(&controls, lo, &mut elements, &cur);
                     cur = g2;
                     q_lo = q2;
                 } else {
@@ -1336,15 +1339,16 @@ impl Prop {
                 let (mut l, mut h) = (lo, hi);
                 for _ in 0..14 {
                     let mid = 0.5 * (l + h);
-                    let (t2, q2, _a, c2, g2, p2) = eval(&controls, mid, &mut elements, &cur);
+                    let (t2, q2, _a, c2, g2, p2, u2) = eval(&controls, mid, &mut elements, &cur);
                     cur = g2;
                     let e2 = (q2 - q_target).abs() / q_target.max(1.0e-9);
                     // Adopt the tighter sample only when it is physical
-                    // (positive torque, every station lifting): a
-                    // warm-started Newton solve at some bisection point can
-                    // land on a brake-tip branch whose total torque still
-                    // matches, and the objective must not reward that state.
-                    if e2 < err && physical(q2, &cur) {
+                    // (positive torque, every station lifting, attached
+                    // flow): a warm-started Newton solve at some bisection
+                    // point can land on a brake-tip or unattached branch
+                    // whose total torque still matches, and the objective
+                    // must not reward that state.
+                    if e2 < err && physical(q2, &cur, &u2) {
                         err = e2;
                         da = mid;
                         r_t = t2;
@@ -1763,11 +1767,18 @@ impl Prop {
                 );
                 (res, alphas)
             };
+        // The exported flow must also be *attached*: outside the inner hub
+        // zone the inflow angle and the induced axial velocity cannot blow
+        // up (see [`flow_phi_sane`], [`flow_ui_sane`]) — the wake model's
+        // small-perturbation assumption is gone past those bounds and the
+        // solved state (huge phi, wild exported twists) is not a physical
+        // loading.
         let physical = |r: &lift_line::LiftLineResult| -> bool {
             r.torque.is_finite()
                 && r.torque > 0.0
                 && r.gamma.iter().all(|&x| x.is_finite() && x >= -1.0e-9)
                 && circulation_smooth(&r.gamma)
+                && flow_ui_sane(&r.u_i, &rr, u_0, omega)
         };
         let target = q_target.max(1.0e-9);
         let mut da = win.da;
@@ -1951,6 +1962,33 @@ fn circulation_smooth(gamma: &[f64]) -> bool {
 
 /// [`circulation_smooth`]'s largest/second-largest ratio bound.
 const CIRC_SPIKE_RATIO: f64 = 4.0;
+
+/// Largest attached-flow ratio of the induced axial velocity to the local
+/// speed `u_0 + ωr` outside the hub zone: beyond ~this the wake model's
+/// small-perturbation assumption fails and the solved state is not a
+/// physical loading.  The spurious states it rejects are far past any
+/// sane value — flywoo's unattached hover state reached ~1.2-1.9, and a
+/// diverged solve (turnigy's mechanical re-design) reached ~8600; healthy
+/// designs sit well below 1.0.
+const UI_RATIO_MAX: f64 = 1.0;
+
+/// Hub-zone width as a fraction of the blade span: inside it the root /
+/// hub-loss region legitimately sees reversed or extreme inflow, so the
+/// attached-flow checks start only past this radius.
+const HUB_ZONE_FRAC: f64 = 0.15;
+
+/// Attached-flow check on the solved induced axial velocity (m/s): outside
+/// the hub zone, `|u_i|` may not approach the local rotational speed.
+fn flow_ui_sane(u_i: &[f64], rr: &[f64], u_0: f64, omega: f64) -> bool {
+    if u_i.len() != rr.len() {
+        return true;
+    }
+    let span = rr[rr.len() - 1] - rr[0];
+    let hub_zone = rr[0] + HUB_ZONE_FRAC * span;
+    u_i.iter().zip(rr.iter()).all(|(&ui, &ri)| {
+        ri < hub_zone || ui.abs() <= UI_RATIO_MAX * (u_0 + omega * ri) + 1.0e-6
+    })
+}
 
 /// Piecewise-linear interpolation (scipy `interp1d(x, y, "linear")`).
 fn lin_interp(x: &[f64], y: &[f64], t: f64) -> f64 {

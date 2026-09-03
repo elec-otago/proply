@@ -65,7 +65,25 @@ pub fn run_design(
     // and the design then re-runs on that law so the reported operating
     // point and geometry match the mechanically sized blade.
     if param.mech_thickness && p.size_mechanical_thickness() {
-        res = p.design_for_torque(optimum_rpm, optimum_torque, param.ar);
+        let res_mech = p.design_for_torque(optimum_rpm, optimum_torque, param.ar);
+        if res_mech.torque > 0.0 || res_mech.warning.is_none() {
+            // The mechanical re-design reached the operating point (or at
+            // least produced a real closest design): report it.
+            res = res_mech;
+        } else {
+            // The mechanical re-design found no usable state at all (the
+            // sized blade cannot be solved at this operating point, e.g.
+            // turnigy_CA_120: only unattached/diverged flow states exist).
+            // Keep the first design and say so, instead of reporting a
+            // blade that was never built.
+            let base = res.warning.clone().unwrap_or_default();
+            let note = if base.is_empty() {
+                "the mechanical-thickness re-design at this operating point was not achievable; this design uses the geometric thickness law".to_string()
+            } else {
+                format!("{base} (the mechanical-thickness re-design at this operating point was not achievable; this design uses the geometric thickness law)")
+            };
+            res.warning = Some(note);
+        }
     }
     let (q, t) = (res.torque, res.thrust);
 
