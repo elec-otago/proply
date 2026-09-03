@@ -2,8 +2,10 @@
 
 Every propeller in [`props/`](props/) designed by `proply-rs` with the
 coupled lifting-line / vortex design loop (STEP output; see
-[proply-rs/README.md](proply-rs/README.md)) and rendered headlessly with
-FreeCAD via [`props/renderprop.py`](props/renderprop.py).
+[proply-rs/README.md](proply-rs/README.md)) and rendered headlessly by
+[`render-step`](render-step/): the design pipeline writes a triangle mesh
+(`.ply`) beside each STEP, and the software renderer rasterises it to the
+PNG with no CAD kernel or display.
 
 To regenerate everything after changing a prop JSON, the design code, or the
 render script:

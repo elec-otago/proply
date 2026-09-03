@@ -17,6 +17,7 @@ pub mod motor;
 pub mod nurbs;
 pub mod optimize;
 pub mod pchip;
+pub mod mesh_out;
 pub mod polyfit;
 pub mod pipeline;
 pub mod prop;

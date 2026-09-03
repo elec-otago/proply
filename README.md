@@ -101,7 +101,7 @@ per-station section list).
 
 `make gallery` designs every prop in `props/` and renders each STEP file to
 `images/<name>.png` with FreeCAD (headless, via
-[`props/renderprop.py`](props/renderprop.py)); the results are collected in
+[`render-step`](render-step/)); the results are collected in
 [GALLERY.md](GALLERY.md), where every prop also links its YAML design
 summary (`make summaries` regenerates just those).
 

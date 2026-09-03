@@ -20,6 +20,9 @@ pub struct DesignOutcome {
     pub step: String,
     /// The design summary (`yaml_out::summary`).
     pub yaml: String,
+    /// Triangle-mesh (PLY) of the propeller, when requested (`--mesh-file`);
+    /// rendered headlessly by the `render-step` utility.
+    pub mesh: Option<String>,
     /// Absorbed torque at the design point (N m).
     pub torque: f64,
     /// Produced thrust at the design point (N).
@@ -41,6 +44,17 @@ pub struct DesignOutcome {
 pub fn run_design(
     param: &DesignParameters,
     store: Arc<Mutex<PolarStore>>,
+) -> Result<DesignOutcome, String> {
+    run_design_mesh(param, store, false)
+}
+
+/// [`run_design`], with optional triangle-mesh output alongside the STEP
+/// (the `--mesh-file` CLI path): the same geometry `step_out` writes, as a
+/// mesh the headless `render-step` previewer can draw.
+pub fn run_design_mesh(
+    param: &DesignParameters,
+    store: Arc<Mutex<PolarStore>>,
+    want_mesh: bool,
 ) -> Result<DesignOutcome, String> {
     let element_width = (param.radius - param.hub_radius) / param.element_count as f64;
     let mut p = Prop::new(param.clone(), element_width, store);
@@ -98,10 +112,16 @@ pub fn run_design(
         max_power_w: power,
     };
     let yaml = yaml_out::summary(&p, optimum_rpm, t, q, &motor_info, res.warning.as_deref());
+    let mesh = if want_mesh {
+        Some(crate::mesh_out::ply_prop(&mut p, param.n))
+    } else {
+        None
+    };
 
     Ok(DesignOutcome {
         step,
         yaml,
+        mesh,
         torque: q,
         thrust: t,
         rpm: optimum_rpm,

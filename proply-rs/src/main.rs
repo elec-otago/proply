@@ -26,6 +26,7 @@ struct Args {
     element_count: Option<usize>,
     dir: Option<String>,
     step_file: Option<String>,
+    mesh_file: Option<String>,
     log: Option<String>,
     plate: Option<bool>,
     ar: Option<f64>,
@@ -103,6 +104,7 @@ OUTPUT OPTIONS:
     --dir <DIR>            Directory for the output STEP (created if needed;
                            default: .).
     --step-file <FILE>     Explicit output STEP path (overrides --dir +
+    --mesh-file <FILE>     Explicit output MESH path (PLY, beside the STEP)
                            <param name>.step).
     --log <FILE>           Write a detailed design trace to FILE for
                            debugging convergence: every design-loop line
@@ -140,6 +142,7 @@ fn parse_args() -> Result<Args, String> {
         element_count: None,
         dir: None,
         step_file: None,
+        mesh_file: None,
         log: None,
         plate: None,
         lifting_line: None,
@@ -213,6 +216,7 @@ fn parse_args() -> Result<Args, String> {
             ),
             "--dir" => a.dir = Some(value()?),
             "--step-file" => a.step_file = Some(value()?),
+            "--mesh-file" => a.mesh_file = Some(value()?),
             "--log" => a.log = Some(value()?),
             "--plate" => a.plate = Some(true), // testing: analytic flat-plate polars
             "--lifting-line" => a.lifting_line = Some(true), // coupled vortex-lattice design
@@ -371,7 +375,7 @@ fn main() {
     // The whole design (converged onto the motor operating point, then the
     // STEP and YAML text) runs in the shared pipeline — the same code the
     // WebAssembly build runs.
-    let outcome = match pipeline::run_design(&param, store.clone()) {
+    let outcome = match pipeline::run_design_mesh(&param, store.clone(), args.mesh_file.is_some()) {
         Ok(o) => o,
         Err(e) => {
             // The design trace (if any) ends with the failure reason.
@@ -410,6 +414,18 @@ fn main() {
         exit(1);
     });
     proply_rs::dprintln!("Wrote {}", yaml_filename);
+
+    // Triangle mesh (PLY) for the headless render-step previewer, when
+    // requested with --mesh-file.
+    if let Some(mesh_file) = &args.mesh_file {
+        if let Some(ply) = &outcome.mesh {
+            std::fs::write(mesh_file, ply).unwrap_or_else(|e| {
+                proply_rs::deprintln!("cannot write {}: {}", mesh_file, e);
+                exit(1);
+            });
+            proply_rs::dprintln!("Wrote {}", mesh_file);
+        }
+    }
 
     // Persist any newly simulated polars, and the degenerate-polar markers
     // proven during this run (both beside foil_cache.json).

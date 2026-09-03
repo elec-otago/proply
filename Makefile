@@ -14,6 +14,10 @@
 
 DESIGN_FLAGS ?= --naca --lifting-line --mech-thickness --n 40 --element-count 30
 
+# Never delete intermediate artefacts (the .ply meshes in particular are
+# the render inputs and each design run is expensive).
+.SECONDARY:
+
 PROPS  := $(wildcard props/*.json)
 STEPS  := $(PROPS:props/%.json=build/out/%.step)
 YAMLS  := $(PROPS:props/%.json=build/out/%.yml)
@@ -40,17 +44,17 @@ $(STAMP): Makefile
 # summary), so they are a grouped target: the design is rerun whenever
 # either output is missing or outdated.  --step-file pins the output name
 # to the JSON file stem: the "name" field inside the JSON does not always
-# match (and ntm_28_26_1200Kv.json omits it).
-build/out/%.step build/out/%.yml &: props/%.json $(STAMP)
+# match (and ntm_28_26_1200Kv.json omits it).  --mesh-file writes the
+# triangle mesh (PLY) the headless render-step previewer draws.
+build/out/%.step build/out/%.yml build/out/%.ply &: props/%.json $(STAMP)
 	@mkdir -p $(dir $@)
-	cargo run --release -p proply-rs -- $(DESIGN_FLAGS) --log build/out/$*.log --step-file=build/out/$*.step --param=$<
+	cargo run --release -p proply-rs -- $(DESIGN_FLAGS) --log build/out/$*.log --step-file=build/out/$*.step --mesh-file=build/out/$*.ply --param=$<
 
-# freecadcmd forwards script arguments only when each is preceded by --pass,
-# and it crashes during Qt teardown *after* the image is saved, so the exit
-# status is ignored and success is judged by the PNG existing.
-images/%.png: build/out/%.step build/out/%.yml props/renderprop.py
+# The headless render-step utility rasterises the design's triangle mesh
+# (written beside the STEP) to the gallery PNG — no CAD kernel, no display.
+images/%.png: build/out/%.step build/out/%.ply build/out/%.yml
 	@mkdir -p images
-	-freecadcmd props/renderprop.py --pass --step --pass $< --pass --png --pass $@
+	cargo run --quiet --release -p render-step -- --step $< --png $@
 	test -f $@
 
 clean:

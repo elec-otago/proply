@@ -1,5 +1,5 @@
 [workspace]
-members = ["rust-foil", "proply-rs"]
+members = ["rust-foil", "proply-rs", "render-step"]
 resolver = "2"
 
 [profile.release]

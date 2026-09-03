@@ -1,0 +1,8 @@
+[package]
+name = "render-step"
+version = "0.1.0"
+edition = "2021"
+description = "Headless software renderer for proply-rs propeller STEP files (PLY mesh -> PNG)"
+
+[dependencies]
+png = "0.17"
