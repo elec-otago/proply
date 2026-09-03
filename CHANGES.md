@@ -1,4 +1,27 @@
 # CHANGES
+## 2026-09-03 — Reject spurious single-station circulation spikes
+
+### proply-rs
+
+A `make gallery` review found several blades rendered non-smooth.  The
+cold re-solve that verifies the exported blade can settle on a
+discrete-solve root where one station carries a circulation spike —
+measured at gamma 7.6 vs ~0.8 on its neighbours (a 9x spike, on
+low-aspect-ratio blades at 30+ stations) — with ui = 45 m/s there.
+The spike is not a physical loading: it distorts the induced inflow
+over several stations, so the exported twist (phi + alpha) develops a
+large local excursion (dys_2814's max twist curvature went from 6.2 deg
+in the old warm-exported design to 29.7 deg).
+
+Spike states are now rejected wherever the brake branches are: a sample
+is physical only if every station lifts (gamma >= 0) *and* the largest
+circulation is within 4x of the second largest (smooth loadings peak at
+~1.5x).  When the cold re-match at the target torque cannot find a
+smooth physical state, the export falls back to the warm state the
+optimizer matched (its twists and its operating point) instead of
+exporting the spiky cold branch.  dys_2814 now exports the warm state:
+T = 12.95 N at Q = 0.1304 Nm (err 0.01%), no spike.
+de7dc35
 ## 2026-09-03 — Journal the polar cache (per-polar durability without whole-file rewrites)
 
 ### proply-rs
