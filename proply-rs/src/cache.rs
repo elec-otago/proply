@@ -26,6 +26,11 @@ pub struct PolarStore {
     /// freshly simulated polars a host without a filesystem (the browser)
     /// persists itself.
     new_keys: Vec<String>,
+    /// Inserts appended to the journal since the last whole-file rewrite
+    /// ([`PolarStore::save`]): a path-backed store's per-polar durability
+    /// is the journal append, so the whole-file rewrite only happens every
+    /// [`FULL_SAVE_EVERY`] inserts (or at save/exit).
+    pending: usize,
     /// The per-polar persistence hook, fired synchronously by
     /// [`PolarStore::insert`] for every freshly simulated polar — good or a
     /// degenerate failure marker.  Native hosts checkpoint to disk inside
@@ -50,8 +55,32 @@ impl std::fmt::Debug for PolarStore {
     }
 }
 
+/// How many journal-appended inserts accumulate before the whole cache
+/// file is rewritten ([`PolarStore::save`] compacts: full pretty JSON to a
+/// temp file, atomic rename, journal dropped).  The journal makes each
+/// individual polar durable with an O(one polar) append; rewriting the
+/// whole (growing) file on *every* insert made the per-polar checkpoint
+/// cost O(the whole cache) — the design-log bottleneck once the file
+/// reaches tens of megabytes.
+const FULL_SAVE_EVERY: usize = 200;
+
+/// One journal record: a freshly inserted polar (`foil_cache.json.journal`,
+/// one NDJSON line per record).
+#[derive(Serialize, Deserialize)]
+struct JournalEntry {
+    key: String,
+    alpha: Vec<f64>,
+    cl: Vec<f64>,
+    cd: Vec<f64>,
+}
+
 pub fn cache_key(hash: &str, reynolds: f64, mach: f64) -> String {
     format!("{}|{}|{}", hash, reynolds, mach)
+}
+
+/// The append-only journal's path: the cache path with `.journal` appended.
+fn journal_path(cache_path: &str) -> String {
+    format!("{cache_path}.journal")
 }
 
 impl PolarStore {
@@ -61,17 +90,35 @@ impl PolarStore {
         Self::default()
     }
 
-    /// Load the cache from `path` (missing file = empty cache).
+    /// Load the cache from `path` (missing file = empty cache): the whole
+    /// file first, then every journal record appended since its last
+    /// rewrite — journal records win over the file's copy of a key (they
+    /// are newer).  A torn journal tail (a killed append) is skipped.
     pub fn load(path: &str) -> Self {
-        let foils = std::fs::read_to_string(path)
+        let mut foils = std::fs::read_to_string(path)
             .ok()
             .and_then(|s| Self::parse(&s))
             .unwrap_or_default();
+        if let Ok(text) = std::fs::read_to_string(journal_path(path)) {
+            for line in text.lines() {
+                if let Ok(rec) = serde_json::from_str::<JournalEntry>(line) {
+                    foils.insert(
+                        rec.key,
+                        StoredPolar {
+                            alpha: rec.alpha,
+                            cl: rec.cl,
+                            cd: rec.cd,
+                        },
+                    );
+                }
+            }
+        }
         Self {
             path: path.to_string(),
             foils,
             dirty: false,
             new_keys: Vec::new(),
+            pending: 0,
             #[cfg(any(test, target_arch = "wasm32"))]
             on_insert: None,
         }
@@ -91,6 +138,7 @@ impl PolarStore {
             foils: Self::parse(json).unwrap_or_default(),
             dirty: false,
             new_keys: Vec::new(),
+            pending: 0,
             #[cfg(any(test, target_arch = "wasm32"))]
             on_insert: None,
         }
@@ -102,14 +150,52 @@ impl PolarStore {
         serde_json::to_string_pretty(&self.foils).ok()
     }
 
-    /// Write the cache back to disk (only if it changed since the last save).
+    /// Compact the cache to the whole file (only if it changed since the
+    /// last save): the full pretty JSON is written to a temp file and
+    /// renamed over the cache (atomic on POSIX — a killed save leaves the
+    /// previous file intact and the journal to replay), then the journal
+    /// is dropped.  Called by [`PolarStore::insert`] every
+    /// [`FULL_SAVE_EVERY`] inserts and at exit (the CLI's final save).
     pub fn save(&mut self) {
         if !self.dirty || self.path.is_empty() {
             return;
         }
         if let Some(json) = self.to_json_string() {
-            let _ = std::fs::write(&self.path, json);
-            self.dirty = false;
+            let tmp = format!("{}.tmp", self.path);
+            let ok = std::fs::write(&tmp, json).is_ok()
+                && std::fs::rename(&tmp, &self.path).is_ok();
+            if ok {
+                // Every journaled record is now in the file: drop the
+                // journal so a later load does not replay stale records
+                // (harmless if this removal fails — replay of identical
+                // records is idempotent).
+                let _ = std::fs::remove_file(journal_path(&self.path));
+                self.dirty = false;
+                self.pending = 0;
+            } else {
+                let _ = std::fs::remove_file(tmp);
+            }
+        }
+    }
+
+    /// Append one freshly inserted polar to the journal: the per-polar
+    /// durability step for path-backed stores (a single small line, not a
+    /// rewrite of the whole cache).
+    fn append_journal(&mut self, key: &str, polar: &StoredPolar) {
+        let line = serde_json::to_string(&JournalEntry {
+            key: key.to_string(),
+            alpha: polar.alpha.clone(),
+            cl: polar.cl.clone(),
+            cd: polar.cd.clone(),
+        });
+        let Ok(line) = line else { return };
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(journal_path(&self.path))
+        {
+            use std::io::Write;
+            let _ = writeln!(f, "{line}");
         }
     }
 
@@ -117,23 +203,31 @@ impl PolarStore {
         self.foils.get(key)
     }
 
-    /// Insert a freshly simulated polar, persisting it to disk
-    /// immediately: every completed calculation is durable on its own, so
-    /// an interrupted run loses at most the sweep in flight (the write of
-    /// the whole JSON file takes milliseconds next to the seconds each
-    /// rust-foil sweep takes).  Stores without a path — the wasm build —
-    /// never persist and the save is a no-op, so the wasm host instead
-    /// installs the per-polar hook ([`PolarStore::on_insert`]) and each
-    /// new polar is pushed to its cache here, at calculation time.
+    /// Insert a freshly simulated polar, persisting it to disk at once:
+    /// path-backed stores append the record to the journal immediately —
+    /// every completed calculation is durable on its own, at O(one polar)
+    /// — and rewrite the whole file only every [`FULL_SAVE_EVERY`] inserts
+    /// (an interrupted run loses at most the sweep in flight; a journal
+    /// line is milliseconds next to the seconds each rust-foil sweep
+    /// takes).  Stores without a path — the wasm build — never journal and
+    /// the save is a no-op, so the wasm host instead installs the
+    /// per-polar hook ([`PolarStore::on_insert`]) and each new polar is
+    /// pushed to its cache here, at calculation time.
     pub fn insert(&mut self, key: String, polar: StoredPolar) {
         #[cfg(any(test, target_arch = "wasm32"))]
         if let Some(h) = self.on_insert.as_ref() {
             h(&key, &polar);
         }
+        if !self.path.is_empty() {
+            self.append_journal(&key, &polar);
+            self.pending += 1;
+        }
         self.foils.insert(key.clone(), polar);
         self.new_keys.push(key);
         self.dirty = true;
-        self.save();
+        if self.pending >= FULL_SAVE_EVERY {
+            self.save();
+        }
     }
 
     /// Install the per-polar persistence hook (the wasm host installs it;
@@ -218,30 +312,98 @@ mod tests {
     }
 
     #[test]
-    fn insert_persists_each_polar_immediately() {
-        // Every freshly simulated polar is written to disk at once: an
-        // interrupted run keeps every completed calculation.
-        let dir = std::env::temp_dir().join("proply_rs_cache_checkpoint");
+    fn each_insert_is_journaled_immediately_and_reloads() {
+        // Path-backed stores append every freshly simulated polar to the
+        // journal at once (the per-polar durability step): a reload before
+        // any whole-file rewrite must still see every insert.
+        let dir = std::env::temp_dir().join("proply_rs_cache_journal");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("cache.json");
+        let journal = dir.join("cache.json.journal");
         let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(&journal);
+        let path_str = path.to_str().unwrap().to_string();
+
+        {
+            let mut store = PolarStore::load(&path_str);
+            store.insert("k1".into(), sample(0.1));
+            assert!(
+                journal.exists(),
+                "the first insert must be journaled immediately"
+            );
+            assert!(store.dirty, "the whole file waits for the next compaction");
+            store.insert("k2".into(), sample(0.2));
+        }
+        // The main file was never rewritten, yet a fresh load replays the
+        // journal and sees both polars.
+        assert_eq!(std::fs::read_to_string(&path).unwrap_or_default(), "");
+        let reloaded = PolarStore::load(&path_str);
+        assert_eq!(reloaded.len(), 2);
+        assert_eq!(reloaded.get("k1").cloned(), Some(sample(0.1)));
+        assert_eq!(reloaded.get("k2").cloned(), Some(sample(0.2)));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn journal_replay_tolerates_a_torn_tail_and_duplicates() {
+        // A killed append can leave a partial final line (skipped), and a
+        // compaction that crashed between the rename and the journal drop
+        // leaves records already in the file (idempotent re-apply).
+        let dir = std::env::temp_dir().join("proply_rs_cache_journal_torn");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("cache.json");
+        let journal = dir.join("cache.json.journal");
+        let path_str = path.to_str().unwrap().to_string();
+
+        // Seed the main file with k1 and journal it again (duplicate) plus
+        // a good k2 and a torn tail.
+        std::fs::write(&path, r#"{"k1": {"alpha": [0.0], "cl": [0.1], "cd": [0.01]}}"#)
+            .unwrap();
+        std::fs::write(
+            &journal,
+            r#"{"key":"k1","alpha":[0.0],"cl":[0.1],"cd":[0.01]}
+{"key":"k2","alpha":[0.2],"cl":[0.3],"cd":[0.02]}
+{"key":"k3","alpha":[0.4],"cl":[0.5],"cd":[0.03]
+"#,
+        )
+        .unwrap();
+
+        let store = PolarStore::load(&path_str);
+        assert_eq!(store.len(), 2, "file + journal; the torn tail line is skipped");
+        assert_eq!(store.get("k1").unwrap().cl, vec![0.1], "journal re-apply is idempotent");
+        assert_eq!(store.get("k2").unwrap().cl, vec![0.3]);
+        assert!(store.get("k3").is_none(), "the torn line must not parse");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn compaction_rewrites_the_whole_file_and_drops_the_journal() {
+        // After FULL_SAVE_EVERY inserts the store compacts: the main file
+        // holds everything and the journal is gone, so later loads do not
+        // replay stale records.
+        let dir = std::env::temp_dir().join("proply_rs_cache_compact");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("cache.json");
+        let journal = dir.join("cache.json.journal");
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(&journal);
         let path_str = path.to_str().unwrap().to_string();
 
         let mut store = PolarStore::load(&path_str);
-        store.insert("k1".into(), sample(0.1));
-        assert!(
-            std::path::Path::new(&path_str).exists(),
-            "the first insert must write to disk immediately"
-        );
-        assert!(!store.dirty, "insert leaves the store clean");
-        store.insert("k2".into(), sample(0.2));
-        assert!(!store.dirty, "the second insert persists too");
+        for i in 0..FULL_SAVE_EVERY {
+            store.insert(format!("k{i}"), sample(i as f64 * 0.01));
+        }
+        assert!(!store.dirty, "the threshold insert compacts");
+        assert!(!journal.exists(), "the journal is dropped on compaction");
 
-        // The on-disk copy holds every inserted polar.
-        let on_disk = PolarStore::load(&path_str);
-        assert_eq!(on_disk.len(), 2);
-        assert!(on_disk.get("k1").is_some());
-        assert!(on_disk.get("k2").is_some());
+        let reloaded = PolarStore::load(&path_str);
+        assert_eq!(reloaded.len(), FULL_SAVE_EVERY);
+        assert_eq!(
+            reloaded
+                .get(&format!("k{}", FULL_SAVE_EVERY - 1))
+                .cloned(),
+            Some(sample((FULL_SAVE_EVERY as f64 - 1.0) * 0.01))
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
