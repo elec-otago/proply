@@ -1,4 +1,29 @@
 # CHANGES
+## 2026-09-03 — Journal the polar cache (per-polar durability without whole-file rewrites)
+
+### proply-rs
+
+The per-polar checkpoint — every freshly simulated polar persisted the
+moment it exists — rewrote the entire pretty-printed `foil_cache.json`
+on each insert.  Once the cache reaches tens of megabytes that rewrite
+dominated the design wall clock: a `make gallery` run issued ~950 MB of
+disk writeback per 30 s (one ~86 MB rewrite per polar) against a device
+sustaining ~32 MB/s — ~2.5 s of serialized writeback per polar, on the
+global store lock, and worsening as the cache grows prop by prop.
+
+Path-backed stores now append each new polar (a good sweep or a
+degenerate failure marker) as one NDJSON line to `foil_cache.json.journal`
+— still written at calculation time, but O(one polar) — and rewrite the
+whole file only every 200 inserts or at save/exit, via a temp file +
+atomic rename, then dropping the journal.  Loading replays the file then
+the journal, skipping a torn tail and tolerating duplicate records.  The
+in-memory wasm store is unchanged (its per-polar IndexedDB hook already
+writes O(one polar)).
+
+A full dji_phantom3 design (element-count 30, base + mechanical phases)
+that was on track for ~25+ min completed in 191 s with 45 sweeps and no
+writeback stall.
+6549325
 ## 2026-09-03 — Design directly onto the motor operating point (torque, RPM)
 
 ### proply-rs
