@@ -1072,7 +1072,10 @@ impl Prop {
         // torque cliff between consecutive matches.  At a torque target a
         // brake wastes torque budget, but only if it is never adopted here.
         let physical = |q: f64, g: &[f64]| -> bool {
-            q.is_finite() && q > 0.0 && g.iter().all(|&x| x.is_finite() && x >= -1.0e-9)
+            q.is_finite()
+                && q > 0.0
+                && g.iter().all(|&x| x.is_finite() && x >= -1.0e-9)
+                && circulation_smooth(g)
         };
         let meet_torque = |controls: &[f64],
                            elems: &mut Vec<BladeElement<FoilFamily>>,
@@ -1764,6 +1767,7 @@ impl Prop {
             r.torque.is_finite()
                 && r.torque > 0.0
                 && r.gamma.iter().all(|&x| x.is_finite() && x >= -1.0e-9)
+                && circulation_smooth(&r.gamma)
         };
         let target = q_target.max(1.0e-9);
         let mut da = win.da;
@@ -1835,36 +1839,62 @@ impl Prop {
         }
         // The exported blade: twist follows the cold-solved inflow at the
         // matched `da`, so the geometry, the trace and the reported
-        // operating point all describe the same state.  (If even the cold
-        // solve at the pass's own `da` was non-physical — it should not be:
-        // the pass only adopted physical samples — fall back to the warm
-        // state the optimizer measured.)
-        if !exported {
+        // operating point all describe the same state.  When no cold state
+        // at the target torque is physical (positive torque, every station
+        // lifting, no circulation spike) — the pass itself only adopted
+        // physical samples, so this should be rare — export the warm state
+        // the optimizer measured instead: its twists (win.phis) at its own
+        // matched `da`, and its matched operating point.  A cold re-solve
+        // can settle on a spurious circulation-spike branch that the
+        // optimizer's warm-started path never visits; that branch must not
+        // become the exported blade.
+        let warm_twist = |da: f64| -> Vec<f64> {
+            win.alpha_base
+                .iter()
+                .map(|&ab| (ab + da).clamp(-lift_line::ALPHA_MAX, lift_line::ALPHA_MAX))
+                .collect()
+        };
+        let (q, t) = if !exported {
+            let warm_alphas = warm_twist(win.da);
             for (i, be) in elements.iter_mut().enumerate() {
-                be.set_twist(win.phis[i] + alphas[i]);
+                be.set_twist(win.phis[i] + warm_alphas[i]);
             }
             da = win.da;
-            (res, alphas) = cold_eval(da, &mut elements);
-            err = (res.torque - q_target).abs() / target;
+            let err_warm = (win.q - q_target).abs() / target;
             crate::deprintln!(
-                "proply: cold re-solve of the winning blade was not physical; reporting the warm state"
+                "proply: cold re-solve of the winning blade was not physical; exporting the warm state (T={:.4} Q={:.4}, err {:.2}%)",
+                win.t,
+                win.q,
+                100.0 * err_warm
             );
+            crate::dprintln!(
+                "Lifting-line blade stations (warm state: T={:.4} Q={:.4}, err {:.2}%)",
+                win.t,
+                win.q,
+                100.0 * err_warm
+            );
+            err = err_warm;
+            // The station rows below describe the cold re-solve (the last
+            // one attempted); label them as the reference state, not the
+            // exported geometry's flow.
+            (win.q, win.t)
         } else {
             for (i, be) in elements.iter_mut().enumerate() {
                 be.set_twist(res.phi[i] + alphas[i]);
             }
-        }
-        if self.param.mech_thickness {
-            for (i, be) in elements.iter_mut().enumerate() {
-                be.thrust_n = Some(res.d_thrust[i]);
+            if self.param.mech_thickness {
+                for (i, be) in elements.iter_mut().enumerate() {
+                    be.thrust_n = Some(res.d_thrust[i]);
+                }
             }
-        }
-        crate::dprintln!(
-            "Lifting-line blade stations (cold-verified: T={:.4} Q={:.4}, err {:.2}%)",
-            res.thrust,
-            res.torque,
-            100.0 * err
-        );
+            crate::dprintln!(
+                "Lifting-line blade stations (cold-verified: T={:.4} Q={:.4}, err {:.2}%)",
+                res.thrust,
+                res.torque,
+                100.0 * err
+            );
+            (res.torque, res.thrust)
+        };
         for (i, &ri) in rr.iter().enumerate() {
             crate::dprintln!(
                 "r={} camber={} alpha_base={} alpha={} phi={} twist={} chord={} ",
@@ -1889,7 +1919,6 @@ impl Prop {
         self.blade_elements = elements;
         // Remember the winning design so the pipeline's second run (the
         // mechanical-thickness law) can warm-start its incumbent pass from it.
-        let (q, t) = (res.torque, res.thrust);
         win.da = da;
         win.q = q;
         win.t = t;
@@ -1897,6 +1926,31 @@ impl Prop {
         (q, t, err)
     }
 }
+
+/// True when the circulation profile is smooth: no station carries a
+/// spurious spike.  A converged discrete solve can sit on a root where one
+/// station holds several times its neighbours' circulation (seen up to ~9x
+/// on low-aspect-ratio blades at 30+ stations): the largest bound
+/// circulation may not exceed [`CIRC_SPIKE_RATIO`] times the second
+/// largest, which is far above any smooth loading (those peak at ~1.5x).
+/// Such states distort the induced inflow and the exported twist, so they
+/// are rejected wherever the brake branches are.
+fn circulation_smooth(gamma: &[f64]) -> bool {
+    if gamma.len() < 3 {
+        return true;
+    }
+    let mut s: Vec<f64> = gamma.iter().copied().filter(|g| g.is_finite()).collect();
+    if s.len() < 3 {
+        return true;
+    }
+    s.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let largest = *s.last().unwrap();
+    let second = s[s.len() - 2];
+    largest <= CIRC_SPIKE_RATIO * second.max(1.0e-9) + 1.0e-6
+}
+
+/// [`circulation_smooth`]'s largest/second-largest ratio bound.
+const CIRC_SPIKE_RATIO: f64 = 4.0;
 
 /// Piecewise-linear interpolation (scipy `interp1d(x, y, "linear")`).
 fn lin_interp(x: &[f64], y: &[f64], t: f64) -> f64 {
