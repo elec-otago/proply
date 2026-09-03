@@ -1,4 +1,31 @@
 # CHANGES
+## 2026-09-03 — Reject unattached flow states (extreme induced inflow)
+
+### proply-rs
+
+A vision check of the gallery renders found blades with extreme wiggles
+whose exported twists (phi + alpha) ballooned to 66-76 deg at mid span.
+All three cases trace to the discrete wake model finding non-physical
+roots outside its small-perturbation validity:
+
+- flywoo_robo_rb1202.5 (20 mm hover rotor, 41 krpm, u0 = 0): induced
+  axial velocity several times the local rotational speed mid-blade;
+- dys_2814_910kv: a single-station circulation spike (gamma 7.6 vs ~0.8
+  on its neighbours);
+- turnigy_CA_120's mechanical re-design: a fully diverged solve (ui
+  ratio ~8600 at one station).
+
+A converged circulation is now usable only if, outside the inner hub
+zone, the induced axial velocity stays within ~1.0 of u0 + w.r (checked
+at every adoption point in the pass and in the cold export re-match)
+and no station carries a circulation spike (largest within 4x of the
+second largest).  Rejected states cannot win the candidate competition
+or become the exported blade.  When the mechanical-thickness re-design
+finds no usable state at all, the pipeline keeps the first design and
+says so in the warning instead of reporting a blade that was never
+built.  flywoo now exports a smooth design (T = 0.590 N at Q = 0.0023
+Nm, cold-verified, err 0.00%).
+df6c7a3
 ## 2026-09-03 — Reject spurious single-station circulation spikes
 
 ### proply-rs
