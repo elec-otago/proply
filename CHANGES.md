@@ -1,4 +1,26 @@
 # CHANGES
+## 2026-09-04 — Faithful twist export for steep profiles (Whittaker smoothing)
+
+### proply-rs
+
+flywoo_robo_rb1202.5's exported twist was wrong in shape, not just
+noisy: its hover inflow rises ~30 deg over three stations at mid-blade,
+and the degree-4..6 polynomial export fit undershot the mid-blade peak
+by ~11 deg and overshot the tip by ~8 deg (the blade ended 33 deg at
+the tip against the design's 25 deg).  The exported twist is now the
+penalized least-squares (Whittaker) smoothing of the per-station
+phi + alpha with a fixed second-difference penalty: locally adaptive,
+so it rounds the solve's station-to-station noise while tracking real
+gradients and the design's own root/tip values (no low-degree
+polynomial, no clamping).  Residuals against the solved flow drop from
+up to 16 deg to <= 5.7 deg on flywoo, <= 1.5 deg on dji_phantom3 and
+<= 1.8 deg on honda_gx35; every export still cold-verifies at 0.00%
+torque error.  Note the mechanical-thickness law is sized on the
+exported (smoothed) twist, so the smoother also moves the re-design:
+dji_phantom3's mechanical re-design lands on the flat m=0.02 camber
+(T=9.98 N) instead of the composed m(r) camber (T=13.24 N) — honest
+cold-verified states either way, but the run-2 candidate landscape sits
+close to a viability cliff for this prop.
 ## 2026-09-04 — Render the hub mounting bore (`center_hole`)
 
 ### proply-rs / render-step

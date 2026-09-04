@@ -2078,14 +2078,13 @@ impl Prop {
         // on the twist — the analysis prescribes the attack angles directly
         // — so this only straightens the manufactured geometry.
         {
-            // The exported twist is a solved smooth spline too: among the
-            // degree-4..6 least-squares polynomials fit to the per-station
-            // phi + alpha, keep the one with the least spanwise curvature
-            // (see [`smooth_twist_spline`]).  The fit may overshoot the
-            // data's range slightly — clamping would put a corner exactly
-            // where the curve turns.
+            // The exported twist is a solved smooth spline too: a
+            // penalized least-squares fit (see [`smooth_twist_spline`])
+            // of the per-station phi + alpha that rounds the solve's
+            // noise while tracking real gradients — no low-degree
+            // polynomial, which mis-shapes steep profiles at the ends.
             let raw: Vec<f64> = elements.iter().map(|be| be.get_twist()).collect();
-            let smooth = smooth_twist_spline(&rr, &raw);
+            let smooth = smooth_twist_spline(&raw);
             for (i, be) in elements.iter_mut().enumerate() {
                 be.set_twist(smooth[i]);
             }
@@ -2201,31 +2200,79 @@ fn smooth_alpha_curve(rr: &[f64], alpha: &[f64]) -> Vec<f64> {
 }
 
 /// Solved smooth spline for the exported twist: the per-station flow solve
-/// adds station-to-station noise to the inflow angles, so fit degree-4..6
-/// least-squares polynomials and keep the one with the least spanwise
-/// curvature (largest second difference of the fit).  The winning
-/// parameters come straight from the fit — no post-smoothing — and the
-/// fit may overshoot the data slightly rather than being clamped into a
-/// corner at its extremes.
-fn smooth_twist_spline(rr: &[f64], twist: &[f64]) -> Vec<f64> {
-    let mut best: Option<(f64, Vec<f64>)> = None;
-    for deg in 4..=6 {
-        if deg >= twist.len() {
-            continue;
-        }
-        let fit = polyfit(rr, twist, deg);
-        let vals: Vec<f64> = rr.iter().map(|&r| polyval(&fit, r)).collect();
-        let d2 = vals
-            .windows(3)
-            .map(|w| ((w[2] - w[1]) - (w[1] - w[0])).abs())
-            .fold(0.0, f64::max);
-        if best.as_ref().is_none_or(|(b, _)| d2 < *b) {
-            best = Some((d2, vals));
+/// adds station-to-station noise to the inflow angles (twist = phi +
+/// alpha), so re-fit the per-station values with a penalized
+/// least-squares spline — Whittaker smoothing — and export the solved
+/// values themselves.  A low-degree global polynomial cannot track steep
+/// local gradients without overshooting at the ends (flywoo's hover
+/// inflow rises ~30 deg across three stations mid-blade: a degree-6 fit
+/// undershot the peak by 11 deg and overshot the tip by 8 deg), so the
+/// roughness penalty is on the second *differences* (locally adaptive),
+/// not on a polynomial's curvature.  No clamping: it would put a corner
+/// exactly where the curve turns.
+fn smooth_twist_spline(twist: &[f64]) -> Vec<f64> {
+    let n = twist.len();
+    if n <= 4 {
+        return twist.to_vec();
+    }
+    // Minimise Σ(x_i - y_i)² + λ Σ((x_{i+1}-x_i) - (x_i - x_{i-1}))², i.e.
+    // solve (I + λ DᵀD) x = y with D the (n-2) x n second-difference
+    // matrix.  The station spacing is uniform (hub → tip), so the
+    // penalty needs no radius weights.
+    let lam = TWIST_SMOOTH_LAM;
+    let mut a = vec![0.0; n * n];
+    for i in 0..n {
+        a[i * n + i] = 1.0;
+    }
+    let row = [1.0, -2.0, 1.0];
+    for i in 0..n - 2 {
+        for (ii, s) in row.iter().enumerate() {
+            for (jj, t) in row.iter().enumerate() {
+                a[(i + ii) * n + (i + jj)] += lam * s * t;
+            }
         }
     }
-    best.expect("a degree-4..6 fit always exists for 5+ stations")
-        .1
+    // Cholesky decomposition (A is symmetric positive definite).
+    let mut l = vec![0.0; n * n];
+    for i in 0..n {
+        for j in 0..=i {
+            let mut sum = a[i * n + j];
+            for k in 0..j {
+                sum -= l[i * n + k] * l[j * n + k];
+            }
+            if i == j {
+                l[i * n + j] = sum.sqrt();
+            } else {
+                l[i * n + j] = sum / l[j * n + j];
+            }
+        }
+    }
+    // Forward and back substitution.
+    let mut z = vec![0.0; n];
+    for i in 0..n {
+        let mut sum = twist[i];
+        for k in 0..i {
+            sum -= l[i * n + k] * z[k];
+        }
+        z[i] = sum / l[i * n + i];
+    }
+    let mut x = vec![0.0; n];
+    for i in (0..n).rev() {
+        let mut sum = z[i];
+        for k in (i + 1)..n {
+            sum -= l[k * n + i] * x[k];
+        }
+        x[i] = sum / l[i * n + i];
+    }
+    x
 }
+
+/// Whittaker second-difference penalty strength for the exported twist:
+/// strong enough to round the solve's station-to-station noise (raw
+/// profiles zigzag up to 5-12 deg), weak enough that real gradients that
+/// span a few stations (flywoo's mid-blade inflow rise) stay within a few
+/// degrees of the solved values.
+const TWIST_SMOOTH_LAM: f64 = 2.0;
 
 /// Compose a per-station camber distribution from `lds[c][i]`, the section
 /// L/D of candidate camber `c` at station `i`: each station takes its best
