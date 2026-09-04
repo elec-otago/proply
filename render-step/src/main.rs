@@ -27,7 +27,7 @@ use std::env;
 use std::fs::File;
 use std::io::BufWriter;
 
-const TILT_DEG: f64 = 45.0; // camera elevation off the rotor axis
+const TILT_DEG: f64 = 30.0; // camera elevation off the rotor axis
 const VFOV_DEG: f64 = 32.0; // vertical field of view
 const MARGIN: f64 = 0.98; // model half-diagonal -> frame half-height
 const SS: usize = 2; // supersampling factor per axis
@@ -181,7 +181,7 @@ fn render(
     let mut frame = vec![240u8; w * h * 3]; // background
 
     let light = {
-        let mut l = [0.55, 0.42, 0.72];
+        let mut l = [0.86, 0.42, 0.22];
         normalize(&mut l);
         l
     };
@@ -217,16 +217,16 @@ fn render(
                 *w = -*w;
             }
         }
-        let shade = (0.5 + 0.5 * dot(&wn, &light).max(0.0)).clamp(0.0, 1.0);
+        let shade = (0.50 + 0.50 * dot(&wn, &light).max(0.0)).clamp(0.0, 1.0);
         // Texture on blade faces only (part 1); the hub stays plain.
         let (ua, va, pa) = uv[face[0] as usize];
         let (ub, vb, pb) = uv[face[1] as usize];
         let (uc, vc, pc) = uv[face[2] as usize];
         let textured = pa == 1 && pb == 1 && pc == 1;
         let col = [
-            (0.85 * 255.0 * shade) as u8,
-            (0.88 * 255.0 * shade) as u8,
-            (0.91 * 255.0 * shade) as u8,
+            (0.90 * 255.0 * shade) as u8,
+            (0.92 * 255.0 * shade) as u8,
+            (0.94 * 255.0 * shade) as u8,
         ];
 
         // Rasterise with edge functions.
@@ -297,13 +297,13 @@ fn texture_factor(mode: Texture, u: f64, v: f64) -> f64 {
         // c in [-1, 1] -> steepened to {0, 1}-ish, then scaled to an
         // an on/off stripe with a soft edge.
         let t = 0.5 + 0.5 * c;
-        0.15 + 0.85 * t.powf(4.0)
+        0.35 + 0.65 * t.powf(3.0)
     };
     match mode {
         Texture::None => 1.0,
-        Texture::Rings => band(v, 31),
-        Texture::Stripes => band(u, 39),
-        Texture::Grid => 0.5 * (band(u, 39) + band(v, 31)),
+        Texture::Rings => band(v, 20),
+        Texture::Stripes => band(u, 26),
+        Texture::Grid => 0.5 * (band(u, 26) + band(v, 20)),
     }
 }
 
