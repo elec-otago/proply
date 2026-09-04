@@ -27,7 +27,7 @@ use std::env;
 use std::fs::File;
 use std::io::BufWriter;
 
-const TILT_DEG: f64 = 30.0; // camera elevation off the rotor axis
+const TILT_DEG: f64 = 45.0; // camera elevation off the rotor axis
 const VFOV_DEG: f64 = 32.0; // vertical field of view
 const MARGIN: f64 = 0.98; // model half-diagonal -> frame half-height
 const SS: usize = 2; // supersampling factor per axis
@@ -180,11 +180,21 @@ fn render(
     let mut zbuf = vec![f32::INFINITY; w * h];
     let mut frame = vec![240u8; w * h * 3]; // background
 
-    let light = {
-        let mut l = [0.86, 0.42, 0.22];
-        normalize(&mut l);
-        l
-    };
+    // Two-light rig: a raked directional key (the normal variation across
+    // the blade's curvature is what shades the surface) plus a softer
+    // diffuse fill from the other side so shadowed faces stay readable,
+    // over a small ambient floor.  A Blinn-Phong specular term adds a
+    // moving highlight: on a faceted mesh the highlight breaks across
+    // curved/undulating regions, which is exactly what reveals surface
+    // curvature changes.
+    // Headlight (directional, along the view) as the diffuse base so no
+    // surface is black, plus a raked directional light across the chord
+    // whose grazing angle turns the blade's twist/curvature into a
+    // brightness gradient — the "some diffuse, some directional" rig.
+    let mut rake = [0.85, 0.38, 0.06];
+    normalize(&mut rake);
+    let (ambient, d_head, d_rake) = (0.14, 0.72, 0.62);
+    let (spec_w, spec_pow) = (0.5, 24.0);
     let to_cam = |v: &[f64; 3]| -> [f64; 3] {
         [
             dot(v, &xc) - dot(&eye, &xc),
@@ -217,17 +227,37 @@ fn render(
                 *w = -*w;
             }
         }
-        let shade = (0.50 + 0.50 * dot(&wn, &light).max(0.0)).clamp(0.0, 1.0);
+        // Diffuse: a headlight along the view (base) + a raked directional
+        // across the chord (linearises the twist/curvature into shading).
+        let centroid = [
+            (wa[0] + wb[0] + wc[0]) / 3.0,
+            (wa[1] + wb[1] + wc[1]) / 3.0,
+            (wa[2] + wb[2] + wc[2]) / 3.0,
+        ];
+        let mut view = [eye[0] - centroid[0], eye[1] - centroid[1], eye[2] - centroid[2]];
+        normalize(&mut view);
+        let ndot_v = dot(&wn, &view).max(0.0);
+        let ndot_r = dot(&wn, &rake).max(0.0);
+        let lam = (ambient + d_head * ndot_v + d_rake * ndot_r).clamp(0.0, 1.0);
+        // Specular highlight (Blinn-Phong, half vector of view & headlight
+        // ≈ view): a moving highlight that breaks across curved regions.
+        let spec = spec_w * ndot_v.powf(spec_pow);
         // Texture on blade faces only (part 1); the hub stays plain.
         let (ua, va, pa) = uv[face[0] as usize];
         let (ub, vb, pb) = uv[face[1] as usize];
         let (uc, vc, pc) = uv[face[2] as usize];
         let textured = pa == 1 && pb == 1 && pc == 1;
+        let material = [0.92, 0.94, 0.96];
+        let shade = |mtl: f64, tex: f64| -> u8 {
+            let v = mtl * 255.0 * lam * tex + 255.0 * spec;
+            v.min(255.0).round() as u8
+        };
         let col = [
-            (0.90 * 255.0 * shade) as u8,
-            (0.92 * 255.0 * shade) as u8,
-            (0.94 * 255.0 * shade) as u8,
+            shade(material[0], 1.0),
+            shade(material[1], 1.0),
+            shade(material[2], 1.0),
         ];
+
 
         // Rasterise with edge functions.
         let x0 = ((a[0] / a[2] * f + w as f64 / 2.0).floor().max(0.0)) as usize;
@@ -267,9 +297,16 @@ fn render(
                         let u = w0 * ua + w1 * ub + w2 * uc;
                         let v = w0 * va + w1 * vb + w2 * vc;
                         let f = texture_factor(texture, u, v);
-                        frame[j] = (col[0] as f64 * f).round() as u8;
-                        frame[j + 1] = (col[1] as f64 * f).round() as u8;
-                        frame[j + 2] = (col[2] as f64 * f).round() as u8;
+                        // The texture modulates only the diffuse (lambert)
+                        // part; the specular highlight is left on top so
+                        // curved regions still light up over the pattern.
+                        let shade = |mtl: f64| -> u8 {
+                            let v = mtl * 255.0 * lam * f + 255.0 * spec;
+                            v.min(255.0).round() as u8
+                        };
+                        frame[j] = shade(material[0]);
+                        frame[j + 1] = shade(material[1]);
+                        frame[j + 2] = shade(material[2]);
                     } else {
                         frame[j] = col[0];
                         frame[j + 1] = col[1];
