@@ -271,8 +271,20 @@ fn render(
         let max_x = (ax.max(bx).max(cx).ceil().min(w as f64 - 1.0)) as usize;
         let min_y = (ay.min(by).min(cy).floor().max(0.0)) as usize;
         let max_y = (ay.max(by).max(cy).ceil().min(h as f64 - 1.0)) as usize;
-        let area = ((bx - ax) * (cy - ay) - (by - ay) * (cx - ax)).abs();
-        if area < 1e-12 {
+        // Winding-agnostic inside test (the PLY winding is not guaranteed):
+        // a point is inside when all three edge functions share a sign.
+        // (The previous test assumed counter-clockwise triangles, so faces
+        // built the other way — the hub end caps — were dropped and the
+        // caps never filled.)
+        let e0_den = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+        let edge = |p: (f64, f64)| -> (f64, f64, f64) {
+            let (x, y) = p;
+            let e0 = (bx - ax) * (y - ay) - (by - ay) * (x - ax);
+            let e1 = (cx - bx) * (y - by) - (cy - by) * (x - bx);
+            let e2 = (ax - cx) * (y - cy) - (ay - cy) * (x - cx);
+            (e0, e1, e2)
+        };
+        if e0_den.abs() < 1e-12 {
             continue;
         }
         for py in min_y..=max_y {
@@ -280,12 +292,16 @@ fn render(
             for px in min_x..=max_x {
                 let x = px as f64 + 0.5;
                 let y = py as f64 + 0.5;
-                let w0 = ((bx - ax) * (y - ay) - (by - ay) * (x - ax)) / area;
-                let w1 = ((cx - bx) * (y - by) - (cy - by) * (x - bx)) / area;
-                let w2 = 1.0 - w0 - w1;
-                if w0 < -1e-9 || w1 < -1e-9 || w2 < -1e-9 {
+                let (e0, e1, e2) = edge((x, y));
+                let inside = (e0 >= 0.0 && e1 >= 0.0 && e2 >= 0.0)
+                    || (e0 <= 0.0 && e1 <= 0.0 && e2 <= 0.0);
+                if !inside {
                     continue;
                 }
+                let area = e0 + e1 + e2; // 2 * signed area
+                let w0 = e0 / area;
+                let w1 = e1 / area;
+                let w2 = e2 / area;
                 let z = w0 * az + w1 * _bz + w2 * _cz;
                 let i = row + px;
                 if z < zbuf[i] as f64 {
