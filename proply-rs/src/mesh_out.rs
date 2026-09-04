@@ -17,11 +17,12 @@
 //! Every vertex carries texture coordinates and a part marker: blades
 //! (part 1) have `u` = chordwise fraction (0 = LE .. 1 = TE) and `v` =
 //! spanwise fraction (0 = hub .. 1 = tip); the hub (part 0) is a plain
-//! cylinder matching the design (radius `hub_radius`, height `hub_depth`)
-//! with `u` = azimuth fraction and `v` = height fraction.  `render-step`
-//! uses the two parts to shade the hub with a material and pattern
-//! distinct from the blades, and overlays zebra/grid patterns on the
-//! blade whose distortion exposes station-to-station undulation.
+//! cylinder matching the design (radius `hub_radius`, height `hub_depth`,
+//! with the `center_hole` mounting bore through it) with `u` = azimuth
+//! fraction and `v` = height fraction.  `render-step` uses the two parts
+//! to shade the hub with a material and pattern distinct from the blades,
+//! and overlays zebra/grid patterns on the blade whose distortion exposes
+//! station-to-station undulation.
 
 use crate::prop::Prop;
 
@@ -198,12 +199,12 @@ fn blade_into<F: Fn(&[f64; 3]) -> [f64; 3]>(
 }
 
 /// The hub: a plain cylinder matching the design data exactly — outer
-/// radius `hub_radius`, height `hub_depth`, centred on z = 0 (the same
-/// solid `step_out` writes, minus the mounting-bore hole which is
-/// invisible at render scale).  Part 0, with its own texture coordinates
-/// (u = azimuth fraction around the axis, v = height fraction) so
-/// render-step can shade the hub with a material and pattern distinct
-/// from the blades.
+/// radius `hub_radius`, height `hub_depth`, centred on z = 0, with the
+/// mounting-bore hole through it (`center_hole` in the design JSON, or
+/// half the hub radius when absent) — the same solid `step_out` writes.
+/// Part 0, with its own texture coordinates (u = azimuth fraction around
+/// the axis, v = height fraction) so render-step can shade the hub with a
+/// material and pattern distinct from the blades.
 fn hub_into(param: &crate::design_parameters::DesignParameters, mesh: &mut Mesh) {
     let r = param.hub_radius;
     let (z0, z1) = (-param.hub_depth / 2.0, param.hub_depth / 2.0);
@@ -211,45 +212,59 @@ fn hub_into(param: &crate::design_parameters::DesignParameters, mesh: &mut Mesh)
         return;
     }
     const SEG: usize = 64;
-    let ring = |mesh: &mut Mesh, z: f64, v: f64| -> Vec<usize> {
+    let ring = |mesh: &mut Mesh, radius: f64, z: f64, v: f64, part: u8| -> Vec<usize> {
         (0..SEG)
             .map(|i| {
                 let a = 2.0 * std::f64::consts::PI * i as f64 / SEG as f64;
                 mesh.push(V {
-                    pos: [r * a.cos(), r * a.sin(), z],
+                    pos: [radius * a.cos(), radius * a.sin(), z],
                     u: i as f64 / SEG as f64,
                     v,
-                    part: 0,
+                    part,
                 })
             })
             .collect()
     };
-    let bottom = ring(mesh, z0, 0.0);
-    let top = ring(mesh, z1, 1.0);
+    // Outer cylindrical side.
+    let bottom = ring(mesh, r, z0, 0.0, 0);
+    let top = ring(mesh, r, z1, 1.0, 0);
     for i in 0..SEG {
         let j = (i + 1) % SEG;
         mesh.quad(bottom[i], top[i], top[j], bottom[j]);
     }
-    // Top and bottom end caps: a filled disc per end, built as a few
-    // concentric ring fans so the cover is robust (a single centre fan
-    // left the hub interior unfilled in the software rasteriser).  The
-    // bore hole is not worth modelling at render scale.
-    for (_z_rings, z) in [(&bottom, z0), (&top, z1)] {
-        let fracs = [1.0, 0.72, 0.45, 0.2];
-        let mut rings: Vec<Vec<usize>> = Vec::new();
-        for f in fracs {
-            let ring: Vec<usize> = (0..SEG)
-                .map(|i| {
-                    let a = 2.0 * std::f64::consts::PI * i as f64 / SEG as f64;
-                    mesh.push(V {
-                        pos: [r * f * a.cos(), r * f * a.sin(), z],
-                        u: i as f64 / SEG as f64,
-                        v: 0.5,
-                        part: 0,
-                    })
-                })
-                .collect();
-            rings.push(ring);
+    // The mounting bore from the design data: a genuine hole only (a bore
+    // of essentially the full hub radius would leave nothing of the hub).
+    // The bore's wall is its own part (2) so the renderer shades it as
+    // the dark cavity the hole is, instead of the lit hub material.
+    let bore = param.center_hole();
+    let has_bore = bore > 0.0 && bore < 0.99 * r;
+    let bore_wall_b = has_bore.then(|| ring(mesh, bore, z0, 0.0, 2));
+    let bore_wall_t = has_bore.then(|| ring(mesh, bore, z1, 1.0, 2));
+    if let (Some(bb), Some(bt)) = (&bore_wall_b, &bore_wall_t) {
+        for i in 0..SEG {
+            let j = (i + 1) % SEG;
+            mesh.quad(bb[i], bt[i], bt[j], bb[j]);
+        }
+    }
+    // End caps: annular covers from the outer rim down to the bore (a few
+    // concentric ring fans for robustness; the innermost ring is the bore
+    // circle itself).  Without a bore the caps are filled discs, covered
+    // by a centre fan as before.
+    let bore_frac = bore / r;
+    let mids: Vec<f64> = [0.72, 0.45, 0.2]
+        .into_iter()
+        .filter(|&f| f > bore_frac + 1.0e-6)
+        .collect();
+    for (z, outer, bore_cap) in [
+        (z0, &bottom, has_bore.then(|| ring(mesh, bore, z0, 0.5, 0))),
+        (z1, &top, has_bore.then(|| ring(mesh, bore, z1, 0.5, 0))),
+    ] {
+        let mut rings: Vec<Vec<usize>> = vec![outer.clone()];
+        for &f in &mids {
+            rings.push(ring(mesh, r * f, z, 0.5, 0));
+        }
+        if let Some(bc) = bore_cap {
+            rings.push(bc);
         }
         for w in rings.windows(2) {
             for i in 0..SEG {
@@ -257,17 +272,19 @@ fn hub_into(param: &crate::design_parameters::DesignParameters, mesh: &mut Mesh)
                 mesh.quad(w[0][i], w[0][j], w[1][j], w[1][i]);
             }
         }
-        let cc = mesh.push(V {
-            pos: [0.0, 0.0, z],
-            u: 0.5,
-            v: 0.5,
-            part: 0,
-        });
-        let inner = &rings[rings.len() - 1];
-        for i in 0..SEG {
-            let a = inner[i];
-            let b = inner[(i + 1) % SEG];
-            mesh.tri(a, b, cc);
+        if !has_bore {
+            let cc = mesh.push(V {
+                pos: [0.0, 0.0, z],
+                u: 0.5,
+                v: 0.5,
+                part: 0,
+            });
+            let inner = &rings[rings.len() - 1];
+            for i in 0..SEG {
+                let a = inner[i];
+                let b = inner[(i + 1) % SEG];
+                mesh.tri(a, b, cc);
+            }
         }
     }
 }

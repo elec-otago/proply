@@ -241,17 +241,30 @@ fn render(
         let lam = (ambient + d_head * ndot_v + d_rake * ndot_r).clamp(0.0, 1.0);
         // Specular highlight (Blinn-Phong, half vector of view & headlight
         // ≈ view): a moving highlight that breaks across curved regions.
-        let spec = spec_w * ndot_v.powf(spec_pow);
+        // The bore cavity (part 2) takes none — a shiny highlight inside
+        // the mounting hole would read as the lit hub surface.
+        let spec = if uv[face[0] as usize].2 == 2
+            && uv[face[1] as usize].2 == 2
+            && uv[face[2] as usize].2 == 2
+        {
+            0.0
+        } else {
+            spec_w * ndot_v.powf(spec_pow)
+        };
         // Part-dependent material and texture: the hub (part 0) is a
         // darker cylinder with its own vertical banding, always distinct
         // from the blades (part 1), which take the requested texture mode
-        // (or none = plain light surface).
+        // (or none = plain light surface); the mounting bore's wall (part
+        // 2) is a near-black cavity so the hole reads as a hole.
         let (ua, va, pa) = uv[face[0] as usize];
         let (ub, vb, pb) = uv[face[1] as usize];
         let (uc, vc, pc) = uv[face[2] as usize];
         let is_blade = pa == 1 && pb == 1 && pc == 1;
+        let is_bore = pa == 2 && pb == 2 && pc == 2;
         let (mtl_r, mtl_g, mtl_b) = if is_blade {
             (0.92, 0.94, 0.96)
+        } else if is_bore {
+            (0.05, 0.06, 0.08) // bore cavity
         } else {
             (0.40, 0.43, 0.52) // gunmetal hub
         };
@@ -311,6 +324,8 @@ fn render(
                     let v = w0 * va + w1 * vb + w2 * vc;
                     let tex = if is_blade {
                         texture_factor(texture, u, v)
+                    } else if is_bore {
+                        1.0 // plain dark cavity, no machined banding
                     } else {
                         // The hub always carries its own fine vertical
                         // banding (bands in the azimuth coordinate u) so

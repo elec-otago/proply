@@ -1,4 +1,17 @@
 # CHANGES
+## 2026-09-04 — Render the hub mounting bore (`center_hole`)
+
+### proply-rs / render-step
+
+The rendered hub was a solid cylinder, while the design data (the STEP
+already) carries a mounting-bore hole.  The PLY hub now matches the
+design solid: the end caps are annular covers down to the bore radius
+(`center_hole` in the design JSON, half the `hub_radius` when absent)
+and the bore's wall is modelled as its own mesh part (2) so the renderer
+shades it as a near-black cavity — a visible hole in the middle of the
+hub instead of a lit, filled disc.  Verified in the dji_phantom3 gallery
+render (dark central opening ~33x60 px, pixel lum down to 3.7 against
+the cap's 40-70).
 ## 2026-09-04 — Smooth solved splines for the exported blade (chord, twist, camber)
 
 ### proply-rs
