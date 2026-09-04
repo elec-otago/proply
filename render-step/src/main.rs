@@ -99,6 +99,19 @@ fn main() {
         eprintln!("render-step: mesh {} has no faces", ply.to_string_lossy());
         std::process::exit(1);
     }
+    // Confirm whether the mesh carries texture coordinates, so a missing
+    // texture is obvious rather than a silent plain render.
+    let has_tex = verts.iter().any(|v| v.u != 0.0 || v.v != 0.0);
+    if texture != Texture::None {
+        if has_tex {
+            eprintln!("render-step: texture {:?} applied (mesh has texture coordinates)", texture);
+        } else {
+            eprintln!(
+                "render-step: warning: --texture {:?} requested but the mesh has no texture coordinates; re-run the design with --mesh-file to regenerate it",
+                texture
+            );
+        }
+    }
 
     // Frame the camera from the model's bounding box.
     let (mut lo, mut hi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
@@ -204,16 +217,16 @@ fn render(
                 *w = -*w;
             }
         }
-        let shade = (0.35 + 0.65 * dot(&wn, &light).max(0.0)).clamp(0.0, 1.0);
+        let shade = (0.5 + 0.5 * dot(&wn, &light).max(0.0)).clamp(0.0, 1.0);
         // Texture on blade faces only (part 1); the hub stays plain.
         let (ua, va, pa) = uv[face[0] as usize];
         let (ub, vb, pb) = uv[face[1] as usize];
         let (uc, vc, pc) = uv[face[2] as usize];
         let textured = pa == 1 && pb == 1 && pc == 1;
         let col = [
-            (0.72 * 255.0 * shade) as u8,
-            (0.78 * 255.0 * shade) as u8,
-            (0.83 * 255.0 * shade) as u8,
+            (0.85 * 255.0 * shade) as u8,
+            (0.88 * 255.0 * shade) as u8,
+            (0.91 * 255.0 * shade) as u8,
         ];
 
         // Rasterise with edge functions.
@@ -274,12 +287,23 @@ fn render(
 /// they run perfectly regularly, and any station-to-station undulation of
 /// the surface bends or kinks them.
 fn texture_factor(mode: Texture, u: f64, v: f64) -> f64 {
-    let band = |x: f64, n: usize| 0.62 + 0.38 * (2.0 * std::f64::consts::PI * n as f64 * x).cos();
+    // Hard zebra bands (a steepened cosine): bold black/white stripes in
+    // [0.15, 1.0] that read clearly at a glance.  The counts track the
+    // blade's own resolution (31 stations, ~39 profile points) so one
+    // band lands on each section and any station-to-station undulation
+    // kinks or doubles the band there.
+    let band = |x: f64, n: usize| {
+        let c = (2.0 * std::f64::consts::PI * n as f64 * x).cos();
+        // c in [-1, 1] -> steepened to {0, 1}-ish, then scaled to an
+        // an on/off stripe with a soft edge.
+        let t = 0.5 + 0.5 * c;
+        0.15 + 0.85 * t.powf(4.0)
+    };
     match mode {
         Texture::None => 1.0,
-        Texture::Rings => band(v, 24),
-        Texture::Stripes => band(u, 32),
-        Texture::Grid => 0.5 * (band(u, 32) + band(v, 24)),
+        Texture::Rings => band(v, 31),
+        Texture::Stripes => band(u, 39),
+        Texture::Grid => 0.5 * (band(u, 39) + band(v, 31)),
     }
 }
 
@@ -346,7 +370,7 @@ struct Vert {
 }
 
 /// Procedural surface texture used to visualise surface undulation.
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 enum Texture {
     None,
     /// Bands of constant spanwise fraction `v` (rings around the blade):
