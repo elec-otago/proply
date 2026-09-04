@@ -39,6 +39,7 @@ twist d2 down from 2-12.7 deg raw to 0.8-2.7 deg, chord d2 down from
 the target torque.  dji's mechanical re-design now lands on the
 composed per-station camber (T 13.24 N) with a smooth 0.018-0.020
 camber curve.
+8d22973
 ## 2026-09-03 — render-step: headless software rendering of the gallery
 
 ### proply-rs / render-step
