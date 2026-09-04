@@ -13,19 +13,24 @@ pub fn polyfit(x: &[f64], y: &[f64], deg: usize) -> Vec<f64> {
     let m = x.len();
     assert!(m > deg, "at least deg+1 data points required");
 
-    // Vandermonde: A[i][j] = x_i^(deg - j)  (column j is power deg-j)
-    let mut a: Vec<f64> = vec![0.0; m * (deg + 1)];
+    // Vandermonde: column j holds x^(deg - j), so the solved coefficients
+    // come out highest-power-first.
+    let n = deg + 1;
+    let mut a: Vec<f64> = vec![0.0; m * n];
     for i in 0..m {
         let mut p = 1.0;
         for j in (0..=deg).rev() {
-            a[i * (deg + 1) + j] = p;
+            a[i * n + j] = p;
             p *= x[i];
         }
     }
-    // a[i][k] now holds x_i^k for k = 0..deg
+    lstsq(&mut a, y, m, n)
+}
 
+/// Column-scaled Householder-QR least squares: solves `a z ≈ y` with `a` an
+/// `m` x `n` matrix (column-major, overwritten in place) and returns `z`.
+fn lstsq(a: &mut [f64], y: &[f64], m: usize, n: usize) -> Vec<f64> {
     // Column scaling for conditioning.
-    let n = deg + 1;
     let mut scale = vec![0.0; n];
     for j in 0..n {
         let mut mx: f64 = 0.0;
@@ -41,7 +46,7 @@ pub fn polyfit(x: &[f64], y: &[f64], deg: usize) -> Vec<f64> {
     }
 
     // Householder QR of the scaled A.
-    let mut r = a.clone();
+    let mut r = a.to_vec();
     let mut qty: Vec<f64> = y.to_vec();
     for k in 0..n {
         // norm of column k rows k..m

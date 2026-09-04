@@ -230,18 +230,43 @@ fn hub_into(param: &crate::design_parameters::DesignParameters, mesh: &mut Mesh)
         let j = (i + 1) % SEG;
         mesh.quad(bottom[i], top[i], top[j], bottom[j]);
     }
-    // Top and bottom end caps (fans over the full disc; the bore hole is
-    // not worth modelling at render scale).
-    for (ring_pts, z, v) in [(&bottom, z0, 0.0), (&top, z1, 1.0)] {
+    // Top and bottom end caps: a filled disc per end, built as a few
+    // concentric ring fans so the cover is robust (a single centre fan
+    // left the hub interior unfilled in the software rasteriser).  The
+    // bore hole is not worth modelling at render scale.
+    for (_z_rings, z) in [(&bottom, z0), (&top, z1)] {
+        let fracs = [1.0, 0.72, 0.45, 0.2];
+        let mut rings: Vec<Vec<usize>> = Vec::new();
+        for f in fracs {
+            let ring: Vec<usize> = (0..SEG)
+                .map(|i| {
+                    let a = 2.0 * std::f64::consts::PI * i as f64 / SEG as f64;
+                    mesh.push(V {
+                        pos: [r * f * a.cos(), r * f * a.sin(), z],
+                        u: i as f64 / SEG as f64,
+                        v: 0.5,
+                        part: 0,
+                    })
+                })
+                .collect();
+            rings.push(ring);
+        }
+        for w in rings.windows(2) {
+            for i in 0..SEG {
+                let j = (i + 1) % SEG;
+                mesh.quad(w[0][i], w[0][j], w[1][j], w[1][i]);
+            }
+        }
         let cc = mesh.push(V {
             pos: [0.0, 0.0, z],
             u: 0.5,
-            v,
+            v: 0.5,
             part: 0,
         });
+        let inner = &rings[rings.len() - 1];
         for i in 0..SEG {
-            let a = ring_pts[i];
-            let b = ring_pts[(i + 1) % SEG];
+            let a = inner[i];
+            let b = inner[(i + 1) % SEG];
             mesh.tri(a, b, cc);
         }
     }

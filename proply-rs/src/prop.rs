@@ -1374,6 +1374,15 @@ impl Prop {
             "lift-line camber {}: T={:.4} Q={:.4} (err {:.2}%, obj {:.4})",
             label, r_t, r_q, 100.0 * err, f
         );
+        // The adopted state's own circulation: re-solve it on the warm
+        // branch (the last bisection sample moved `pg` past it) so the
+        // outcome carries the design branch's seed for the exported
+        // blade's verification.
+        let gamma = {
+            let cur = pg.borrow().clone();
+            let (_t3, _q3, _a3, _c3, g3, _p3, _u3) = eval(&controls, da, &mut elements, &cur);
+            g3
+        };
         Some(PassOutcome {
             f,
             q: r_q,
@@ -1384,6 +1393,7 @@ impl Prop {
             phis,
             chords,
             camber_dist: camber_dist.to_vec(),
+            gamma,
             design_x: best_x,
         })
     }
@@ -1698,6 +1708,25 @@ impl Prop {
             "Lifting-line design: camber {} da={:.3} T={:.4} Q={:.4}",
             win.label, win.da, win.t, win.q
         );
+        // The exported camber is a solved smooth spline too: the composed
+        // m(r) candidate is quantised to the 0.01 polar-hash grid, leaving
+        // small steps between adjacent stations.  Fit a low-order
+        // polynomial over the span (least squares — the solved spline
+        // parameters) and clamp it to the data's own range so the fit
+        // cannot overshoot at the ends.
+        let camber_smooth: Vec<f64> = {
+            let lo = win.camber_dist.iter().cloned().fold(f64::INFINITY, f64::min);
+            let hi = win
+                .camber_dist
+                .iter()
+                .cloned()
+                .fold(f64::NEG_INFINITY, f64::max);
+            let deg = 3.min(m.saturating_sub(1));
+            let fit = polyfit(&rr, &win.camber_dist, deg);
+            (0..m)
+                .map(|i| polyval(&fit, rr[i]).clamp(lo, hi))
+                .collect()
+        };
 
         // Rebuild the winning elements on this thread from the pass's plain
         // geometry outcome (chord and twist per station).
@@ -1711,7 +1740,7 @@ impl Prop {
                 self.mech_thickness_law.as_ref(),
                 ri,
                 c,
-                win.camber_dist[i],
+                camber_smooth[i],
             )));
             let mut be = BladeElement::new(
                 ri,
@@ -1728,6 +1757,32 @@ impl Prop {
             be.set_chord(win.chords[i]);
             elements.push(be);
         }
+        // The exported blade is a smooth realisation of the design: the
+        // chord's geometric cap can kink where the optimizer's spline
+        // meets it, so the exported chord re-fits the winning chord over
+        // the span and the cold re-match below settles the operating point
+        // on this smoothed blade (the analysis stations then use these
+        // chords).
+        let chord_shape: Vec<f64>;
+        {
+            // The exported chord is a solved smooth spline: least-squares
+            // polynomial parameters over the span (degree 5), clamped to
+            // the data's range so the fit cannot overshoot at the ends.
+            // This rounds the geometric-cap knee that the design spline
+            // otherwise kinks on, and smooths the unloaded hub station
+            // (the optimizer pinches it).  Its scale is left free: the
+            // operating-point solve below picks it so the smoothed blade
+            // absorbs exactly the target torque.
+            let raw: Vec<f64> = elements
+                .iter()
+                .map(|be| be.foil.borrow().chord())
+                .collect();
+            let lo = raw.iter().cloned().fold(f64::INFINITY, f64::min);
+            let hi = raw.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+            let deg = 5.min(m.saturating_sub(1));
+            let fit = polyfit(&rr, &raw, deg);
+            chord_shape = (0..m).map(|i| polyval(&fit, rr[i]).clamp(lo, hi)).collect();
+        }
         // The exported blade's own operating point.  An independent cold
         // solve (starting from zero circulation, not the optimizer's warm
         // state) can settle on a neighbouring branch of the nonlinear flow
@@ -1739,8 +1794,11 @@ impl Prop {
         // exported geometry measures.  The same cold solve provides the
         // per-station flow diagnostics and the station loads the mechanical
         // law sizes on.
-        let cold_eval =
-            |da: f64, elems: &mut Vec<BladeElement<FoilFamily>>| -> (lift_line::LiftLineResult, Vec<f64>) {
+        let eval_at =
+            |da: f64,
+             elems: &mut Vec<BladeElement<FoilFamily>>,
+             seed: &[f64]|
+             -> (lift_line::LiftLineResult, Vec<f64>) {
                 let alphas: Vec<f64> = win
                     .alpha_base
                     .iter()
@@ -1749,20 +1807,19 @@ impl Prop {
                 let stations: Vec<lift_line::Station> = (0..m)
                     .map(|i| lift_line::Station {
                         r: rr[i],
-                        c: win.chords[i],
+                        c: elems[i].foil.borrow().chord(),
                         alpha: alphas[i],
                     })
                     .collect();
                 let fs_refs: Vec<&FoilSimulator<FoilFamily>> =
                     elems.iter().map(|be| &be.fs).collect();
-                let seed = vec![0.0; m];
                 let res = lift_line::solve_with_influence(
                     &stations,
                     self.n_blades,
                     omega,
                     u_0,
                     &fs_refs,
-                    &seed,
+                    seed,
                     &infl,
                 );
                 (res, alphas)
@@ -1781,82 +1838,188 @@ impl Prop {
                 && flow_ui_sane(&r.u_i, &rr, u_0, omega)
         };
         let target = q_target.max(1.0e-9);
-        let mut da = win.da;
-        let (mut res, mut alphas) = cold_eval(da, &mut elements);
-        let mut err = (res.torque - q_target).abs() / target;
-        let mut exported = physical(&res);
-        if exported && err > 2.0e-3 {
-            // Expand a bracket around the warm da until the cold-absorbed
-            // torque straddles the target, then bisect.  Samples that fall
-            // onto a non-physical branch are not adopted but still bracket.
-            let mut best: Option<(f64, f64, f64)> = None; // (err, da, torque)
-            let (mut lo, mut hi) = (da, da);
-            let (mut q_lo, mut q_hi) = (res.torque, res.torque);
-            for _ in 0..7 {
-                if (q_lo - q_target) * (q_hi - q_target) <= 0.0 && lo < hi {
+        // Solve the exported spline's scale so the smoothed blade absorbs
+        // exactly the target torque: the scale is the spline's one free
+        // parameter and Q scales almost linearly with chord, so a short
+        // multiplicative iteration on the measured Q (each step a full
+        // cold da re-match) converges in a few rounds.  The reported
+        // operating point is then the smoothed, scaled blade's own state.
+        let set_chords = |elems: &mut Vec<BladeElement<FoilFamily>>, scale: f64| {
+            for (i, be) in elems.iter_mut().enumerate() {
+                be.set_chord(chord_shape[i] * scale);
+            }
+        };
+        let rematch =
+            |elems: &mut Vec<BladeElement<FoilFamily>>, seed: &[f64]| -> (lift_line::LiftLineResult, Vec<f64>, f64, f64, bool) {
+            let mut da = win.da;
+            let (mut res, mut alphas) = eval_at(da, elems, seed);
+            let mut err = (res.torque - q_target).abs() / target;
+            let mut exported = physical(&res);
+            // A physical solve whose circulation seeds continuation retries
+            // for samples the primary seed lands off-branch on (the solve
+            // can flip to a spurious branch over a small da step).
+            let mut cont: Option<Vec<f64>> = if exported {
+                Some(res.gamma.clone())
+            } else {
+                None
+            };
+            let mut sample =
+                |sda: f64, elems: &mut Vec<BladeElement<FoilFamily>>| -> (lift_line::LiftLineResult, Vec<f64>, bool) {
+                    let (r2, a2) = eval_at(sda, elems, seed);
+                    if physical(&r2) {
+                        cont = Some(r2.gamma.clone());
+                        return (r2, a2, true);
+                    }
+                    if let Some(g) = &cont {
+                        let (r3, a3) = eval_at(sda, elems, g);
+                        if physical(&r3) {
+                            cont = Some(r3.gamma.clone());
+                            return (r3, a3, true);
+                        }
+                    }
+                    (r2, a2, false)
+                };
+            if exported && err > 2.0e-3 {
+                // Expand a bracket around the warm da until the cold-absorbed
+                // torque straddles the target, then bisect.  Samples that fall
+                // onto a non-physical branch are not adopted but still bracket.
+                let mut best: Option<(f64, f64)> = None; // (err, da)
+                let (mut lo, mut hi) = (da, da);
+                let (mut q_lo, mut q_hi) = (res.torque, res.torque);
+                // Expand in small steps so the continuation seed tracks the
+                // physical branch: a 0.1 rad jump can leave it behind and
+                // every further sample lands off-branch.  A failed sample
+                // marks its end non-physical (INF); the expansion keeps
+                // walking that direction, since the branch may reappear or
+                // the bracketing torque may still lie past the dead spot.
+                for _ in 0..10 {
+                    let bracketed = q_lo.is_finite()
+                        && q_hi.is_finite()
+                        && (q_lo - q_target) * (q_hi - q_target) <= 0.0
+                        && lo < hi;
+                    if bracketed {
+                        break;
+                    }
+                    if ((q_hi.is_finite() && q_hi < q_target) || !q_hi.is_finite())
+                        && hi < DA_MAX
+                    {
+                        lo = hi;
+                        q_lo = q_hi;
+                        hi = (hi + 0.02).min(DA_MAX);
+                        let (r2, _a2, ok) = sample(hi, elems);
+                        q_hi = if ok { r2.torque } else { f64::INFINITY };
+                    } else if ((q_lo.is_finite() && q_lo > q_target) || !q_lo.is_finite())
+                        && lo > DA_MIN
+                    {
+                        hi = lo;
+                        q_hi = q_lo;
+                        lo = (lo - 0.02).max(DA_MIN);
+                        let (r2, _a2, ok) = sample(lo, elems);
+                        q_lo = if ok { r2.torque } else { f64::NEG_INFINITY };
+                    } else {
+                        break;
+                    }
+                }
+                // Bisect only a true bracket: both ends physical and the
+                // target between their torques.
+                if q_lo.is_finite()
+                    && q_hi.is_finite()
+                    && (q_lo - q_target) * (q_hi - q_target) <= 0.0
+                {
+                    let (mut l, mut h) = (lo, hi);
+                    for _ in 0..12 {
+                        let mid = 0.5 * (l + h);
+                        let (r2, _a2, ok) = sample(mid, elems);
+                        if ok {
+                            let e2 = (r2.torque - q_target).abs() / target;
+                            if best.is_none_or(|(be, _)| e2 < be) {
+                                best = Some((e2, mid));
+                            }
+                            if r2.torque <= q_target {
+                                l = mid;
+                            } else {
+                                h = mid;
+                            }
+                        }
+                    }
+                }
+                if let Some((e2, da2)) = best {
+                    if e2 < err {
+                        let (r3, a3, ok3) = sample(da2, elems);
+                        if ok3 {
+                            da = da2;
+                            err = (r3.torque - q_target).abs() / target;
+                            (res, alphas) = (r3, a3);
+                            exported = true;
+                        }
+                    }
+                }
+            }
+            (res, alphas, da, err, exported)
+        };
+        let (mut res, mut alphas, mut da, mut err, mut exported);
+        let mut verified: &str = "cold";
+        {
+            let mut scale = 1.0;
+            // The smoothed chord shape is the exported blade's chord: apply
+            // it before the first solve so the cold re-match below measures
+            // (and reports) the blade that is actually exported — even when
+            // the raw design already sits on the target torque.
+            set_chords(&mut elements, scale);
+            let zeros = vec![0.0; m];
+            (res, alphas, da, err, exported) = rematch(&mut elements, &zeros);
+            for _ in 0..6 {
+                if !exported || err <= 2.0e-3 {
                     break;
                 }
-                if q_hi < q_target && hi < DA_MAX {
-                    lo = hi;
-                    q_lo = q_hi;
-                    hi = (hi + 0.1).min(DA_MAX);
-                    let (r2, _a2) = cold_eval(hi, &mut elements);
-                    if physical(&r2) {
-                        q_hi = r2.torque;
-                    } else {
-                        q_hi = f64::INFINITY;
-                    }
-                } else if q_lo > q_target && lo > DA_MIN {
-                    hi = lo;
-                    q_hi = q_lo;
-                    lo = (lo - 0.1).max(DA_MIN);
-                    let (r2, _a2) = cold_eval(lo, &mut elements);
-                    if physical(&r2) {
-                        q_lo = r2.torque;
-                    } else {
-                        q_lo = f64::NEG_INFINITY;
-                    }
+                let next = (scale * q_target / res.torque.max(1.0e-9)).clamp(0.5, 2.0);
+                if (next - scale).abs() / scale < 2.0e-3 {
+                    break;
+                }
+                let prev_scale = scale;
+                scale = next;
+                set_chords(&mut elements, scale);
+                // Continue the branch the last physical state lives on:
+                // a fresh zero-seed solve at the scaled chord can settle on
+                // a different root and defeat the monotone Q(scale) the
+                // multiplicative update relies on.
+                let seed = res.gamma.clone();
+                let (r2, a2, d2, e2, x2) = rematch(&mut elements, &seed);
+                if x2 && e2 < err {
+                    (res, alphas, da, err, exported) = (r2, a2, d2, e2, true);
                 } else {
+                    // The scaled state was no better than the one the report
+                    // keeps: restore its chords so the exported geometry and
+                    // the reported operating point still describe one blade.
+                    set_chords(&mut elements, prev_scale);
                     break;
-                }
-            }
-            if (q_lo - q_target) * (q_hi - q_target) <= 0.0 {
-                let (mut l, mut h) = (lo, hi);
-                for _ in 0..12 {
-                    let mid = 0.5 * (l + h);
-                    let (r2, _a2) = cold_eval(mid, &mut elements);
-                    if physical(&r2) {
-                        let e2 = (r2.torque - q_target).abs() / target;
-                        if best.is_none_or(|(be, _, _)| e2 < be) {
-                            best = Some((e2, mid, r2.torque));
-                        }
-                        if r2.torque <= q_target {
-                            l = mid;
-                        } else {
-                            h = mid;
-                        }
-                    }
-                }
-            }
-            if let Some((e2, da2, _q2)) = best {
-                if e2 < err {
-                    da = da2;
-                    let (r2, a2) = cold_eval(da, &mut elements);
-                    (res, alphas) = (r2, a2);
-                    err = e2;
-                    exported = true;
                 }
             }
         }
-        // The exported blade: twist follows the cold-solved inflow at the
-        // matched `da`, so the geometry, the trace and the reported
-        // operating point all describe the same state.  When no cold state
-        // at the target torque is physical (positive torque, every station
+        // The zero-seed solve can die before the target torque: the cold
+        // branch it settles on may end just short of it (or the scaled
+        // continuation above may fail), while the design branch — the one
+        // the optimizer converged on — does absorb it.  Verify the
+        // exported blade on that branch too, seeded with the pass's own
+        // converged circulation, and report whichever verification reached
+        // the target; the cold state, when it does, stays the reported one.
+        if win.gamma.len() == m && (!exported || err > 2.0e-3) {
+            let (r4, a4, d4, e4, x4) = rematch(&mut elements, &win.gamma);
+            if x4 && e4 < err {
+                (res, alphas, da, err, exported) = (r4, a4, d4, e4, true);
+                verified = "branch";
+            }
+        }
+        // The exported blade: twist follows the solved inflow at the
+        // matched `da` (cold- or design-branch-verified above), so the
+        // geometry, the trace and the reported operating point all
+        // describe the same state.  When no physical state of the exported
+        // blade reaches the target torque (positive torque, every station
         // lifting, no circulation spike) — the pass itself only adopted
         // physical samples, so this should be rare — export the warm state
         // the optimizer measured instead: its twists (win.phis) at its own
-        // matched `da`, and its matched operating point.  A cold re-solve
-        // can settle on a spurious circulation-spike branch that the
+        // matched `da`, and its matched operating point.  A re-solve can
+        // settle on a spurious circulation-spike branch that the
         // optimizer's warm-started path never visits; that branch must not
         // become the exported blade.
         let warm_twist = |da: f64| -> Vec<f64> {
@@ -1873,7 +2036,7 @@ impl Prop {
             da = win.da;
             let err_warm = (win.q - q_target).abs() / target;
             crate::deprintln!(
-                "proply: cold re-solve of the winning blade was not physical; exporting the warm state (T={:.4} Q={:.4}, err {:.2}%)",
+                "proply: no physical re-solve of the winning blade (cold or design branch); exporting the warm state (T={:.4} Q={:.4}, err {:.2}%)",
                 win.t,
                 win.q,
                 100.0 * err_warm
@@ -1899,23 +2062,44 @@ impl Prop {
                 }
             }
             crate::dprintln!(
-                "Lifting-line blade stations (cold-verified: T={:.4} Q={:.4}, err {:.2}%)",
+                "Lifting-line blade stations ({}-verified: T={:.4} Q={:.4}, err {:.2}%)",
+                verified,
                 res.thrust,
                 res.torque,
                 100.0 * err
             );
             (res.torque, res.thrust)
         };
+        // Smooth the exported twist too: the per-station flow solve adds
+        // station-to-station noise to the inflow angles (twist = phi +
+        // alpha), so re-fit it over the span with a solved least-squares
+        // polynomial (the same idea the BEM path applies to its twist).
+        // The flow state (and the reported operating point) does not depend
+        // on the twist — the analysis prescribes the attack angles directly
+        // — so this only straightens the manufactured geometry.
+        {
+            // The exported twist is a solved smooth spline too: among the
+            // degree-4..6 least-squares polynomials fit to the per-station
+            // phi + alpha, keep the one with the least spanwise curvature
+            // (see [`smooth_twist_spline`]).  The fit may overshoot the
+            // data's range slightly — clamping would put a corner exactly
+            // where the curve turns.
+            let raw: Vec<f64> = elements.iter().map(|be| be.get_twist()).collect();
+            let smooth = smooth_twist_spline(&rr, &raw);
+            for (i, be) in elements.iter_mut().enumerate() {
+                be.set_twist(smooth[i]);
+            }
+        }
         for (i, &ri) in rr.iter().enumerate() {
             crate::dprintln!(
                 "r={} camber={} alpha_base={} alpha={} phi={} twist={} chord={} ",
                 ri,
-                win.camber_dist[i],
+                camber_smooth[i],
                 win.alpha_base[i].to_degrees(),
                 alphas[i].to_degrees(),
                 res.phi[i].to_degrees(),
-                (res.phi[i] + alphas[i]).to_degrees(),
-                win.chords[i]
+                elements[i].get_twist().to_degrees(),
+                elements[i].foil.borrow().chord()
             );
             crate::dprintln!(
                 "st{:2}: gamma={:8.3} ui={:7.2} vi={:7.2} dT={:8.4} dQ={:8.5}",
@@ -2016,6 +2200,33 @@ fn smooth_alpha_curve(rr: &[f64], alpha: &[f64]) -> Vec<f64> {
     rr.iter().map(|&r| polyval(&poly, r)).collect()
 }
 
+/// Solved smooth spline for the exported twist: the per-station flow solve
+/// adds station-to-station noise to the inflow angles, so fit degree-4..6
+/// least-squares polynomials and keep the one with the least spanwise
+/// curvature (largest second difference of the fit).  The winning
+/// parameters come straight from the fit — no post-smoothing — and the
+/// fit may overshoot the data slightly rather than being clamped into a
+/// corner at its extremes.
+fn smooth_twist_spline(rr: &[f64], twist: &[f64]) -> Vec<f64> {
+    let mut best: Option<(f64, Vec<f64>)> = None;
+    for deg in 4..=6 {
+        if deg >= twist.len() {
+            continue;
+        }
+        let fit = polyfit(rr, twist, deg);
+        let vals: Vec<f64> = rr.iter().map(|&r| polyval(&fit, r)).collect();
+        let d2 = vals
+            .windows(3)
+            .map(|w| ((w[2] - w[1]) - (w[1] - w[0])).abs())
+            .fold(0.0, f64::max);
+        if best.as_ref().is_none_or(|(b, _)| d2 < *b) {
+            best = Some((d2, vals));
+        }
+    }
+    best.expect("a degree-4..6 fit always exists for 5+ stations")
+        .1
+}
+
 /// Compose a per-station camber distribution from `lds[c][i]`, the section
 /// L/D of candidate camber `c` at station `i`: each station takes its best
 /// candidate's camber, the resulting step distribution is smoothed with a
@@ -2073,6 +2284,11 @@ struct PassOutcome {
     phis: Vec<f64>,
     chords: Vec<f64>,
     camber_dist: Vec<f64>,
+    /// The converged circulation of the pass's own final state: the design
+    /// branch's seed for the exported blade's verification, when the cold
+    /// (zero-seed) solve settles off that branch and cannot reach the
+    /// target torque.
+    gamma: Vec<f64>,
     /// The winning chord-spline controls (`x ∈ [0, 1]`, the Nelder-Mead
     /// design variables) — kept so the next torque match can warm-start
     /// from this design instead of the full chord.

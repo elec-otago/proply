@@ -1,4 +1,44 @@
 # CHANGES
+## 2026-09-04 — Smooth solved splines for the exported blade (chord, twist, camber)
+
+### proply-rs
+
+The exported blade (STEP, mesh, summary) carried the optimizer's raw
+per-station values, so the geometric-cap knee in the chord and the
+discrete solve's station-to-station noise in the twist showed up as
+kinks in the manufactured geometry.  The export now realises the design
+with solved splines, and the reported operating point is the smoothed
+blade's own state:
+
+- **Chord** — the winning chord is re-fit over the span with a
+  degree-5 least-squares polynomial (the solved spline parameters),
+  which rounds the cap knee and smooths the unloaded hub station.  Its
+  scale is the spline's one free parameter: a short multiplicative
+  iteration solves it so the smoothed blade absorbs exactly the target
+  torque (each step a full re-match of `da`).  The smoothed chords are
+  applied *before* the first verification solve, so the export and the
+  report always describe the same blade.
+- **Twist** — phi + alpha is re-fit with degree-4..6 least-squares
+  polynomials; the one with the least spanwise curvature is exported
+  (unclamped — clamping put a corner exactly where the curve turns).
+- **Camber** — the composed m(r) distribution (quantised to the 0.01
+  polar-hash grid) is re-fit with a degree-3 polynomial, so a
+  per-station camber winner exports as a smooth camber curve.
+- **Verification robustness** — the da re-match walks the branch in
+  0.02 rad steps with continuation seeds (a zero-seed solve can flip
+  to a spurious branch over a da step and fake a torque bracket), the
+  scale iteration continues from the previous state's circulation
+  instead of re-solving from zero, and when the cold branch cannot
+  reach the target torque the exported blade is verified on the design
+  branch (the pass's own converged circulation as the seed, reported
+  as `branch-verified`).
+
+Validated on multistar_1704_1900kv, dji_phantom3 and honda_gx35:
+twist d2 down from 2-12.7 deg raw to 0.8-2.7 deg, chord d2 down from
+2.2-2.5 mm to 0.08-0.30 mm, and every export verified within 0.01% of
+the target torque.  dji's mechanical re-design now lands on the
+composed per-station camber (T 13.24 N) with a smooth 0.018-0.020
+camber curve.
 ## 2026-09-03 — render-step: headless software rendering of the gallery
 
 ### proply-rs / render-step
