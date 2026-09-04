@@ -26,7 +26,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex, OnceLock};
 
-use crate::cache::{cache_key, PolarStore, StoredPolar};
+use crate::cache::{PolarStore, StoredPolar};
 use crate::foil::FoilLike;
 use crate::polyfit::{polyfit, polyval};
 
@@ -50,6 +50,31 @@ const RE_FLAT_PLATE: f64 = 10000.0;
 /// are treated as degenerate (flat-plate fallback), exactly like sweeps
 /// with too few converged points.
 const CD_FLOOR: f64 = 0.004;
+
+/// Transition-turbulence level for the e^n model.  Above [`N_CRIT_HI_RE`]
+/// the standard XFOIL free-flight value (Ncrit 9) is used; at and below it
+/// the environment is noisier (low-Re propellers/rotors run in their own
+/// turbulent wake), and Ncrit 9 makes the boundary-layer solve fail
+/// wholesale — measured on thin cambered sections (NACA 2406-class):
+/// 0 of 81 sweep points converge at Re 15k/30k with Ncrit 9, while
+/// Ncrit 5 converges 76-80 of 81 at Re 10k-30k with physical drag.
+const N_CRIT_HI_RE: f64 = 100_000.0;
+const N_CRIT_LOW_RE: f64 = 5.0;
+const N_CRIT_HIGH_RE: f64 = 9.0;
+
+/// The cache key of one simulated polar bucket.  Below [`N_CRIT_HI_RE`] the
+/// key is versioned: those buckets were previously simulated with Ncrit 9
+/// (or cached as degenerate markers when that failed wholesale), and the
+/// Ncrit-5 policy below only takes effect if the old entries are never
+/// found again.
+fn bucket_cache_key(hash: &str, reynolds: f64, mach: f64) -> String {
+    let k = crate::cache::cache_key(hash, reynolds, mach);
+    if reynolds <= N_CRIT_HI_RE {
+        format!("{k}|n5")
+    } else {
+        k
+    }
+}
 
 /// Flat-plate fallback blend window for high attack angles (radians).
 ///
@@ -375,7 +400,7 @@ impl<F: FoilLike> FoilSimulator<F> {
         }
 
         let hash = self.foil.borrow().hash();
-        let ck = cache_key(&hash, reynolds, mach);
+        let ck = bucket_cache_key(&hash, reynolds, mach);
         // A key this session (or a previous run — see
         // load_persisted_bad_keys) already proved degenerate: skip the
         // store and the sweep entirely — the flat-plate fallback is what
@@ -520,9 +545,38 @@ impl<F: FoilLike> FoilSimulator<F> {
         xf.set_airfoil(&kept_x, &kept_y);
         xf.set_reynolds(reynolds);
         xf.set_max_iter(80);
-        xf.set_n_crit(9.0);
+        // Low-Re buckets trip transition early (see [`N_CRIT_HI_RE`]): the
+        // e^n critical amplification is lowered there so the viscous solve
+        // converges at all.
+        if reynolds <= N_CRIT_HI_RE {
+            xf.set_n_crit(N_CRIT_LOW_RE);
+        } else {
+            xf.set_n_crit(N_CRIT_HIGH_RE);
+        }
 
+        // The first operating point can diverge wholesale (a sweep that
+        // "converged" 0 of 81 points in a fraction of a second: the BL
+        // state at the sweep's starting alpha fails and the whole sequence
+        // aborts, while a fresh solve of the same foil converges 79/81).
+        // Retry once with a brand-new solve before declaring the bucket
+        // degenerate — a doomed key still ends in a marker after both
+        // attempts, so the cost is one extra sweep per truly failing bucket.
         let polar = xf.aseq(-20.0, 20.0, 80);
+        let polar = if polar.iter().filter(|p| p.5).count() < 5 {
+            let mut xf2 = rust_foil::XFoil::new();
+            xf2.set_show_output(false);
+            xf2.set_airfoil(&kept_x, &kept_y);
+            xf2.set_reynolds(reynolds);
+            xf2.set_max_iter(80);
+            if reynolds <= N_CRIT_HI_RE {
+                xf2.set_n_crit(N_CRIT_LOW_RE);
+            } else {
+                xf2.set_n_crit(N_CRIT_HIGH_RE);
+            }
+            xf2.aseq(-20.0, 20.0, 80)
+        } else {
+            polar
+        };
 
         // Prune non-converged points (the Python prunes NaN alpha values).
         let mut alfa = Vec::new();
@@ -536,7 +590,7 @@ impl<F: FoilLike> FoilSimulator<F> {
             }
         }
 
-        let key = cache_key(&self.foil.borrow().hash(), reynolds, mach);
+        let key = bucket_cache_key(&self.foil.borrow().hash(), reynolds, mach);
         let mut store = self.store.lock().unwrap();
         if alfa.len() < 5 {
             // The sweep failed — nothing usable to fit (see get_polars).
@@ -597,14 +651,17 @@ fn flat_plate_fit() -> &'static (Fit, Fit) {
 }
 
 /// The flat-plate fallback model, fitted like the Python `Foil didn't
-/// simulate` branch (degree 4 over a degree grid).
+/// simulate` branch (degree 4 over the ±20° alpha sweep).
+///
+/// The fit's abscissa is the angle in *radians*, exactly as the fitted
+/// polars' (a degree-grid abscissa was a units bug: evaluating the degree
+/// fit at radian arguments shrank the drag ~57x, so the "flat-plate"
+/// fallback advertised L/D ~ 281 instead of ~4.9 and best-L/D scans rode
+/// its corner).
 fn flat_plate_polys() -> (Vec<f64>, Vec<f64>) {
-    let alpha: Vec<f64> = (-20..=20).map(|a| a as f64).collect();
-    let cl: Vec<f64> = alpha
-        .iter()
-        .map(|a| 2.0 * std::f64::consts::PI * a)
-        .collect();
-    let cd: Vec<f64> = alpha.iter().map(|a| 1.28 * (a * DEG2RAD).sin()).collect();
+    let alpha: Vec<f64> = (-20..=20).map(|a| (a as f64) * DEG2RAD).collect();
+    let cl: Vec<f64> = alpha.iter().map(|a| 2.0 * std::f64::consts::PI * a).collect();
+    let cd: Vec<f64> = alpha.iter().map(|a| 1.28 * a.sin()).collect();
     (polyfit(&alpha, &cl, 4), polyfit(&alpha, &cd, 4))
 }
 
@@ -826,12 +883,13 @@ mod tests {
             cl.push(k * 2.0 * std::f64::consts::PI * a);
             cd.push(0.005 + 0.3 * a * a);
         }
-        let key = cache_key(&f.hash(), g, fs.get_mach(v_for_g));
+        let key = bucket_cache_key(&f.hash(), g, fs.get_mach(v_for_g));
         store
             .lock()
             .unwrap()
             .insert(key, StoredPolar { alpha, cl, cd });
     }
+
 
     #[test]
     fn polar_fit_matches_stored_data() {
@@ -1007,7 +1065,7 @@ mod tests {
             let vg = g * 15.11e-6 / (1.225 * chord);
             let ma = f.mach(vg);
             let mach = ((ma * 20.0).round()) / 20.0;
-            let key = cache_key(&f.hash(), g, mach);
+            let key = bucket_cache_key(&f.hash(), g, mach);
             store
                 .lock()
                 .unwrap()

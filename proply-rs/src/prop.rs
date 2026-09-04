@@ -836,6 +836,20 @@ impl Prop {
         if best_ld.is_finite() && best_ld <= 4.9 + 1.0e-6 {
             return (0.10, best_ld);
         }
+        // A nearly flat L/D *tail* is the same non-optimum in disguise: the
+        // flat-plate fallback's L/D creeps up ~1% across the whole scan (the
+        // analytic cd rises slightly slower than linear), so its argmax parks
+        // at the scan's +16 deg end even though every angle is equivalent —
+        // and the design would prescribe the clamped maximum attack angle
+        // (flywoo's tip sections rode this to alpha_base 20 deg).  When the
+        // winner sits at the scan end and barely beats the moderate working
+        // angle, treat the curve as flat: return the working angle.
+        if best >= 15.0_f64.to_radians() {
+            let moderate = ld(0.10);
+            if moderate > 0.0 && best_ld <= 1.04 * moderate {
+                return (0.10, best_ld);
+            }
+        }
         // The scan quantises the angle to whole degrees; refine to a
         // continuous maximum with a golden-section search in the +/- 1 deg
         // neighbourhood of the winner (cl/cd is a smooth polynomial ratio of

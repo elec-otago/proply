@@ -1,4 +1,37 @@
 # CHANGES
+## 2026-09-04 — Low-Reynolds section model fixes (flywoo's twist root cause)
+
+### proply-rs
+
+flywoo_robo_rb1202.5's remaining twist oddity (mid-blade ~55 deg at
+60% span, tip re-loading) traced through the flow to the section model
+below Re ~ 100k, not to the design loop:
+
+- **The flat-plate fallback's drag fit was dimensionally wrong**: the
+  cd polynomial was fitted over a degree-grid abscissa but evaluated at
+  radian arguments, shrinking cd ~57x.  "Flat-plate" sections advertised
+  L/D ~ 281 instead of ~4.9, so best-L/D scans parked at the +16 deg
+  scan edge, alpha_base rode to the 20 deg clamp at the root and tip,
+  and the loading concentrated mid-blade (induced inflow to 0.67 x w.r).
+- **rust-foil sweeps below Re ~ 30k failed wholesale** (0 of 81 points
+  converge) for thin cambered sections with Ncrit 9, so those buckets
+  degenerated into that broken fallback.  Lowering the e^n critical
+  amplification to Ncrit 5 (the noisy low-Re environment) converges
+  76-80/81 points at Re 10k-30k with physical drag; buckets at
+  Re <= 100k now simulate with Ncrit 5 (versioned cache keys) and a
+  whole-sweep abort retries once on a fresh solve.
+- **best_ld treated the flat model's ~1% L/D creep as a real optimum**;
+  when the argmax sits at the +16 deg scan end and barely beats the
+  moderate working angle, the section now gets the working angle.
+
+flywoo's export is now a normal prop: twist -32 deg at the root to a
++33 deg peak near 30% span, declining to +15 deg at the tip (was
+-25 -> +55 -> +25), no attack angles at the clamp, gamma max 0.21 (was
+0.40), induced ratio 0.37 (was 0.67), T = 0.48 N cold-verified at
+0.00%.  The corrected polars shift every low-Re design (dji 9.54 N,
+multistar 2.73 N, honda 20.7 N -- honest states of the corrected
+model); turnigy_CA_120 now absorbs 58.5% of its target torque (was
+~100%, warning) and rotax_912_uls exports its warm state.
 ## 2026-09-04 — Faithful twist export for steep profiles (Whittaker smoothing)
 
 ### proply-rs
