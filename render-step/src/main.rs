@@ -242,21 +242,19 @@ fn render(
         // Specular highlight (Blinn-Phong, half vector of view & headlight
         // ≈ view): a moving highlight that breaks across curved regions.
         let spec = spec_w * ndot_v.powf(spec_pow);
-        // Texture on blade faces only (part 1); the hub stays plain.
+        // Part-dependent material and texture: the hub (part 0) is a
+        // darker cylinder with its own vertical banding, always distinct
+        // from the blades (part 1), which take the requested texture mode
+        // (or none = plain light surface).
         let (ua, va, pa) = uv[face[0] as usize];
         let (ub, vb, pb) = uv[face[1] as usize];
         let (uc, vc, pc) = uv[face[2] as usize];
-        let textured = pa == 1 && pb == 1 && pc == 1;
-        let material = [0.92, 0.94, 0.96];
-        let shade = |mtl: f64, tex: f64| -> u8 {
-            let v = mtl * 255.0 * lam * tex + 255.0 * spec;
-            v.min(255.0).round() as u8
+        let is_blade = pa == 1 && pb == 1 && pc == 1;
+        let (mtl_r, mtl_g, mtl_b) = if is_blade {
+            (0.92, 0.94, 0.96)
+        } else {
+            (0.40, 0.43, 0.52) // gunmetal hub
         };
-        let col = [
-            shade(material[0], 1.0),
-            shade(material[1], 1.0),
-            shade(material[2], 1.0),
-        ];
 
 
         // Rasterise with edge functions.
@@ -293,25 +291,28 @@ fn render(
                 if z < zbuf[i] as f64 {
                     zbuf[i] = z as f32;
                     let j = i * 3;
-                    if textured {
-                        let u = w0 * ua + w1 * ub + w2 * uc;
-                        let v = w0 * va + w1 * vb + w2 * vc;
-                        let f = texture_factor(texture, u, v);
-                        // The texture modulates only the diffuse (lambert)
-                        // part; the specular highlight is left on top so
-                        // curved regions still light up over the pattern.
-                        let shade = |mtl: f64| -> u8 {
-                            let v = mtl * 255.0 * lam * f + 255.0 * spec;
-                            v.min(255.0).round() as u8
-                        };
-                        frame[j] = shade(material[0]);
-                        frame[j + 1] = shade(material[1]);
-                        frame[j + 2] = shade(material[2]);
+                    let u = w0 * ua + w1 * ub + w2 * uc;
+                    let v = w0 * va + w1 * vb + w2 * vc;
+                    let tex = if is_blade {
+                        texture_factor(texture, u, v)
                     } else {
-                        frame[j] = col[0];
-                        frame[j + 1] = col[1];
-                        frame[j + 2] = col[2];
-                    }
+                        // The hub always carries its own fine vertical
+                        // banding (bands in the azimuth coordinate u) so
+                        // it reads as a machined cylinder, distinct from
+                        // the blades whatever the blade texture mode.
+                        let c = (2.0 * std::f64::consts::PI * 24.0 * u).cos();
+                        (0.78 + 0.22 * c).max(0.25)
+                    };
+                    // The pattern modulates only the diffuse (lambert)
+                    // part; the specular highlight is left on top so
+                    // curved regions still light up over the pattern.
+                    let shade = |mtl: f64| -> u8 {
+                        let val = mtl * 255.0 * lam * tex + 255.0 * spec;
+                        val.min(255.0).round() as u8
+                    };
+                    frame[j] = shade(mtl_r);
+                    frame[j + 1] = shade(mtl_g);
+                    frame[j + 2] = shade(mtl_b);
                 }
             }
         }
