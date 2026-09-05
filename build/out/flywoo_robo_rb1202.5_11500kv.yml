@@ -13,7 +13,7 @@ design:
   loft_points: 40
   foil_family: naca4
   thickness_law: mechanical
-  tip_deflection_mm: 0.14686
+  tip_deflection_mm: 0.270028
   chord_spline_n: 3
   auto: false
 motor:
@@ -26,306 +26,306 @@ motor:
   max_power_w: 9.870747
 performance:
   rpm: 41416.651808
-  thrust_n: 0.478547
-  torque_nm: 0.002276
-  shaft_power_w: 9.870846
+  thrust_n: 0.461962
+  torque_nm: 0.002275
+  shaft_power_w: 9.867011
   propulsive_efficiency: 0.0
-  figure_of_merit: 0.604427
+  figure_of_merit: 0.573504
   tip_speed_mps: 86.742833
 sections:
 - r_m: 0.004
   r_over_R: 0.2
-  chord_m: 0.005257
-  twist_deg: -32.271213
+  chord_m: 0.005214
+  twist_deg: 25.38742
   camber: 0.04
-  thickness_m: 0.000315
-  thickness_fraction: 0.06
+  thickness_m: 0.000356
+  thickness_fraction: 0.068319
   dr_m: 0.000533
 - r_m: 0.004444
   r_over_R: 0.222222
-  chord_m: 0.005437
-  twist_deg: -29.838357
+  chord_m: 0.005383
+  twist_deg: 25.129527
   camber: 0.04
-  thickness_m: 0.000326
+  thickness_m: 0.000323
   thickness_fraction: 0.06
   dr_m: 0.000533
 - r_m: 0.004889
   r_over_R: 0.244444
-  chord_m: 0.005677
-  twist_deg: -26.832898
+  chord_m: 0.005626
+  twist_deg: 25.224302
   camber: 0.04
-  thickness_m: 0.000341
+  thickness_m: 0.000338
   thickness_fraction: 0.06
   dr_m: 0.000533
 - r_m: 0.005333
   r_over_R: 0.266667
-  chord_m: 0.005958
-  twist_deg: -22.839156
+  chord_m: 0.005919
+  twist_deg: 25.909443
   camber: 0.04
-  thickness_m: 0.000357
+  thickness_m: 0.000355
   thickness_fraction: 0.06
   dr_m: 0.000533
 - r_m: 0.005778
   r_over_R: 0.288889
-  chord_m: 0.006261
-  twist_deg: -17.705813
+  chord_m: 0.006241
+  twist_deg: 27.171119
   camber: 0.04
-  thickness_m: 0.000376
+  thickness_m: 0.000374
   thickness_fraction: 0.06
   dr_m: 0.000533
 - r_m: 0.006222
   r_over_R: 0.311111
-  chord_m: 0.006573
-  twist_deg: -11.406893
+  chord_m: 0.006574
+  twist_deg: 28.751958
   camber: 0.04
   thickness_m: 0.000394
   thickness_fraction: 0.06
   dr_m: 0.000533
 - r_m: 0.006667
   r_over_R: 0.333333
-  chord_m: 0.006881
-  twist_deg: -3.907517
+  chord_m: 0.006904
+  twist_deg: 30.302489
   camber: 0.04
-  thickness_m: 0.000413
+  thickness_m: 0.000414
   thickness_fraction: 0.06
   dr_m: 0.000533
 - r_m: 0.007111
   r_over_R: 0.355556
-  chord_m: 0.007173
-  twist_deg: 4.803363
-  camber: 0.04
-  thickness_m: 0.000469
-  thickness_fraction: 0.065407
-  dr_m: 0.000533
-- r_m: 0.007556
-  r_over_R: 0.377778
-  chord_m: 0.007439
-  twist_deg: 14.342592
-  camber: 0.04
-  thickness_m: 0.000446
-  thickness_fraction: 0.06
-  dr_m: 0.000533
-- r_m: 0.008
-  r_over_R: 0.4
-  chord_m: 0.007673
-  twist_deg: 23.356102
-  camber: 0.04
-  thickness_m: 0.00046
-  thickness_fraction: 0.06
-  dr_m: 0.000533
-- r_m: 0.008444
-  r_over_R: 0.422222
-  chord_m: 0.007867
-  twist_deg: 29.83912
-  camber: 0.04
-  thickness_m: 0.000472
-  thickness_fraction: 0.06
-  dr_m: 0.000533
-- r_m: 0.008889
-  r_over_R: 0.444444
-  chord_m: 0.008017
-  twist_deg: 32.580782
-  camber: 0.04
-  thickness_m: 0.000481
-  thickness_fraction: 0.06
-  dr_m: 0.000533
-- r_m: 0.009333
-  r_over_R: 0.466667
-  chord_m: 0.008119
-  twist_deg: 31.830718
-  camber: 0.04
-  thickness_m: 0.000487
-  thickness_fraction: 0.06
-  dr_m: 0.000533
-- r_m: 0.009778
-  r_over_R: 0.488889
-  chord_m: 0.008172
-  twist_deg: 29.151707
-  camber: 0.04
-  thickness_m: 0.00049
-  thickness_fraction: 0.06
-  dr_m: 0.000533
-- r_m: 0.010222
-  r_over_R: 0.511111
-  chord_m: 0.008175
-  twist_deg: 26.482244
-  camber: 0.04
-  thickness_m: 0.000491
-  thickness_fraction: 0.06
-  dr_m: 0.000533
-- r_m: 0.010667
-  r_over_R: 0.533333
-  chord_m: 0.008128
-  twist_deg: 24.828168
-  camber: 0.04
-  thickness_m: 0.000488
-  thickness_fraction: 0.06
-  dr_m: 0.000533
-- r_m: 0.011111
-  r_over_R: 0.555556
-  chord_m: 0.008032
-  twist_deg: 24.258075
-  camber: 0.04
-  thickness_m: 0.000482
-  thickness_fraction: 0.06
-  dr_m: 0.000533
-- r_m: 0.011556
-  r_over_R: 0.577778
-  chord_m: 0.00789
-  twist_deg: 24.394252
-  camber: 0.04
-  thickness_m: 0.000473
-  thickness_fraction: 0.06
-  dr_m: 0.000533
-- r_m: 0.012
-  r_over_R: 0.6
-  chord_m: 0.007704
-  twist_deg: 24.764075
-  camber: 0.04
-  thickness_m: 0.000462
-  thickness_fraction: 0.06
-  dr_m: 0.000533
-- r_m: 0.012444
-  r_over_R: 0.622222
-  chord_m: 0.007479
-  twist_deg: 24.99384
-  camber: 0.04
-  thickness_m: 0.000449
-  thickness_fraction: 0.06
-  dr_m: 0.000533
-- r_m: 0.012889
-  r_over_R: 0.644444
-  chord_m: 0.007218
-  twist_deg: 24.903225
+  chord_m: 0.007216
+  twist_deg: 31.536342
   camber: 0.04
   thickness_m: 0.000433
   thickness_fraction: 0.06
   dr_m: 0.000533
+- r_m: 0.007556
+  r_over_R: 0.377778
+  chord_m: 0.007499
+  twist_deg: 32.264961
+  camber: 0.04
+  thickness_m: 0.00045
+  thickness_fraction: 0.06
+  dr_m: 0.000533
+- r_m: 0.008
+  r_over_R: 0.4
+  chord_m: 0.007746
+  twist_deg: 32.499585
+  camber: 0.04
+  thickness_m: 0.000465
+  thickness_fraction: 0.06
+  dr_m: 0.000533
+- r_m: 0.008444
+  r_over_R: 0.422222
+  chord_m: 0.007948
+  twist_deg: 32.38242
+  camber: 0.04
+  thickness_m: 0.000477
+  thickness_fraction: 0.06
+  dr_m: 0.000533
+- r_m: 0.008889
+  r_over_R: 0.444444
+  chord_m: 0.0081
+  twist_deg: 32.066883
+  camber: 0.04
+  thickness_m: 0.000486
+  thickness_fraction: 0.06
+  dr_m: 0.000533
+- r_m: 0.009333
+  r_over_R: 0.466667
+  chord_m: 0.0082
+  twist_deg: 31.67171
+  camber: 0.04
+  thickness_m: 0.000492
+  thickness_fraction: 0.06
+  dr_m: 0.000533
+- r_m: 0.009778
+  r_over_R: 0.488889
+  chord_m: 0.008246
+  twist_deg: 31.245306
+  camber: 0.04
+  thickness_m: 0.000495
+  thickness_fraction: 0.06
+  dr_m: 0.000533
+- r_m: 0.010222
+  r_over_R: 0.511111
+  chord_m: 0.008236
+  twist_deg: 30.753187
+  camber: 0.04
+  thickness_m: 0.000494
+  thickness_fraction: 0.06
+  dr_m: 0.000533
+- r_m: 0.010667
+  r_over_R: 0.533333
+  chord_m: 0.008173
+  twist_deg: 30.185646
+  camber: 0.04
+  thickness_m: 0.00049
+  thickness_fraction: 0.06
+  dr_m: 0.000533
+- r_m: 0.011111
+  r_over_R: 0.555556
+  chord_m: 0.008057
+  twist_deg: 29.549512
+  camber: 0.04
+  thickness_m: 0.000483
+  thickness_fraction: 0.06
+  dr_m: 0.000533
+- r_m: 0.011556
+  r_over_R: 0.577778
+  chord_m: 0.007893
+  twist_deg: 28.857522
+  camber: 0.04
+  thickness_m: 0.000474
+  thickness_fraction: 0.06
+  dr_m: 0.000533
+- r_m: 0.012
+  r_over_R: 0.6
+  chord_m: 0.007685
+  twist_deg: 28.124461
+  camber: 0.04
+  thickness_m: 0.000461
+  thickness_fraction: 0.06
+  dr_m: 0.000533
+- r_m: 0.012444
+  r_over_R: 0.622222
+  chord_m: 0.007436
+  twist_deg: 27.368196
+  camber: 0.04
+  thickness_m: 0.000446
+  thickness_fraction: 0.06
+  dr_m: 0.000533
+- r_m: 0.012889
+  r_over_R: 0.644444
+  chord_m: 0.007154
+  twist_deg: 26.610637
+  camber: 0.04
+  thickness_m: 0.000429
+  thickness_fraction: 0.06
+  dr_m: 0.000533
 - r_m: 0.013333
   r_over_R: 0.666667
-  chord_m: 0.006928
-  twist_deg: 24.493367
+  chord_m: 0.006844
+  twist_deg: 25.854452
   camber: 0.04
-  thickness_m: 0.000416
+  thickness_m: 0.000411
   thickness_fraction: 0.06
   dr_m: 0.000533
 - r_m: 0.013778
   r_over_R: 0.688889
-  chord_m: 0.006614
-  twist_deg: 23.864998
+  chord_m: 0.006512
+  twist_deg: 25.086847
   camber: 0.04
-  thickness_m: 0.000397
+  thickness_m: 0.000391
   thickness_fraction: 0.06
   dr_m: 0.000533
 - r_m: 0.014222
   r_over_R: 0.711111
-  chord_m: 0.006282
-  twist_deg: 23.130791
+  chord_m: 0.006165
+  twist_deg: 24.301337
   camber: 0.04
-  thickness_m: 0.000377
+  thickness_m: 0.00037
   thickness_fraction: 0.06
   dr_m: 0.000533
 - r_m: 0.014667
   r_over_R: 0.733333
-  chord_m: 0.005937
-  twist_deg: 22.375832
+  chord_m: 0.005811
+  twist_deg: 23.49832
   camber: 0.04
-  thickness_m: 0.000356
+  thickness_m: 0.000349
   thickness_fraction: 0.06
   dr_m: 0.000533
 - r_m: 0.015111
   r_over_R: 0.755556
-  chord_m: 0.005588
-  twist_deg: 21.654347
+  chord_m: 0.005456
+  twist_deg: 22.685434
   camber: 0.04
-  thickness_m: 0.000335
+  thickness_m: 0.000327
   thickness_fraction: 0.06
   dr_m: 0.000533
 - r_m: 0.015556
   r_over_R: 0.777778
-  chord_m: 0.005239
-  twist_deg: 21.000689
+  chord_m: 0.005108
+  twist_deg: 21.872273
   camber: 0.04
-  thickness_m: 0.000314
+  thickness_m: 0.000306
   thickness_fraction: 0.06
   dr_m: 0.000533
 - r_m: 0.016
   r_over_R: 0.8
-  chord_m: 0.004899
-  twist_deg: 20.439546
+  chord_m: 0.004772
+  twist_deg: 21.06755
   camber: 0.04
-  thickness_m: 0.000294
+  thickness_m: 0.000286
   thickness_fraction: 0.06
   dr_m: 0.000533
 - r_m: 0.016444
   r_over_R: 0.822222
-  chord_m: 0.004574
-  twist_deg: 19.992884
+  chord_m: 0.004455
+  twist_deg: 20.278241
   camber: 0.04
-  thickness_m: 0.000274
+  thickness_m: 0.000267
   thickness_fraction: 0.06
   dr_m: 0.000533
 - r_m: 0.016889
   r_over_R: 0.844444
-  chord_m: 0.00427
-  twist_deg: 19.675601
+  chord_m: 0.004163
+  twist_deg: 19.509669
   camber: 0.04
-  thickness_m: 0.000256
+  thickness_m: 0.00025
   thickness_fraction: 0.06
   dr_m: 0.000533
 - r_m: 0.017333
   r_over_R: 0.866667
-  chord_m: 0.003994
-  twist_deg: 19.477799
+  chord_m: 0.003901
+  twist_deg: 18.76415
   camber: 0.04
-  thickness_m: 0.00024
+  thickness_m: 0.000234
   thickness_fraction: 0.06
   dr_m: 0.000533
 - r_m: 0.017778
   r_over_R: 0.888889
-  chord_m: 0.003751
-  twist_deg: 19.343179
+  chord_m: 0.003674
+  twist_deg: 18.041492
   camber: 0.04
-  thickness_m: 0.000225
+  thickness_m: 0.00022
   thickness_fraction: 0.06
   dr_m: 0.000533
 - r_m: 0.018222
   r_over_R: 0.911111
-  chord_m: 0.003548
-  twist_deg: 19.153108
+  chord_m: 0.003485
+  twist_deg: 17.338769
   camber: 0.04
-  thickness_m: 0.000213
+  thickness_m: 0.000209
   thickness_fraction: 0.06
   dr_m: 0.000533
 - r_m: 0.018667
   r_over_R: 0.933333
-  chord_m: 0.003389
-  twist_deg: 18.739504
+  chord_m: 0.003336
+  twist_deg: 16.65128
   camber: 0.04
-  thickness_m: 0.000203
+  thickness_m: 0.0002
   thickness_fraction: 0.06
   dr_m: 0.000533
 - r_m: 0.019111
   r_over_R: 0.955556
-  chord_m: 0.003279
-  twist_deg: 17.950952
+  chord_m: 0.003229
+  twist_deg: 15.973139
   camber: 0.04
-  thickness_m: 0.000197
+  thickness_m: 0.000194
   thickness_fraction: 0.06
   dr_m: 0.000533
 - r_m: 0.019556
   r_over_R: 0.977778
-  chord_m: 0.003221
-  twist_deg: 16.758424
+  chord_m: 0.003164
+  twist_deg: 15.299585
   camber: 0.04
-  thickness_m: 0.000193
+  thickness_m: 0.00019
   thickness_fraction: 0.06
   dr_m: 0.000533
 - r_m: 0.02
   r_over_R: 1.0
-  chord_m: 0.00322
-  twist_deg: 15.325185
+  chord_m: 0.003139
+  twist_deg: 14.627952
   camber: 0.04
-  thickness_m: 0.000193
+  thickness_m: 0.000188
   thickness_fraction: 0.06
   dr_m: 0.000533
