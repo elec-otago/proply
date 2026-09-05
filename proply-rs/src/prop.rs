@@ -44,6 +44,29 @@ const CH_FLOOR: f64 = 0.002;
 const DA_MIN: f64 = -0.45;
 const DA_MAX: f64 = 0.12;
 
+/// Inboard fraction of the blade span (hub → tip) over which the
+/// prescribed attack angle ramps down to zero at the hub.  The discrete
+/// wake's root rings make the model's inflow inboard of the first loaded
+/// stations unphysical (reversed flow, ui/(ωr) ~ -1 at the hub for
+/// high-loading micro rotors), and the exported twist inherits the
+/// artifact as a violent root washout.  Unloading the band (alpha → 0
+/// smoothly at the hub) removes the root rings, so the inboard flow and
+/// the twist become the smooth interior of the outer wake.
+const ROOT_UNLOAD_FRAC: f64 = 0.22;
+
+/// Smoothstep (C1) root-unload weight per station: 0 at the hub, 1 past
+/// [`ROOT_UNLOAD_FRAC`] of the span.
+fn root_unload_ramp(rr: &[f64], r_hub: f64) -> Vec<f64> {
+    let span = rr[rr.len() - 1] - rr[0];
+    let width = (ROOT_UNLOAD_FRAC * span).max(1.0e-9);
+    rr.iter()
+        .map(|&ri| {
+            let t = ((ri - r_hub) / width).clamp(0.0, 1.0);
+            t * t * (3.0 - 2.0 * t)
+        })
+        .collect()
+}
+
 /// Relative torque tolerance of the direct lifting-line operating-point
 /// match ([`Prop::lift_line_design`]): above this the geometry could not
 /// absorb the demanded torque and the result carries a warning.
@@ -1034,9 +1057,13 @@ impl Prop {
                     elems: &mut Vec<BladeElement<FoilFamily>>,
                     seed: &[f64]|
          -> (f64, f64, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
+            let unload = root_unload_ramp(rr, param.hub_radius);
             let alphas: Vec<f64> = alpha_base
                 .iter()
-                .map(|&ab| (ab + da).clamp(-lift_line::ALPHA_MAX, lift_line::ALPHA_MAX))
+                .zip(&unload)
+                .map(|(&ab, &w)| {
+                    (ab + da).clamp(-lift_line::ALPHA_MAX, lift_line::ALPHA_MAX) * w
+                })
                 .collect();
             let spl = Pchip::new(ref_r, controls);
             for i in 0..m {
@@ -1378,9 +1405,12 @@ impl Prop {
                 }
             }
         }
+        let unload = root_unload_ramp(rr, param.hub_radius);
         for i in 0..m {
             elements[i].set_twist(
-                phis[i] + (alpha_base[i] + da).clamp(-lift_line::ALPHA_MAX, lift_line::ALPHA_MAX),
+                phis[i]
+                    + (alpha_base[i] + da).clamp(-lift_line::ALPHA_MAX, lift_line::ALPHA_MAX)
+                        * unload[i],
             );
         }
         let f = 1000.0 * err - r_t;
@@ -1433,6 +1463,9 @@ impl Prop {
         let rr: Vec<f64> = (0..m)
             .map(|i| r_hub + (r_tip - r_hub) * i as f64 / (m - 1) as f64)
             .collect();
+        // The root-unload ramp shared by every alpha prescription in the
+        // export/verification path (the pass applies its own).
+        let unload: Vec<f64> = root_unload_ramp(&rr, r_hub);
 
         // --- Chord is a smooth (shape-preserving cubic / PCHIP) spline ---
         // through `chord_spline_n` control values at radii spread hub->tip.
@@ -1816,7 +1849,10 @@ impl Prop {
                 let alphas: Vec<f64> = win
                     .alpha_base
                     .iter()
-                    .map(|&ab| (ab + da).clamp(-lift_line::ALPHA_MAX, lift_line::ALPHA_MAX))
+                    .zip(&unload)
+                    .map(|(&ab, &w)| {
+                        (ab + da).clamp(-lift_line::ALPHA_MAX, lift_line::ALPHA_MAX) * w
+                    })
                     .collect();
                 let stations: Vec<lift_line::Station> = (0..m)
                     .map(|i| lift_line::Station {
@@ -2039,7 +2075,10 @@ impl Prop {
         let warm_twist = |da: f64| -> Vec<f64> {
             win.alpha_base
                 .iter()
-                .map(|&ab| (ab + da).clamp(-lift_line::ALPHA_MAX, lift_line::ALPHA_MAX))
+                .zip(&unload)
+                .map(|(&ab, &w)| {
+                    (ab + da).clamp(-lift_line::ALPHA_MAX, lift_line::ALPHA_MAX) * w
+                })
                 .collect()
         };
         let (q, t) = if !exported {

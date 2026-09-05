@@ -14,11 +14,15 @@
 //!  * discontinuities of `Gamma` across station boundaries shed trailed
 //!    helical vortex filaments whose strength equals the jump;
 //!  * the trailed filaments are azimuthally averaged into coaxial vortex
-//!    rings at the station edges; the rotor-plane calibration of the
-//!    helix pitch is folded into a single constant ([`AXIAL_K`]), and the
-//!    ring field is evaluated a small axial distance downstream
-//!    ([`WAKE_OFFSET_K`]) so the blade does not sit in the singular plane
-//!    of its own wake;
+//!    rings at the station edges.  A *tight* wake (hover: helix pitch
+//!    small vs the tip radius) azimuth-averages into a stack of ring
+//!    planes one pitch apart, and a *loose* wake (cruise) into the
+//!    single-plane legacy ring; the two are blended on the wake-pitch
+//!    ratio (see [`wake_tightness`], [`Influence::axial_matrix`]);
+//!  * the wake pitch is *prescribed* from the momentum slipstream of the
+//!    converged load — never from pointwise induced velocities inside the
+//!    solve (per-station `ui -> pitch` feedback is unstable at tight
+//!    pitch; only the disk-integral thrust may set the pitch);
 //!  * the induced velocity at a station is the Biot–Savart sum (straight
 //!    segments) over every blade's trailed rings;
 //!  * `Gamma` is solved to self-consistency with the polar `cl(alpha)`
@@ -39,21 +43,20 @@ use crate::simulator::FoilSimulator;
 
 pub const RHO: f64 = 1.225;
 
-/// Rotor-plane calibration for the axial trailed-ring induction: `u_i =
-/// AXIAL_K * B/(2π) * Σ dg * K`.  Calibrated (against the corrected
+/// Legacy loose-wake prefactor for the axial trailed-ring induction:
+/// `u_i = AXIAL_K * B/(2π) * Σ dg * K`.  Calibrated (against the corrected
 /// Kutta–Joukowski forces) so a lightly loaded blade's disk-averaged `u_i`
 /// matches the actuator-disk value `w/2`, `w = -u_0 + sqrt(u_0² + 2T/(ρA))`
 /// — see the `axial_induction_matches_actuator_disk` test.
 ///
-/// Known limitation: a rigorous trailed-helix model carries a per-edge
-/// pitch factor `1/tan(phi)` (a semi-infinite helix of pitch
-/// `2 pi a tan(phi)` induces `B dg / (2 p)` at the rotor plane), which no
-/// constant can reproduce across operating points — this constant is
-/// effectively `1/tan(phi)` at the calibration point and under-induces far
-/// from it (e.g. in hover).  Iterating the true per-edge pitch inside the
-/// design loop made the frozen-pitch Newton subproblems ill-posed (the
-/// induction gain exceeds the circulation gain at tight pitch), so the
-/// constant is kept until that coupling is solved simultaneously.
+/// With the wake-pitch model (see [`Influence::axial_matrix`]) this
+/// prefactor scales the *loose-wake* branch of the regime blend: the
+/// legacy single rotor-plane ring at the [`WAKE_OFFSET_K`] offset, used
+/// when the wake helix pitch is large compared with the tip radius.  A
+/// constant cannot serve the tight/hover branch too: a semi-infinite
+/// helix of pitch `p` induces `B dg / (2 p)` at the rotor plane — a
+/// `1/tan(phi)`-shaped gain, an order of magnitude larger at hover pitch —
+/// so the tight branch carries its own calibration ([`STACK_SCALE`]).
 pub const AXIAL_K: f64 = 2.22;
 
 /// Magnitude bound on the prescribed attack angle (rad).  20 deg = the range
@@ -86,6 +89,68 @@ pub const WAKE_OFFSET_K: f64 = 0.1;
 /// second difference then oscillates the innermost inflow angles.
 pub const HUB_RAMP_FRAC: f64 = 0.3;
 
+/// The trailed-wake axial induction is the azimuth average of the frozen
+/// helical wake: each circulation jump trails a semi-infinite helix of
+/// pitch `p_j = 2 pi a_j tan(phi_j)` (`tan(phi_j) = u_wake_j / (omega
+/// a_j)`, the wake's axial convection).  Azimuth-averaging a tight helix
+/// gives a stack of ring planes one pitch apart; a *single* ring in the
+/// rotor plane (the pre-pitch model) instead gives the interior of the
+/// ring the wrong sign — upwash inboard of the loaded band — which made
+/// hover inflow reverse at the hub (`ui/(omega r) ~ -1`).  The wake
+/// convection is the momentum far-wake value `u_wake_j = u_0 + 2 u_i`
+/// (disk average of the far-wake axial velocity), which makes the pitch
+/// a fixed point of the induced flow (see [`solve_with_influence`]).
+/// Ring planes are stacked from `z = (n + 1/2) p_j` (the blade sits
+/// between turns) out to [`WAKE_REACH`] times the tip radius; beyond that
+/// the field has decayed below the calibration noise.
+///
+/// Invariant (what makes the fixed point single-basin): the wake pitch is
+/// prescribed ONLY from the disk-integral momentum of the converged load
+/// (one scalar `u_p` per solve round).  Pointwise `ui -> pitch` feedback
+/// inside a solve is unstable — it has two attractors (a negative root
+/// state and a ~14x oscillation) at tight pitch, where the induction gain
+/// exceeds the circulation gain.  Any future refinement (radially varying
+/// slipstream, per-edge pitch) must likewise be prescribed from the
+/// previous round's converged state, never iterated pointwise within a
+/// round.
+const WAKE_REACH: f64 = 25.0;
+/// Minimum number of ring planes in the stack per trailed edge (also the
+/// loose-pitch guard: the far planes of a stretched helix still carry the
+/// smooth part of the induction).
+const WAKE_PLANES_MIN: usize = 24;
+/// Ring-plane z grid samples for the precomputed kernel table (log
+/// spaced); per-solve stacks interpolate on it, so the pitch-dependent
+/// influence costs O(m^2) per outer iteration, not fresh Biot-Savart.
+const N_ZGRID: usize = 72;
+/// Clamp on the wake helix angle tangent (the fixed point can wander into
+/// absurd territory on non-physical branches).
+const TANP_MIN: f64 = 0.02;
+const TANP_MAX: f64 = 1.5;
+
+/// Tightness transition of the wake model: the turn-stack (tight-helix
+/// vortex-cylinder) is used when the wake pitch `p = 2 pi u_wake/omega`
+/// is small compared with the tip radius, the legacy rotor-plane ring
+/// (empirically calibrated against the actuator disk in cruise) when the
+/// wake is loose, with a smoothstep blend in between.  `p/R` equals
+/// `2 pi tan(phi_tip)`; hover wakes run ~0.5-0.9, the cruise calibration
+/// point ~2.2.
+const WAKE_LOOSE_LO: f64 = 0.9;
+const WAKE_LOOSE_HI: f64 = 1.6;
+
+/// Smoothstep tightness weight: 1 (full turn-stack) for `x <= lo`, 0
+/// (legacy rotor-plane ring only) for `x >= hi`.
+fn wake_tightness(x: f64) -> f64 {
+    let t = ((x - WAKE_LOOSE_LO) / (WAKE_LOOSE_HI - WAKE_LOOSE_LO)).clamp(0.0, 1.0);
+    1.0 - t * t * (3.0 - 2.0 * t)
+}
+
+/// Calibration scale of the turn-stack induction (the tight/hover
+/// regime): the legacy prefactor AXIAL_K was calibrated for the loose
+/// single-plane ring in cruise and under-induces the multi-plane stack
+/// ~5-6x at the hover actuator-disk point; the stack part of the kernel
+/// carries this extra scale.
+const STACK_SCALE: f64 = 4.3;
+
 /// Hub-loss factor: the bound circulation must vanish at the root, where the
 /// blade meets the hub/spinner, and ramps smoothly (smoothstep) back to full
 /// loading over the first [`HUB_RAMP_FRAC`] of the span — the root analogue
@@ -97,6 +162,27 @@ fn hub_loss(r: f64, r_in: f64, r_out: f64) -> f64 {
     let span = (r_out - r_in).max(1.0e-9);
     let x = ((r - r_in) / (HUB_RAMP_FRAC * span)).clamp(0.0, 1.0);
     x * x * (3.0 - 2.0 * x)
+}
+
+/// Index of the first station at which the hub-loss ramp has fully
+/// recovered (`hub_loss == 1`); stations before it carry little or no
+/// circulation.
+fn first_loaded_index(r: &[f64]) -> usize {
+    r.iter()
+        .position(|&rr| hub_loss(rr, r[0], r[r.len() - 1]) >= 1.0)
+        .unwrap_or(0)
+}
+
+/// Disk area used for the momentum slipstream accounting: the *loaded*
+/// annulus from the first fully-loaded station to the tip.  The hub-loss
+/// ramp (inner [`HUB_RAMP_FRAC`] of the span) carries negligible load, so
+/// counting its area as if it pushed air would dilute the momentum
+/// slipstream ~10% in hover.  Shared by the wake-pitch prescription in
+/// [`solve_with_influence`] and by the actuator-disk calibration tests, so
+/// the two cannot drift apart.
+fn momentum_area(r: &[f64]) -> f64 {
+    let r_out = r[r.len() - 1];
+    std::f64::consts::PI * (r_out.powi(2) - r[first_loaded_index(r)].powi(2))
 }
 
 /// One radial station of the blade for the lifting-line analysis.
@@ -507,20 +593,31 @@ fn newton_solve<F: FoilLike>(
 /// solves whose station radii do not change (e.g. a design loop that only
 /// varies chord and attack angle).
 pub struct Influence {
-    /// Unit-ring axial kernels, `kmat[ci*(m+1)+k]` at edge `k` (see
-    /// [`ring_kernels`]).
+    /// Station radii (hub -> tip).
+    r: Vec<f64>,
+    /// Trailed-edge radii (m+1 of them, from [`edges`]).
+    edge: Vec<f64>,
+    /// Unit-ring axial kernels at the legacy rotor-plane offset
+    /// (`z = WAKE_OFFSET_K * r_ci`), `kmat[ci*(m+1)+k]` at edge `k` — the
+    /// seed/initial guess of the wake-pitch fixed point (see
+    /// [`Influence::matrices`]).
     kmat: Vec<f64>,
+    /// Ring-plane z grid (log spaced) of the pitch-dependent kernel table.
+    zgrid: Vec<f64>,
+    /// Unit-ring axial kernels on the z grid:
+    /// `kmat_z[(ci*(m+1)+k)*N_ZGRID + nz]` = ring at edge `k`, station
+    /// `ci`, plane height `zgrid[nz]`.
+    kmat_z: Vec<f64>,
     pub vdiag: Vec<f64>,
     n_blades: usize,
     dr: Vec<f64>,
 }
 
 impl Influence {
-    /// The axial influence matrix `U` (`u_i[i] = sum_j U[i*m+j] Gamma_j`),
-    /// matching the trailed-ring model of [`induced_velocity`]: `Gamma_j`
-    /// feeds the trailed rings at edges `j` and `j+1` (the jump in bound
-    /// circulation) with opposite signs, each scaled by the rotor-plane
-    /// calibration [`AXIAL_K`].
+    /// The axial influence matrix of the legacy single-plane rotor-plane
+    /// model (see [`AXIAL_K`]): the ring-pair combination used to seed the
+    /// wake-pitch fixed point, and what the cfg(test) twin
+    /// [`induced_velocity`] models.
     pub fn matrices(&self) -> Vec<f64> {
         let m = self.vdiag.len();
         let pref = AXIAL_K * self.n_blades as f64 / (2.0 * std::f64::consts::PI);
@@ -532,6 +629,80 @@ impl Influence {
             }
         }
         u
+    }
+
+    /// The axial influence matrix of the pitch-resolved wake model: each
+    /// trailed edge `j` sheds a semi-infinite helix whose azimuth average
+    /// is a stack of ring planes one pitch apart, `z = (n + 1/2) p_j`
+    /// with `p_j = 2 pi a_j tan(phi_j)` and `tanp[j] = tan(phi_j)` (see
+    /// the module docs).  The table is precomputed on the z grid, so one
+    /// matrix build is O(m^2 * planes) — cheap enough for an outer
+    /// iteration of the wake-pitch fixed point.
+    pub fn axial_matrix(&self, tanp: &[f64]) -> Vec<f64> {
+        let m = self.vdiag.len();
+        let pref = AXIAL_K * self.n_blades as f64 / (2.0 * std::f64::consts::PI);
+        let reach = WAKE_REACH * self.r[self.r.len() - 1];
+        // Wake tightness from the tip edge's pitch ratio p/R_tip =
+        // 2 pi tan(phi_tip): tight wakes use the turn-stack (vortex
+        // cylinder), loose wakes the legacy rotor-plane ring.
+        let ratio = 2.0
+            * std::f64::consts::PI
+            * tanp[m].clamp(TANP_MIN, TANP_MAX)
+            * self.edge[m]
+            / self.r[m - 1];
+        let tight = wake_tightness(ratio);
+        // Stacked kernel per (station, edge): sum over the edge helix's
+        // ring planes, interpolated on the z table.
+        let mut s = vec![0.0; m * (m + 1)];
+        for ci in 0..m {
+            let row = ci * (m + 1);
+            for j in 0..=m {
+                let p = 2.0
+                    * std::f64::consts::PI
+                    * self.edge[j]
+                    * tanp[j].clamp(TANP_MIN, TANP_MAX);
+                let n_max = (reach / p.max(1.0e-12)).ceil() as usize;
+                let n_max = n_max.max(WAKE_PLANES_MIN);
+                let mut sum = 0.0;
+                for n in 0..n_max {
+                    let z = (n as f64 + 0.5) * p;
+                    if z > reach {
+                        break;
+                    }
+                    sum += self.z_interp(row + j, z);
+                }
+                // Blend with the legacy rotor-plane ring (loose wakes).
+                let legacy = self.kmat[row + j];
+                s[row + j] = tight * STACK_SCALE * sum + (1.0 - tight) * legacy;
+            }
+        }
+        let mut u = vec![0.0; m * m];
+        for ci in 0..m {
+            let row = ci * (m + 1);
+            for j in 0..m {
+                u[ci * m + j] = pref * (s[row + j + 1] - s[row + j]);
+            }
+        }
+        u
+    }
+
+    /// Linear interpolation (in log z) of the precomputed ring-kernel
+    /// table for one (station, edge) pair at plane height `z`.
+    fn z_interp(&self, base: usize, z: f64) -> f64 {
+        let z0 = self.zgrid[0];
+        let z1 = self.zgrid[N_ZGRID - 1];
+        if z <= z0 {
+            return self.kmat_z[base * N_ZGRID];
+        }
+        if z >= z1 {
+            return self.kmat_z[base * N_ZGRID + N_ZGRID - 1];
+        }
+        let t = (z.ln() - z0.ln()) / (z1.ln() - z0.ln()) * (N_ZGRID - 1) as f64;
+        let i = (t.floor() as usize).min(N_ZGRID - 2);
+        let f = t - i as f64;
+        let lo = self.kmat_z[base * N_ZGRID + i];
+        let hi = self.kmat_z[base * N_ZGRID + i + 1];
+        lo + f * (hi - lo)
     }
 }
 
@@ -545,11 +716,35 @@ pub fn influence(r: &[f64], n_blades: usize) -> Influence {
     // Vortex-core radius, a small fraction of the mean blade element span.
     let core = 0.15 * (r[m - 1] - r[0]) / m as f64;
     let kmat = ring_kernels(r, &edge, core);
+    // Ring-plane z table for the pitch-resolved wake model: log spaced
+    // from a small fraction of the mean element width (the tightest
+    // realistic hover wake's half-pitch) to WAKE_REACH tip radii.
+    let zmin = 0.05 * dr.iter().cloned().fold(f64::INFINITY, f64::min);
+    let zmax = WAKE_REACH * r[m - 1];
+    let zgrid: Vec<f64> = (0..N_ZGRID)
+        .map(|n| {
+            let t = n as f64 / (N_ZGRID - 1) as f64;
+            (zmin * (zmax / zmin).powf(t)).max(1.0e-9)
+        })
+        .collect();
+    let mut kmat_z = vec![0.0; m * (m + 1) * N_ZGRID];
+    for (ci, &rc) in r.iter().enumerate() {
+        for (j, &ej) in edge.iter().enumerate() {
+            let base = (ci * (m + 1) + j) * N_ZGRID;
+            for (nz, &z) in zgrid.iter().enumerate() {
+                kmat_z[base + nz] = ring_axial_unit(ej.max(1.0e-6), rc, z, core, 256);
+            }
+        }
+    }
     let vdiag: Vec<f64> = (0..m)
         .map(|i| n_blades as f64 / (4.0 * std::f64::consts::PI * r[i].max(1.0e-6)))
         .collect();
     Influence {
+        r: r.to_vec(),
+        edge,
         kmat,
+        zgrid,
+        kmat_z,
         vdiag,
         n_blades,
         dr,
@@ -585,9 +780,56 @@ pub fn solve_with_influence<F: FoilLike>(
         ..Default::default()
     };
 
-    // Exact linear influence, then a damped-Newton circulation solve.
-    let u_mat = infl.matrices();
-    let gamma = newton_solve(stations, omega, u_0, &u_mat, &infl.vdiag, fs, seed);
+    // Wake-pitch model (see the module docs): the axial influence of the
+    // trailed wake is the azimuth average of the frozen helices, whose
+    // pitch follows the wake convection.  The convection is the momentum
+    // slipstream of the *converged load* (uniform across the disk), so the
+    // pitch is prescribed from the previous round's thrust:
+    //   w   = -u_0 + sqrt(u_0^2 + 2 T / (rho A))      (far-wake velocity)
+    //   u_p = u_0 + w/2                                 (disk convection)
+    //   tan(phi_j) = u_p / (omega a_j)
+    // A few re-solve rounds converge on T (the circulation is nearly
+    // induction-independent: alpha is prescribed).  The regime blend (see
+    // [`wake_tightness`]) weights the turn-stack (tight/hover wakes)
+    // against the legacy rotor-plane ring (loose wakes) on the wake pitch
+    // ratio x = 2 pi u_p / (omega R_tip).
+    let area = momentum_area(&r);
+    let mut u_mat = infl.matrices();
+    let mut gamma = newton_solve(stations, omega, u_0, &u_mat, &infl.vdiag, fs, seed);
+    let mut seed_g = gamma.clone();
+    let axial_force = |gamma: &[f64]| -> f64 {
+        let nb = n_blades as f64;
+        (0..m)
+            .map(|i| {
+                let v = omega * r[i] - infl.vdiag[i] * gamma[i];
+                nb * RHO * gamma[i] * v.max(0.0) * infl.dr[i]
+            })
+            .sum()
+    };
+    let mut thrust_est = axial_force(&gamma);
+    for _ in 0..4 {
+        let w = (-u_0 + (u_0 * u_0 + 2.0 * thrust_est.max(0.0) / (RHO * area)).sqrt()).max(0.0);
+        // The 0.3 m/s floor on the disk convection only guards the
+        // zero-thrust edge of the design space (e.g. feathered descent)
+        // against a zero-pitch singularity; it is far below every loaded
+        // operating point.
+        let u_p = (u_0 + 0.5 * w).max(0.3);
+        let tanp: Vec<f64> = infl
+            .edge
+            .iter()
+            .map(|&e| (u_p / (omega * e.max(1.0e-9))).clamp(TANP_MIN, TANP_MAX))
+            .collect();
+        let um = infl.axial_matrix(&tanp);
+        let gm = newton_solve(stations, omega, u_0, &um, &infl.vdiag, fs, &seed_g);
+        let t_new = axial_force(&gm);
+        u_mat = um;
+        gamma = gm.clone();
+        seed_g = gm;
+        if (t_new - thrust_est).abs() <= 1.0e-3 * thrust_est.abs().max(1.0e-6) {
+            break;
+        }
+        thrust_est = t_new;
+    }
     res.gamma = gamma.clone();
 
     // Final induced velocities and inflow angles from the converged gamma.
@@ -974,6 +1216,36 @@ mod tests {
     }
 
     #[test]
+    fn hover_axial_induction_matches_actuator_disk() {
+        // The hover twin of the cruise calibration: the same plate blade
+        // at u0 = 0.  The wake is a tight helix here, so the disk-averaged
+        // ui of the converged state must match the actuator-disk value
+        // u_disk = w/2, w = sqrt(2T/(rho A)), over the loaded stations.
+        let radii: Vec<f64> = (0..6).map(|i| 0.02 + 0.01 * i as f64).collect();
+        let (stations, sims) = plate_setup(&radii, 0.006, 0.06);
+        let fs_refs: Vec<&FoilSimulator<crate::foil::Naca4>> = sims.iter().collect();
+        let omega = crate::optimize::rpm2omega(6000.0);
+        let res = solve(&stations, 2, omega, 0.0, &fs_refs, &[]);
+        let i0 = first_loaded_index(&radii);
+        let w = (2.0 * res.thrust / (RHO * momentum_area(&radii))).sqrt();
+        let u_disk = 0.5 * w;
+        let loaded: Vec<f64> = (i0..radii.len()).map(|i| res.u_i[i]).collect();
+        let u_avg = loaded.iter().sum::<f64>() / loaded.len() as f64;
+        assert!(
+            u_avg > 0.0 && u_avg.is_finite(),
+            "hover mean axial induction {} not positive/finite",
+            u_avg
+        );
+        assert!(
+            (u_avg / u_disk - 1.0).abs() < 0.25,
+            "hover mean axial induction {} vs actuator-disk {} (thrust {})",
+            u_avg,
+            u_disk,
+            res.thrust
+        );
+    }
+
+    #[test]
     fn axial_induction_matches_actuator_disk() {
         // Calibration check on AXIAL_K: the disk-averaged axial induced
         // velocity of a lightly loaded blade must match the actuator-disk
@@ -994,13 +1266,8 @@ mod tests {
         // disk over the *loaded* area and average u_i over the loaded
         // stations only (scaling the whole model to a mean that includes an
         // unloaded root over-induces everything else).
-        let r_out = radii[radii.len() - 1];
-        let i0 = radii
-            .iter()
-            .position(|&r| hub_loss(r, radii[0], r_out) >= 1.0)
-            .unwrap_or(0);
-        let area = std::f64::consts::PI * (r_out.powi(2) - radii[i0].powi(2));
-        let w = -u_0 + (u_0 * u_0 + 2.0 * res.thrust / (RHO * area)).sqrt();
+        let i0 = first_loaded_index(&radii);
+        let w = -u_0 + (u_0 * u_0 + 2.0 * res.thrust / (RHO * momentum_area(&radii))).sqrt();
         let u_disk = 0.5 * w;
         let loaded: Vec<f64> = (i0..radii.len()).map(|i| res.u_i[i]).collect();
         let u_avg = loaded.iter().sum::<f64>() / loaded.len() as f64;
@@ -1015,5 +1282,44 @@ mod tests {
             u_avg,
             u_disk
         );
+    }
+
+    #[test]
+    fn axial_induction_tracks_momentum_across_wake_regimes() {
+        // Sweep u_0 from hover to cruise on the fixed plate blade: the
+        // wake-pitch ratio x = 2 pi u_p / (omega R_tip) runs from the tight
+        // regime (hover) through the WAKE_LOOSE_LO..HI blend band to the
+        // loose regime (cruise).  The two actuator-disk tests pin the band
+        // ends; this one probes the middle, where the smoothstep mixes the
+        // turn-stack and the legacy ring — the operating territory of
+        // mid-size props (honda_gx35 sits near x ~ 1.05).  The disk-averaged
+        // ui must stay within a factor 0.5-1.5 of the momentum slipstream
+        // w/2 at EVERY step; a blend that sagged or overshot in the band
+        // would show up here as a ratio excursion.
+        let radii: Vec<f64> = (0..6).map(|i| 0.02 + 0.01 * i as f64).collect();
+        let (stations, sims) = plate_setup(&radii, 0.006, 0.06);
+        let fs_refs: Vec<&FoilSimulator<crate::foil::Naca4>> = sims.iter().collect();
+        let omega = crate::optimize::rpm2omega(6000.0);
+        let i0 = first_loaded_index(&radii);
+        let area = momentum_area(&radii);
+        for u_0 in [0.0, 1.0, 2.5, 4.0, 5.5, 7.0, 8.5, 10.0, 12.0, 15.0] {
+            let res = solve(&stations, 2, omega, u_0, &fs_refs, &[]);
+            let w = (-u_0 + (u_0 * u_0 + 2.0 * res.thrust / (RHO * area)).sqrt()).max(0.0);
+            let u_disk = 0.5 * w;
+            let loaded: Vec<f64> = (i0..radii.len()).map(|i| res.u_i[i]).collect();
+            let u_avg = loaded.iter().sum::<f64>() / loaded.len() as f64;
+            let x = 2.0 * std::f64::consts::PI * (u_0 + u_disk) / (omega * radii[radii.len() - 1]);
+            let ratio = u_avg / u_disk.max(1.0e-9);
+            assert!(
+                (0.5..1.5).contains(&ratio),
+                "u_0={}: ui_avg {} vs w/2 {} (pitch ratio x={:.2}, thrust {}) \
+                 — mid-regime blend outside 0.5-1.5",
+                u_0,
+                u_avg,
+                u_disk,
+                x,
+                res.thrust
+            );
+        }
     }
 }

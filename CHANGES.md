@@ -1,4 +1,55 @@
 # CHANGES
+## 2026-09-05 — Hover wake model: pitch-resolved trailed-helix induction
+
+### proply-rs
+
+flywoo_robo_rb1202.5's hover design exported a not-prop-like twist (-34 deg
+root washout swinging to +35 deg): the axial induced velocity reversed
+inboard (`ui/(omega r) ~ -0.99` at the hub).  Traced to the trailed-wake
+representation — a single rotor-plane ring induces *upwash* in the
+interior of the loaded band for every circulation shape, so no ring
+offset, prefactor or root ramp could make hover inflow physical:
+
+- **Tight wakes are now azimuth-averaged helices**: each circulation jump
+  trails a helix whose azimuth average is a stack of ring planes one wake
+  pitch apart (`z = (n + 1/2) p_j` out to 25 tip radii).  A vortex
+  cylinder's interior is downwash — the actuator-disk sense.
+- **The wake pitch is prescribed from the momentum slipstream of the
+  converged load**: `w = -u_0 + sqrt(u_0^2 + 2T/(rho A))`,
+  `tan(phi_j) = (u_0 + w/2)/(omega a_j)`, with <= 4 re-solve rounds
+  converging the thrust.  Documented invariant: no pointwise
+  `ui -> pitch` feedback inside a solve (that iteration is multi-basin at
+  tight pitch); only the disk-integral thrust may set the pitch.
+- **Loose wakes keep the legacy calibrated rotor-plane ring**: the regime
+  blend weights the turn-stack (tight: wake-pitch ratio
+  `x = 2 pi u_p/(omega R_tip) <= 0.9`) against the legacy ring (loose:
+  `x >= 1.6`) with a smoothstep; the stack branch carries its own hover
+  calibration (`STACK_SCALE 4.3`).  The momentum area is the *loaded*
+  annulus in both the solver and the calibration tests (shared
+  `momentum_area` helper) — the hub-loss ramp carries no load, so counting
+  its area diluted the hover slipstream ~10%.
+- **New tests**: `hover_axial_induction_matches_actuator_disk` (the hover
+  twin of the cruise calibration, 25% band) and
+  `axial_induction_tracks_momentum_across_wake_regimes` (u_0 swept
+  hover -> cruise, probing the mid-blend band honda_gx35 sits in: the
+  disk-averaged ui stays within 0.5-1.5x the momentum w/2 at every step).
+  134 lib tests, clippy clean.
+
+Consequences (torque still cold-verified <= 0.2 %):
+
+- flywoo_robo_rb1202.5: prop-like twist 25.4 -> 32.5 deg (peak ~34 % span)
+  -> 14.6 deg at the tip, max step 0.6 deg/station, ui positive at every
+  station (min +6.6 m/s); T = 0.462 N vs the momentum reference 0.446 N,
+  figure of merit 0.57 (Q err 0.04 %).
+- Honest-model shifts at hover: dji_phantom3 T 9.54 -> 4.47 N (FM 0.30),
+  multistar_1704_1900kv 2.73 -> 1.27 N (FM 0.27, exports its warm state
+  like rotax_912_uls).  The old states implied FM > 0.9 static — above the
+  ideal-disk bound, i.e. the legacy ring's interior upwash was inflating
+  hover thrust.
+- honda_gx35 (20 m/s cruise) essentially unchanged: T = 21.6 N, Q err
+  0.11 %; the steep ~65 deg root twist is the physical inflow angle at the
+  hub ramp (`atan(u_0/omega r)` at r = 16 mm), declining monotonically to
+  ~10-15 deg at the tip.
 ## 2026-09-04 — Low-Reynolds section model fixes (flywoo's twist root cause)
 
 ### proply-rs
