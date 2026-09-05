@@ -301,7 +301,7 @@ pub struct Xfoil {
     pub va: Vec<f64>,   // diagonal blocks (3 x 2 x IZX)
     pub vb: Vec<f64>,   // off-diagonal blocks (3 x 2 x IZX)
     pub vz: Vec<f64>,   // way-off-diagonal block at TE station (3 x 2)
-    pub vm: Vec<f64>,   // mass-influence coefficient vectors (3 x IZX x IZX)
+    pub vm: Vec<f64>,   // mass-influence coefficient vectors: 3 planes of nsys x nsys, packed (see vm_index); allocated at 3*IZX*IZX
     pub vdel: Vec<f64>, // residual and solution vectors (3 x 2 x IZX)
     pub rmsbl: f64,     // rms change from BL Newton system solution
     pub rmxbl: f64,     // max change from BL Newton system solution
@@ -333,6 +333,8 @@ pub struct Xfoil {
     pub bl_u_ac: [Vec<f64>; 2], // [2][IVX]
     pub bl_qnew: Vec<f64>,      // IQX
     pub bl_q_ac: Vec<f64>,      // IQX
+    pub bl_mvd: [Vec<f64>; 2],  // [2][IVX] update() scratch: mass + vdel
+    pub bl_avd: [Vec<f64>; 2],  // [2][IVX] update() scratch: -vdel
 
     // ----- buffer airfoil -----
     pub nb: usize,    // number of points in buffer airfoil array
@@ -717,6 +719,8 @@ impl Xfoil {
             bl_u_ac: [vec![0.0; IVX], vec![0.0; IVX]],
             bl_qnew: vec![0.0; IQX],
             bl_q_ac: vec![0.0; IQX],
+            bl_mvd: [vec![0.0; IVX], vec![0.0; IVX]],
+            bl_avd: [vec![0.0; IVX], vec![0.0; IVX]],
 
             nb: 0,
             xb: vec![0.0; IBX],
@@ -848,12 +852,17 @@ impl Xfoil {
         ((iv - 1) * 2 + (l - 1)) * 3 + (k - 1)
     }
 
-    /// Index into the flat 3xIZXxIZX mass-influence array, matching the
-    /// Fortran `vm(3, IZX, IZX)` layout: element (k, j, i) with 1-based
-    /// indices lives at `((i-1)*IZX + (j-1))*3 + (k-1)`.
+    /// Index into the flat mass-influence array.  Layout is (k, i, j) with j
+    /// innermost — three planes of `nsys x nsys`, row-major, packed by the
+    /// current system size — so that the hot row-wise loops in `blsolv`
+    /// (fixed i, k; varying j) and the column sweeps in the back-substitution
+    /// (fixed i, k; varying j via row slices) run with unit stride and
+    /// auto-vectorize, and the active region stays cache-resident.  Element
+    /// (k, j, i) of the Fortran `vm(3, IZX, IZX)` lives at
+    /// `(k-1)*nsys*nsys + (i-1)*nsys + (j-1)`.
     #[inline]
-    pub fn vm_index(i: usize, j: usize, k: usize) -> usize {
-        ((i - 1) * IZX + (j - 1)) * 3 + (k - 1)
+    pub fn vm_index(i: usize, j: usize, k: usize, nsys: usize) -> usize {
+        (k - 1) * nsys * nsys + (i - 1) * nsys + (j - 1)
     }
 
     /// Index into the flat IQX x IQX matrix, Fortran column-major layout:

@@ -171,6 +171,7 @@ pub fn setbl(xf: &mut Xfoil) -> bool {
         for v in &mut d1_m[..=xf.nsys] {
             *v = 0.0;
         }
+
         let mut u1_a = 0.0;
         let mut d1_a = 0.0;
 
@@ -233,14 +234,23 @@ pub fn setbl(xf: &mut Xfoil) -> bool {
             // u2_m/d2_m are rebuilt for every station; the js/jbl loop writes
             // every jv in 1..=nsys (isys is a bijection), so no re-zero is
             // needed before reuse.
-            for js in 0..2 {
-                for jbl in 2..=xf.nbl[js] as usize {
-                    let j = xf.ipan[js][jbl] as usize;
-                    let jv = xf.isys[js][jbl] as usize;
-                    u2_m[jv] = -xf.vti[is][ibl] * xf.vti[js][jbl] * xf.dij_t[i * IZX + j];
-                    d2_m[jv] = d2_u2 * u2_m[jv];
+            {
+                let vti_ibl = xf.vti[is][ibl];
+                let dij_row = &xf.dij_t[i * IZX..(i + 1) * IZX];
+                for js in 0..2 {
+                    let ipan_js = &xf.ipan[js][..];
+                    let isys_js = &xf.isys[js][..];
+                    let vti_js = &xf.vti[js][..];
+                    for jbl in 2..=xf.nbl[js] as usize {
+                        let j = ipan_js[jbl] as usize;
+                        let jv = isys_js[jbl] as usize;
+                        let u = -vti_ibl * vti_js[jbl] * dij_row[j];
+                        u2_m[jv] = u;
+                        d2_m[jv] = d2_u2 * u;
+                    }
                 }
             }
+
             d2_m[iv] += d2_m2;
 
             let u2_a = xf.uinv_a[is][ibl];
@@ -352,37 +362,46 @@ pub fn setbl(xf: &mut Xfoil) -> bool {
             }
 
             // stuff BL system coefficients into main Jacobian matrix.  The vm
-            // layout is (i, j, k) with k innermost, so for a fixed iv the
-            // nsys*3 elements form one contiguous row.  The original code wrote
-            // the k=1,2,3 components in three separate sweeps that all shared
-            // the same cache lines; fusing them into a single jv pass over the
-            // contiguous row keeps the same values and FP order (bit-identical)
-            // while streaming memory once and hoisting the row-offset bounds
-            // work out of the loop.
+            // layout is (k, i, j) with j innermost (see vm_index), so for a
+            // fixed iv the nsys elements of each k-component form one
+            // contiguous, unit-stride row.
             {
-                let base3 = (iv - 1) * IZX * 3;
-                for jv in 1..=xf.nsys {
-                    let o = base3 + (jv - 1) * 3;
-                    xf.vm[o] = xf.vs1[0][2] * d1_m[jv]
-                        + xf.vs1[0][3] * u1_m[jv]
-                        + xf.vs2[0][2] * d2_m[jv]
-                        + xf.vs2[0][3] * u2_m[jv]
-                        + (xf.vs1[0][4] + xf.vs2[0][4] + xf.vsx[0])
-                            * (xi_ule1 * ule1_m[jv] + xi_ule2 * ule2_m[jv]);
-                    xf.vm[o + 1] = xf.vs1[1][2] * d1_m[jv]
-                        + xf.vs1[1][3] * u1_m[jv]
-                        + xf.vs2[1][2] * d2_m[jv]
-                        + xf.vs2[1][3] * u2_m[jv]
-                        + (xf.vs1[1][4] + xf.vs2[1][4] + xf.vsx[1])
-                            * (xi_ule1 * ule1_m[jv] + xi_ule2 * ule2_m[jv]);
-                    xf.vm[o + 2] = xf.vs1[2][2] * d1_m[jv]
-                        + xf.vs1[2][3] * u1_m[jv]
-                        + xf.vs2[2][2] * d2_m[jv]
-                        + xf.vs2[2][3] * u2_m[jv]
-                        + (xf.vs1[2][4] + xf.vs2[2][4] + xf.vsx[2])
-                            * (xi_ule1 * ule1_m[jv] + xi_ule2 * ule2_m[jv]);
+                let vs1 = xf.vs1;
+                let vs2 = xf.vs2;
+                let vsx = xf.vsx;
+                let ns = xf.nsys;
+                let plane_sz = ns * ns;
+                let row = (iv - 1) * ns;
+                // source vectors as slices over jv = 1..=nsys: unit-stride,
+                // bounds-check-free inner loops that auto-vectorize
+                let sd1 = &d1_m[1..=ns];
+                let su1 = &u1_m[1..=ns];
+                let sd2 = &d2_m[1..=ns];
+                let su2 = &u2_m[1..=ns];
+                let sle1 = &ule1_m[1..=ns];
+                let sle2 = &ule2_m[1..=ns];
+                for k in 0..3 {
+                    let a2 = vs1[k][2];
+                    let a3 = vs1[k][3];
+                    let b2 = vs2[k][2];
+                    let b3 = vs2[k][3];
+                    let ck = vs1[k][4] + vs2[k][4] + vsx[k];
+                    let dst = &mut xf.vm[k * plane_sz + row..k * plane_sz + row + ns];
+                    for ((((((d, d1), u1), d2), u2), le1), le2) in dst
+                        .iter_mut()
+                        .zip(sd1)
+                        .zip(su1)
+                        .zip(sd2)
+                        .zip(su2)
+                        .zip(sle1)
+                        .zip(sle2)
+                    {
+                        *d = a2 * d1 + a3 * u1 + b2 * d2 + b3 * u2
+                            + ck * (xi_ule1 * le1 + xi_ule2 * le2);
+                    }
                 }
             }
+
 
             xf.vb[Xfoil::v_index(iv, 1, 1)] = xf.vs1[0][0];
             xf.vb[Xfoil::v_index(iv, 2, 1)] = xf.vs1[0][1];
@@ -1404,19 +1423,39 @@ pub fn update(xf: &mut Xfoil) {
     // across iterations via mem::take; they are returned to the state below.
     let mut unew = std::mem::take(&mut xf.bl_unew);
     let mut u_ac = std::mem::take(&mut xf.bl_u_ac);
+
+    // Hoist the vdel gathers out of the station loop: the combined
+    // mass+vdel / -vdel vectors depend only on jbl, not on the station ibl.
+    // mvd/avd are reused across iterations via mem::take; they are returned
+    // to the state below.
+    let mut mvd = std::mem::take(&mut xf.bl_mvd);
+    let mut avd = std::mem::take(&mut xf.bl_avd);
+    for js in 0..2 {
+        for jbl in 2..=xf.nbl[js] as usize {
+            let jv = xf.isys[js][jbl] as usize;
+            mvd[js][jbl] = xf.mass[js][jbl] + xf.vdel[Xfoil::v_index(jv, 1, 3)];
+            avd[js][jbl] = -xf.vdel[Xfoil::v_index(jv, 2, 3)];
+        }
+    }
+
     for is in 0..2 {
         for ibl in 2..=xf.nbl[is] as usize {
             let i = xf.ipan[is][ibl] as usize;
 
             let mut dui = 0.0;
             let mut dui_ac = 0.0;
+            let vti_ibl = xf.vti[is][ibl];
+            let dij_row = &xf.dij_t[i * IZX..(i + 1) * IZX];
             for js in 0..2 {
+                let ipan_js = &xf.ipan[js][..];
+                let vti_js = &xf.vti[js][..];
+                let mvd_js = &mvd[js][..];
+                let avd_js = &avd[js][..];
                 for jbl in 2..=xf.nbl[js] as usize {
-                    let j = xf.ipan[js][jbl] as usize;
-                    let jv = xf.isys[js][jbl] as usize;
-                    let ue_m = -xf.vti[is][ibl] * xf.vti[js][jbl] * xf.dij_t[i * IZX + j];
-                    dui += ue_m * (xf.mass[js][jbl] + xf.vdel[Xfoil::v_index(jv, 1, 3)]);
-                    dui_ac += ue_m * (-xf.vdel[Xfoil::v_index(jv, 2, 3)]);
+                    let j = ipan_js[jbl] as usize;
+                    let ue_m = -vti_ibl * vti_js[jbl] * dij_row[j];
+                    dui += ue_m * mvd_js[jbl];
+                    dui_ac += ue_m * avd_js[jbl];
                 }
             }
 
@@ -1709,6 +1748,8 @@ pub fn update(xf: &mut Xfoil) {
     xf.bl_u_ac = u_ac;
     xf.bl_qnew = qnew;
     xf.bl_q_ac = q_ac;
+    xf.bl_mvd = mvd;
+    xf.bl_avd = avd;
 }
 
 /// Limits the displacement thickness to keep Hk >= Hklim.

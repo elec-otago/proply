@@ -45,10 +45,10 @@ fn build_system() -> (Xfoil, [[f64; 6]; 6], [f64; 6]) {
         xf.va[Xfoil::v_index(2, 2, k + 1)] = va2[1][k];
         xf.vb[Xfoil::v_index(2, 1, k + 1)] = vb2[0][k];
         xf.vb[Xfoil::v_index(2, 2, k + 1)] = vb2[1][k];
-        xf.vm[Xfoil::vm_index(1, 1, k + 1)] = m11[k];
-        xf.vm[Xfoil::vm_index(2, 1, k + 1)] = m12[k];
-        xf.vm[Xfoil::vm_index(1, 2, k + 1)] = m21[k];
-        xf.vm[Xfoil::vm_index(2, 2, k + 1)] = m22[k];
+        xf.vm[Xfoil::vm_index(1, 1, k + 1, 2)] = m11[k];
+        xf.vm[Xfoil::vm_index(2, 1, k + 1, 2)] = m12[k];
+        xf.vm[Xfoil::vm_index(1, 2, k + 1, 2)] = m21[k];
+        xf.vm[Xfoil::vm_index(2, 2, k + 1, 2)] = m22[k];
         xf.vdel[Xfoil::v_index(1, 1, k + 1)] = b1[k];
         xf.vdel[Xfoil::v_index(2, 1, k + 1)] = b2[k];
     }
@@ -185,7 +185,7 @@ fn blsolv_three_stations() {
         }
         for mc in 1..=nst {
             for (r, mval) in m[st][mc - 1].iter().enumerate() {
-                xf.vm[Xfoil::vm_index(st, mc, r + 1)] = *mval;
+                xf.vm[Xfoil::vm_index(st, mc, r + 1, nst)] = *mval;
             }
         }
         for r in 0..3 {
