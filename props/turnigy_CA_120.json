@@ -10,18 +10,12 @@
     "motor_no_load_current": 13.0,
     "motor_winding_resistance": 0.005,
 
-    "blades": 2,
+    "blades": 3,
 
     "radius": 0.35,
-    "tip_chord": 0.02,
+    "tip_chord": "2 cm",
     "scimitar_percent": 0.0,
-    "trailing_edge": 2.0,
-    "hub_radius": 0.05,
-    "hub_depth": 0.05,
-
-    "exclude_zone": [
-        {"x":0.005, "z":0.005},
-        {"x":0.006, "z":0.01},
-        {"x":0.02, "z":0.012}
-    ]
+    "trailing_edge": 1.0,
+    "hub_radius": "5cm",
+    "hub_depth": "5cm"
 }

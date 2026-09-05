@@ -11,11 +11,11 @@
     
     "blades": 3,
 
-    "radius": 0.02,
-    "tip_chord": 0.003,
-    "center_hole": 1.5e-3,
-    "scimitar_percent": -5.0,
-    "trailing_edge": 0.25,
-    "hub_radius": 0.004,
-    "hub_depth": 0.003
+    "radius": "20 mm",
+    "tip_chord": "3 mm",
+    "center_hole": "1.5 mm",
+    "scimitar_percent": 0.0,
+    "trailing_edge": 0.2,
+    "hub_radius": "4 mm",
+    "hub_depth": "4 mm"
 }

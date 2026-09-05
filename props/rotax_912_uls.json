@@ -1,14 +1,9 @@
 {
-    "comment": "This is a Rotax 912 USL http://www.flyrotax.com/produkte/detail/rotax-912-uls-s.html with a 1 meter prop cruise at 90 knots",
+    "comment": "This is a Rotax 912 USL http://www.flyrotax.com/produkte/detail/rotax-912-uls-s.html with a 1.2 meter prop cruise at 90 knots",
     "name": "rotax_912_uls",
 
     "altitude": 0.0,
     "forward_airspeed": 45.0,
-
-    "motor_Kv": 1900,
-    "motor_volts": 11.0,
-    "motor_no_load_current": 0.5,
-    "motor_winding_resistance": 0.405,
 
     "motor_torque": 334.8,
     "motor_RPM": 1950.0,
@@ -18,13 +13,7 @@
     "tip_chord": "7cm",
     "scimitar_percent": 0.0,
     "trailing_edge": "2.0mm",
-    "hub_radius": "6cm",
+    "hub_radius": "10cm",
     "center_hole": "12.5mm",
-    "hub_depth": "10cm",
-
-    "exclude_zone": [
-        {"x":0.005, "z":0.005},
-        {"x":0.006, "z":0.01},
-        {"x":0.02, "z":0.012}
-    ]
+    "hub_depth": "10cm"
 }
